@@ -38,6 +38,11 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (TR-20); the 10 MB binary stays gitignored
 - `docs/PHASE_0_RUNBOOK.md` — what the spike does, what only the operator can supply, and the
   known risks in the spike itself
+- Android build toolchain stood up and verified on the development machine — JDK 17.0.20.1,
+  `ANDROID_HOME`, `adb` on PATH, SDK platform `android-36`; `npx expo prebuild` generates the
+  native `android/` project on Gradle 9.3.1. This clears Phase 0 blocker A-1 and is what makes a
+  dev build possible at all (`TR-03`). Versions are recorded in `docs/TOOLING.md` → "Verified local toolchain".
+  **No APK has been compiled and no device has run the app yet**; no NDK is installed.
 
 ### Changed
 - **TR-01 amended:** Expo SDK 55 / RN 0.83 → **SDK 57 / RN 0.86**. See ADR-009.

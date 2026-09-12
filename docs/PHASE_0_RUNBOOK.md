@@ -37,11 +37,28 @@ on the gate. It exits non-zero on FAIL.
 
 These are blocking. Nothing else in Phase 0 matters until A-3 is done.
 
-### A-1. Install JDK 17 and put the Android SDK on PATH
+### A-1. Install JDK 17 and put the Android SDK on PATH — ✅ **DONE (2026-09-12)**
 
-Your machine has the Android SDK at `%LOCALAPPDATA%\Android\Sdk`, but `ANDROID_HOME` is unset,
-`adb` is not on PATH, and your JDKs are 8, 11 and 20. **Expo SDK 57 / RN 0.86 needs JDK 17** —
-20 is not a supported AGP toolchain and 11 is too old.
+Verified on this machine:
+
+| Check | Value |
+|---|---|
+| `java -version` | `17.0.20.1` (Microsoft OpenJDK) |
+| `JAVA_HOME` | `C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot` |
+| `ANDROID_HOME` | `C:\Users\Jasper\AppData\Local\Android\Sdk` |
+| `adb` | on PATH, runs (lists no devices — that is A-2) |
+| SDK platform | `android-36`; build-tools 35.0.0 / 36.0.0 |
+
+`npx expo prebuild` has since generated `android/` with Gradle 9.3.1.
+
+> **One gap remains.** `$ANDROID_HOME/ndk` is empty. The first `npm run android` compiles native
+> C++ for `react-native-fast-tflite` and `react-native-nitro-modules`; Gradle will either
+> auto-download the NDK it wants or stop with "NDK not configured". If it stops, install the
+> version it names via Android Studio's SDK Manager. Budget time for this — it is a long download.
+
+The original instructions are kept below for reproducibility on a fresh machine.
+
+**Expo SDK 57 / RN 0.86 needs JDK 17** — 20 is not a supported AGP toolchain and 11 is too old.
 
 ```powershell
 winget install Microsoft.OpenJDK.17
