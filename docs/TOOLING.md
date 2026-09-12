@@ -1,0 +1,138 @@
+# Tooling — Claude Code setup
+
+What is configured in this repo, what is recommended, and — just as importantly — what is
+deliberately **not** installed.
+
+> **A note on the no-network rule.** `TR-50`/`TR-51` forbid network I/O **in the shipped app**.
+> They say nothing about your development environment. A documentation MCP server running on your
+> laptop is a dev-time tool; it never becomes part of the APK. Keep the distinction clear when
+> auditing dependencies: `package.json` must stay offline-clean, your toolchain need not.
+
+---
+
+## 1. What is already configured
+
+### Documentation-sync hook
+
+`.claude/hooks/doc-guard.mjs`, wired as a `Stop` hook in `.claude/settings.json`.
+
+When Claude finishes a turn, the hook checks the working tree. If files under `src/` or `app/`
+changed but `docs/CHANGELOG.md` and `docs/PROJECT_STATUS.md` did not, it blocks once and lists
+exactly what is missing. Changes under `src/db/`, `src/ml/`, `src/domain/` or to `package.json`
+additionally require `docs/ARCHITECTURE.md`.
+
+Design notes:
+- **Blocks once, never loops.** It honours `stop_hook_active`, so it can't fire twice in a row.
+- **Escapable.** A pure refactor with no behaviour change can legitimately skip the docs — Claude
+  just has to say so explicitly rather than silently.
+- **Deterministic.** This is the reason it's a hook and not just a CLAUDE.md rule: written
+  guidance gets missed in long sessions after context compaction; a hook does not.
+
+Test it manually:
+```bash
+echo '{}' | node .claude/hooks/doc-guard.mjs ; echo "exit: $?"
+```
+Exit `0` = docs in sync (or nothing to check). Exit `2` = reminder fired.
+
+### Project slash commands
+
+| Command | Use |
+|---|---|
+| `/feature-done` | Walk the documentation checklist after finishing a feature |
+| `/phase-gate` | Evaluate the current phase's exit criteria against **measured** evidence |
+| `/spike-report` | Turn Phase 0 raw results into recorded τ/δ values and doc updates |
+
+These encode the project's two hardest-to-hold disciplines: *documentation is part of the feature*,
+and *an unmeasured criterion is never a pass*.
+
+### Permissions
+
+`.claude/settings.json` pre-allows read-only git, `npm test`, and `npm run typecheck` so routine
+work doesn't generate prompts. Nothing destructive is allowed without asking.
+
+---
+
+## 2. Recommended MCP server
+
+### Context7 — worth installing
+
+```bash
+claude mcp add --scope user context7 -- npx -y @upstash/context7-mcp
+```
+Free without an API key; get one at context7.com/dashboard only if you hit rate limits.
+
+**Why this one, for this project specifically.** The entire stack is fast-moving and
+version-sensitive: VisionCamera v5 changed its worklet model, Expo SDK 55 dropped the legacy
+architecture, `react-native-fast-tflite` and sqlite-vec integration details shift between releases.
+Any model's training data lags these. Context7 pulls version-specific docs into the prompt, which
+turns "the API probably looks like this" into the actual current signature.
+
+Use it by name in a prompt: *"check Context7 for the current VisionCamera v5 frame processor API."*
+
+---
+
+## 3. Deliberately not installed
+
+Honest accounting — each of these is popular and each would cost more than it returns here.
+
+| Tool | Why not |
+|---|---|
+| **GitHub MCP server** | `gh` CLI is installed and Claude Code drives it directly. An MCP server would duplicate it while consuming context on every session. |
+| **Filesystem MCP server** | Read/Write/Edit/Grep/Glob already cover this natively and faster. |
+| **Database MCP server** | The database lives on a phone, not on your machine. There is nothing for it to connect to. |
+| **Playwright / browser MCP** | This is a native mobile app. There is no web UI to drive. The built-in `claude-in-chrome` skill covers the rare browser need. |
+| **Sentry / observability MCP** | `SR-41` forbids telemetry. There is nothing to observe remotely, by design. |
+| **Custom subagents** | Deferred on purpose. Subagents start cold and re-derive context; with a codebase this small they'd cost more than they save. Revisit in Phase 2–3 when there is enough code that a focused reviewer has something to chew on. |
+
+---
+
+## 4. Built-in skills worth knowing
+
+Already available — no installation.
+
+| Skill | Where it helps here |
+|---|---|
+| `/code-review` | Run before each phase gate. Use `high` for ML/threading code where the bugs are subtle. |
+| `/security-review` | Run once before shipping. The main surface is the local DB and filesystem, not network. |
+| `/simplify` | Useful right after Phase 0 → Phase 1, when throwaway spike patterns leak into production code. |
+| `/run` | Launching and screenshotting the app once there is an app to launch. |
+| `claude-api` skill | Only if you ever add a cloud LLM feature — which `TR-50` currently forbids. |
+
+---
+
+## 5. Suggested workflow
+
+```
+  start session   →  Claude reads CLAUDE.md + PROJECT_STATUS.md
+        ↓
+  build a feature →  implement, typecheck, test
+        ↓
+  /feature-done   →  changelog + status (+ architecture if the schema/pipeline moved)
+        ↓
+  Stop hook       →  catches it if you forgot
+        ↓
+  commit          →  reference requirement IDs in the message
+        ↓
+  /phase-gate     →  only when you think the phase is actually done
+```
+
+**Commit message convention** — cite requirement IDs so commits tie back to the spec:
+
+```
+feat(scanner): lock overlay after 3-of-5 frame agreement (SR-12, TR-36)
+fix(db): store photo paths relative to documentDirectory (TR-43)
+docs: record Phase 0 measured accuracy and derived tau/delta
+```
+
+---
+
+## 6. Adding a dependency — checklist
+
+Before `npm install` anything:
+
+1. Does it perform network I/O at runtime? → **reject** (`TR-51`)
+2. Does it need an API key or account? → **reject** (`TR-50`)
+3. Does it work with the New Architecture on Expo SDK 55? Expo Go compatibility is irrelevant —
+   we require a dev build anyway (`TR-03`)
+4. Does it add a config plugin requiring a new dev build? Note it in `ARCHITECTURE.md`
+5. Add a `CHANGELOG.md` entry, and an ADR if it replaces something (`DECISIONS.md`)
