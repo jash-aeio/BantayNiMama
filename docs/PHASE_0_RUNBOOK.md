@@ -18,6 +18,18 @@ Three modes, one screen, no navigation library. Deliberately crude.
 | **scan** | Just point. Live top-3 with cosine scores and the top1−top2 margin. | Nothing — this is the "does it feel right" mode |
 | **collect** | Type the **true** label of what you're pointing at, tap *Record test frame*. | A labeled vector + in-worklet latency |
 
+**Fixing mistakes.** Every capture is saved immediately, so there are three ways to take one back:
+
+- *Undo last shot (label)* in **enroll** — removes the most recent reference shot. Use it for a
+  blurry shot, a shot outside the reticle, or a shot under the wrong label.
+- *Undo last test frame (label)* in **collect** — removes the most recent test frame.
+- Tap a product in the **Enrolled** list — after a confirmation, deletes every shot for that label.
+  Use it for a typo'd label, or to re-enroll a product from scratch. Its test frames are **not**
+  deleted; the prompt warns you if any exist, because frames with no enrolled shots score as misses.
+
+Undo works only on the latest capture. Shots carry no id, timestamp or photo, so an older one
+cannot be picked out — delete the product and re-shoot it instead.
+
 *Export dataset JSON* hands `spike-dataset.json` to the Android share sheet. Get it onto the
 laptop any way you like — USB, SD card, a file manager. **No network path is used or needed.**
 
@@ -159,6 +171,11 @@ These are scored separately from the gate: `analyze.mjs` keeps `unknown:` frames
 denominator (they can never match an enrolled label) and reports them as an NFR-03 rejection rate.
 Accepting one still counts as a false positive under `NFR-02` — a confident price for a product
 that is not in the catalog is the worst failure the app has.
+
+> **Undo a test frame only for an operator mistake** — wrong label typed, product not in the
+> reticle, lens covered. **Never undo one because the top-3 showed the wrong product.** Wrong
+> matches are exactly what this step measures; removing them inflates top-1 and hides false
+> positives, which is how the gate produces a confidently wrong PASS (`NFR-02`).
 
 ### A-5. Decisions only you can make
 

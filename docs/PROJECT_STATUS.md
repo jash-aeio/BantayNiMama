@@ -14,7 +14,7 @@
 | | |
 |---|---|
 | **Working on** | Phase 0 spike — **release APK runs untethered and loads the model** (2026-09-13). Awaiting store data. |
-| **Next action** | Enroll ~20 products × 3–5 shots (A-3), then ~100 labeled test frames (A-4) — **on a shelf, not at a desk**. See [`PHASE_0_RUNBOOK.md`](./PHASE_0_RUNBOOK.md). |
+| **Next action** | Enroll ~20 products × 3–5 shots (A-3) — 8 products × 1 shot so far; undo/delete controls installed (2026-09-13), then ~100 labeled test frames (A-4) — **on a shelf, not at a desk**. See [`PHASE_0_RUNBOOK.md`](./PHASE_0_RUNBOOK.md). |
 | **Blocked on** | Reference shots of ~20 real products (A-3), then ~100 labeled test frames (A-4). Nothing technical is blocking. |
 | **Watch out for** | Per-frame latency **140–248 ms** vs a 25–40 ms budget — `NFR-07` is not met. Does not block the accuracy gate; see `ARCHITECTURE.md` §8. Release build is **not** materially faster (on-screen spot readings 140.7 / 144.0 ms), so the debug figure stands until a dataset run replaces it. |
 | **Known soft spot** | If enrollment is shot at a desk rather than on a shelf, the gate number is optimistic and Phase 3 will regress against it. Record the capture setting alongside the number. |

@@ -48,6 +48,14 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   tree transitively and its native module was already autolinked, so nothing new compiles in. For
   an embedded asset it copies out of the APK rather than opening a socket; confirmed in airplane
   mode on device (`TR-50`, `TR-51`, `TR-53`).
+- Phase 0 spike app: mistake correction before store capture — *Undo last shot* (enroll),
+  *Undo last test frame* (collect), and tap-to-delete a product's shots from the Enrolled list
+  with a confirmation. Deleting a product leaves its test frames in place and warns when any
+  exist, so the scored set never changes as a side effect. Undo is by position only: shots have no
+  id or photo in the spike format. Usage rules, including "never undo a frame because it matched
+  wrong" (`NFR-02`), are in `PHASE_0_RUNBOOK.md`. Release APK rebuilt (3m 12s) and installed on
+  the Infinix X6823 as an upgrade; the existing 8-shot dataset survived and *Undo last shot*
+  renders with its label. The three actions themselves have **not yet been exercised** on device.
 
 ### Changed
 - Phase 0 capture now runs from a **release-variant APK** rather than the debug build. A debug
