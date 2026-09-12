@@ -20,9 +20,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Claude Code project configuration: doc-sync `Stop` hook, project slash commands
   (`/feature-done`, `/phase-gate`, `/spike-report`)
 - Git repository initialised with a React Native / Expo `.gitignore`
+- Expo SDK 57 dev-client project scaffolding: `app.json`, `metro.config.js` (with `tflite` asset
+  extension), `babel.config.js` (worklets plugin), `tsconfig.json` with `strict` and
+  `noUncheckedIndexedAccess` (TR-05)
+- Phase 0 spike app (`App.tsx`) — VisionCamera v5 preview with a centre reticle, three capture
+  modes (enroll / scan / collect), live top-3 with cosine scores and top1−top2 margin (SR-01,
+  ADR-006)
+- `src/spike/embed.ts` — in-worklet crop → resize → float32 → `runSync` → L2-normalize, throttled
+  to 4 fps on the camera thread (TR-21, TR-22, TR-25, TR-26)
+- `src/spike/vectors.ts` — pure cosine ranking, best-shot-per-product aggregation and the τ/δ
+  decision function (TR-31, TR-32, TR-33, TR-34, TR-37)
+- `src/spike/dataset.ts` — dataset capture, persistence under the document directory, and export
+  via the system share sheet (no network path, TR-50)
+- `scripts/analyze.mjs` — offline accuracy, score histograms, confusion pairs, a (τ, δ) sweep
+  constrained to the NFR-02 false-positive ceiling, and Phase 0 gate evaluation
+- `scripts/fetch-model.mjs` — reproducible dev-time download of the MobileNetV3-Large embedder
+  (TR-20); the 10 MB binary stays gitignored
+- `docs/PHASE_0_RUNBOOK.md` — what the spike does, what only the operator can supply, and the
+  known risks in the spike itself
 
 ### Changed
-- _nothing yet_
+- **TR-01 amended:** Expo SDK 55 / RN 0.83 → **SDK 57 / RN 0.86**. See ADR-009.
+- **TR-11 amended:** `vision-camera-resize-plugin` → `react-native-nitro-image`. See ADR-010.
+- **TR-21 clarified:** the model's own tensor description specifies input normalized to
+  `[0.0, 1.0]` per channel; recorded so it is never re-derived by guesswork.
 
 ### Fixed
 - _nothing yet_

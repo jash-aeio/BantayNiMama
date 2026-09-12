@@ -54,7 +54,7 @@ See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 
 ## Stack
 
-React Native · Expo SDK 55 (dev client) · react-native-vision-camera v5 ·
+React Native · Expo SDK 57 (dev client) · react-native-vision-camera v5 ·
 react-native-fast-tflite · op-sqlite + sqlite-vec · expo-router · TypeScript
 
 > **Expo Go will not work.** The native modules require a development build (`TR-03`).

@@ -13,9 +13,9 @@
 
 | | |
 |---|---|
-| **Working on** | Project setup and documentation |
-| **Next action** | Scaffold the Phase 0 spike app |
-| **Blocked on** | Reference photos of ~20 real products, shot in an actual sari-sari store |
+| **Working on** | Phase 0 spike — app built, awaiting first run on hardware |
+| **Next action** | Install JDK 17 + set `ANDROID_HOME`, then `npm run android` on a physical phone. See [`PHASE_0_RUNBOOK.md`](./PHASE_0_RUNBOOK.md) Part A. |
+| **Blocked on** | (1) JDK 17 + Android SDK on PATH; (2) a physical Android device; (3) reference photos of ~20 real products, shot in an actual sari-sari store |
 | **Biggest risk** | Q-1 — unproven that a generic embedding model separates sari-sari SKUs |
 
 ---
@@ -37,20 +37,20 @@ Legend: ⚪ not started · 🔵 in progress · 🟢 passed gate · 🔴 gate fai
 
 ## Phase 0 checklist
 
-- [ ] Expo SDK 55 dev-client project created
-- [ ] Development build running on a physical device
-- [ ] VisionCamera preview with a center reticle
-- [ ] `react-native-fast-tflite` loading the MobileNetV3 embedder
-- [ ] 1024-d vector logged from a live frame
+- [x] Expo SDK 57 dev-client project created *(SDK bumped from 55 — ADR-009)*
+- [ ] Development build running on a physical device — **needs JDK 17 + `ANDROID_HOME`**
+- [x] VisionCamera preview with a center reticle
+- [x] `react-native-fast-tflite` loading the MobileNetV3 embedder *(code written; not yet observed loading on a device)*
+- [ ] 1024-d vector logged from a live frame — the app prints the real `dim`; **1024 is still an assumption until it does**
 - [ ] ~20 reference products captured **in a real store** — including the nasty cases:
   - [ ] Two Palmolive sachet variants (near-identical colours)
   - [ ] Kopiko 3-in-1 vs 2-in-1
   - [ ] 250 ml and 1 L Coke (tests L-02)
   - [ ] Two repacked clear bags (tests L-01)
-- [ ] In-JS cosine match, top-3 printed on screen with scores
+- [x] In-JS cosine match, top-3 printed on screen with scores
 - [ ] ~100 labeled test frames collected
-- [ ] Top-1 / top-3 accuracy computed
-- [ ] Score histogram produced; **τ and δ read off it**
+- [x] Top-1 / top-3 accuracy computed — `scripts/analyze.mjs`, verified on synthetic data (PASS and FAIL paths)
+- [x] Score histogram produced; **τ and δ read off it** — sweep implemented, constrained to the NFR-02 ceiling
 - [ ] **GATE:** ≥ 85% top-1 on non-ambiguous items
 
 ### If the gate fails

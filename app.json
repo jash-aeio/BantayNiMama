@@ -1,0 +1,40 @@
+{
+  "expo": {
+    "name": "BantayNiMama",
+    "slug": "bantay-ni-mama",
+    "version": "0.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "scheme": "bantaynimama",
+    "userInterfaceStyle": "light",
+    "newArchEnabled": true,
+    "android": {
+      "package": "com.jash.bantaynimama",
+      "adaptiveIcon": {
+        "backgroundColor": "#E6F4FE",
+        "foregroundImage": "./assets/android-icon-foreground.png",
+        "backgroundImage": "./assets/android-icon-background.png",
+        "monochromeImage": "./assets/android-icon-monochrome.png"
+      },
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "android.permission.CAMERA"
+      ]
+    },
+    "ios": {
+      "bundleIdentifier": "com.jash.bantaynimama",
+      "supportsTablet": false,
+      "infoPlist": {
+        "NSCameraUsageDescription": "BantayNiMama needs the camera to recognise products."
+      }
+    },
+    "plugins": [
+      [
+        "react-native-fast-tflite",
+        {
+          "enableAndroidGpuLibraries": true
+        }
+      ]
+    ]
+  }
+}

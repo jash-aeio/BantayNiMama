@@ -12,7 +12,7 @@ why. A decision nobody would question does not need an ADR.
 
 ## ADR-001 — React Native + Expo over Flutter and native Android
 
-**Status:** Accepted · 2026-09-12
+**Status:** Accepted · 2026-09-12 · *SDK version amended by ADR-009; the platform choice stands.*
 
 **Context.** The app needs camera frame access and on-device ML on both Android and iOS, built
 largely solo.
@@ -134,3 +134,58 @@ at the render boundary.
 **Rationale.** They are empirical values derived from a score distribution, and they will be retuned
 repeatedly as the catalog grows. Hard-coded constants get tuned by guesswork in a commit; a
 configuration row gets tuned by measurement and can be adjusted without a rebuild.
+
+---
+
+## ADR-009 — Expo SDK 57 instead of the specified SDK 55
+
+**Status:** Accepted · 2026-09-12 · Amends `TR-01`
+
+**Context.** `TR-01` specified Expo SDK 55 / RN 0.83 / React 19.2. By the time Phase 0 was
+scaffolded, SDK 55 was two majors behind: current stable is SDK 57.0.22 on RN 0.86.3. More
+importantly, the packages this project's architecture depends on — VisionCamera v5.2.3,
+`react-native-fast-tflite` v3.0.1, and the Nitro modules underneath both — are developed and
+tested against the current RN, not against 0.83.
+
+**Decision.** Scaffold on Expo SDK 57 / RN 0.86.3.
+
+**Rejected.** Honouring `TR-01` literally. It would have kept the spec tidy at the cost of
+running the riskiest, least-documented part of the stack (a Nitro-based frame processor calling
+TFLite synchronously) two majors away from where it is actually exercised. Phase 0 exists to
+test the recognition thesis; spending its budget on version-skew bugs tests nothing.
+
+**Consequence.** `TR-01` is amended rather than dropped. React is 19.2.3 and the New Architecture
+is the only architecture, both of which `TR-01` already assumed. No requirement is weakened.
+
+---
+
+## ADR-010 — `react-native-nitro-image` instead of `vision-camera-resize-plugin`
+
+**Status:** Accepted · 2026-09-12 · Amends `TR-11`
+
+**Context.** `TR-11` specified `vision-camera-resize-plugin` for in-worklet crop, resize and
+pixel-format conversion. That package targets VisionCamera **v4** and the `react-native-worklets-core`
+runtime. VisionCamera v5 is a ground-up Nitro rewrite with a different threading model
+(`react-native-vision-camera-worklets` over `react-native-worklets`), so the plugin no longer fits
+the architecture chosen in `ADR-002`.
+
+**Decision.** Use `react-native-nitro-image`, which VisionCamera v5 already depends on. The chain is
+`HybridFrameConverter.convertFrameToImage(frame)` → `image.crop(...)` → `.resize(224, 224)` →
+`.toRawPixelData()`. Every one of those has a synchronous variant, which is what makes it usable
+inside the frame worklet.
+
+**Rejected.** *Pinning VisionCamera v4* to keep the resize plugin — that would forgo the single
+property that made v5 attractive: because v5 is itself a Nitro module, a `TfliteModel` HybridObject
+crosses into the worklet without boxing. Under v4, `react-native-fast-tflite` requires
+`NitroModules.box()` / `unbox()` gymnastics.
+
+**Consequence.** Channel order must now be handled in application code: `toRawPixelData()` returns
+one of eight RGB layouts depending on platform (Android bitmaps come back `RGBA`, iOS typically
+`BGRA`). `channelLayout()` in `src/spike/embed.ts` maps all of them. This is a real new failure mode
+— wrong channel order does not throw, it just quietly costs accuracy — and it is why the layout is
+resolved from `raw.pixelFormat` at runtime rather than assumed per platform.
+
+**Note.** `react-native-fast-tflite` v3's official VisionCamera v5 integration example is behind a
+GitHub sponsorship. The library itself is MIT and its Nitro type definitions are complete, so the
+glue was written from the types. It is **type-correct but not yet observed running on a device** —
+tracked as a risk in `PHASE_0_RUNBOOK.md` Part D.

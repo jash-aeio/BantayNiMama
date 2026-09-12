@@ -133,7 +133,7 @@ object proposal replacing the fixed reticle.
 
 | ID | Requirement |
 |---|---|
-| **TR-01** | React Native via **Expo SDK 55** (RN 0.83, React 19.2, New Architecture only). |
+| **TR-01** | React Native via **Expo SDK 57** (RN 0.86.3, React 19.2.3, New Architecture only). *Amended from SDK 55 / RN 0.83 — see ADR-009.* |
 | **TR-02** | **Android and iOS.** Android is the primary target; design to budget Android constraints. |
 | **TR-03** | **`expo-dev-client` is required.** Expo Go cannot load the native modules this app depends on. |
 | **TR-04** | Minimum Android 10 (API 29); minimum iOS 16. |
@@ -143,8 +143,8 @@ object proposal replacing the fixed reticle.
 
 | ID | Package | Role |
 |---|---|---|
-| **TR-10** | `react-native-vision-camera` v5 | Camera + frame processors. The only RN camera with real frame processors; v5 is Nitro/worklets-based so a TFLite model is callable directly inside the worklet. |
-| **TR-11** | `vision-camera-resize-plugin` | Native in-worklet crop, resize, YUV→RGB, Float32 conversion. |
+| **TR-10** | `react-native-vision-camera` v5 + `react-native-vision-camera-worklets` | Camera + frame processors. The only RN camera with real frame processors; v5 is Nitro/worklets-based so a TFLite model is callable directly inside the worklet. v5 uses an outputs-based API (`usePreviewOutput`, `useFrameOutput`) and ships **no config plugin** — camera permissions are declared directly in `app.json`. |
+| **TR-11** | `react-native-nitro-image` | Native in-worklet crop, resize and raw-pixel access, via `HybridFrameConverter.convertFrameToImage()`. *Amended from `vision-camera-resize-plugin`, which targets VisionCamera v4 — see ADR-010.* Float32 conversion and channel-order mapping are done in application code. |
 | **TR-12** | `react-native-fast-tflite` | TFLite runtime. Runs synchronously inside worklets; GPU delegate on Android, CoreML on iOS. |
 | **TR-13** | `@op-engineering/op-sqlite` with **sqlite-vec** enabled | Metadata + vector storage in one SQLite file. |
 | **TR-14** | `expo-router` | File-based tab navigation. |
@@ -158,7 +158,7 @@ object proposal replacing the fixed reticle.
 | ID | Requirement |
 |---|---|
 | **TR-20** | Embedding model: **MediaPipe Image Embedder, MobileNetV3-Large**, `.tflite`, 1024-d output. |
-| **TR-21** | Model input: 224×224 RGB, Float32, normalized to the model's expected range. |
+| **TR-21** | Model input: 224×224 RGB, Float32, normalized to **`[0.0, 1.0]` per channel** (i.e. byte ÷ 255). Confirmed from the model file's own tensor description, not assumed — a `[-1, 1]` assumption degrades every score without throwing. |
 | **TR-22** | All embeddings **L2-normalized at write time** so cosine similarity is a plain dot product. |
 | **TR-23** | Every stored vector is stamped with the `model_id` that produced it. |
 | **TR-24** | Model swap requires regenerating all vectors from stored reference JPEGs. **Never discard the JPEGs.** |
@@ -237,6 +237,7 @@ These ship as documented limitations, not bugs. Do not open issues to "fix" them
 ## 10. Related Documents
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — system design, data flow, schema
+- [`PHASE_0_RUNBOOK.md`](./PHASE_0_RUNBOOK.md) — how to run the Phase 0 spike and what it needs from you
 - [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) — current phase, gates, what's next
 - [`CHANGELOG.md`](./CHANGELOG.md) — what shipped, when
 - [`DECISIONS.md`](./DECISIONS.md) — architecture decision records

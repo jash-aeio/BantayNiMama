@@ -2,6 +2,8 @@
 
 > **Last updated:** 2026-09-12 · **Schema version:** 1 · **Model:** `mobilenet_v3_large_embedder_v1`
 >
+> **Stack:** Expo SDK 57 / RN 0.86.3 (ADR-009) · VisionCamera v5.2.3 · react-native-fast-tflite v3.0.1
+>
 > **Claude: update this document whenever you change the data model, the pipeline, the matching
 > policy, or a core dependency.** See [`../CLAUDE.md`](../CLAUDE.md).
 
@@ -67,6 +69,7 @@ crosses that boundary per frame.
 ║  1. runAtTargetFps(4)      drop 26 of 30 frames              ~0 ms     ║
 ║  2. Sharpness gate         Laplacian variance; bail on blur  ~1 ms     ║
 ║  3. Crop + resize          reticle → 224×224 RGB Float32     1–3 ms    ║
+║     via nitro-image        crop() → resize() → toRawPixelData()        ║
 ║  4. model.runSync()        TFLite forward pass               8–40 ms   ║
 ║  5. L2-normalize           1024-d unit vector                <0.1 ms   ║
 ╚════════╤═══════════════════════════════════════════════════════════════╝
@@ -217,7 +220,18 @@ BantayNiMama/
 │   ├── settings.json          ← hooks + permissions
 │   ├── commands/              ← project slash commands
 │   └── hooks/                 ← doc-sync guard
-├── assets/models/             ← .tflite model files (git-lfs candidates)
+├── assets/models/             ← .tflite model files; gitignored, fetched by
+│                              `npm run fetch-model` (scripts/fetch-model.mjs)
+├── scripts/
+│   ├── fetch-model.mjs        ← dev-time model download (TR-20)
+│   └── analyze.mjs            ← Phase 0 offline accuracy + τ/δ sweep
+├── App.tsx                    ← PHASE 0 ONLY. Throwaway spike UI; replaced by app/
+│                              once the gate passes.
+├── src/spike/                 ← PHASE 0 ONLY. Deleted at the start of Phase 1.
+│   ├── config.ts              ← spike constants (τ/δ are NOT here — see TR-35)
+│   ├── embed.ts               ← in-worklet crop→resize→runSync→L2-normalize
+│   ├── vectors.ts             ← pure cosine ranking + τ/δ decision
+│   └── dataset.ts             ← capture, persist, share-sheet export
 ├── src/
 │   ├── domain/                ← PURE TS. No I/O. Unit-tested.
 │   │   ├── match.ts           ← τ/δ policy

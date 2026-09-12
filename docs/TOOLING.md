@@ -62,7 +62,7 @@ claude mcp add --scope user context7 -- npx -y @upstash/context7-mcp
 Free without an API key; get one at context7.com/dashboard only if you hit rate limits.
 
 **Why this one, for this project specifically.** The entire stack is fast-moving and
-version-sensitive: VisionCamera v5 changed its worklet model, Expo SDK 55 dropped the legacy
+version-sensitive: VisionCamera v5 changed its worklet model, Expo SDK 57 dropped the legacy
 architecture, `react-native-fast-tflite` and sqlite-vec integration details shift between releases.
 Any model's training data lags these. Context7 pulls version-specific docs into the prompt, which
 turns "the API probably looks like this" into the actual current signature.
@@ -132,7 +132,7 @@ Before `npm install` anything:
 
 1. Does it perform network I/O at runtime? → **reject** (`TR-51`)
 2. Does it need an API key or account? → **reject** (`TR-50`)
-3. Does it work with the New Architecture on Expo SDK 55? Expo Go compatibility is irrelevant —
+3. Does it work with the New Architecture on Expo SDK 57? Expo Go compatibility is irrelevant —
    we require a dev build anyway (`TR-03`)
 4. Does it add a config plugin requiring a new dev build? Note it in `ARCHITECTURE.md`
 5. Add a `CHANGELOG.md` entry, and an ADR if it replaces something (`DECISIONS.md`)
