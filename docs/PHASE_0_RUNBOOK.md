@@ -14,7 +14,7 @@ Three modes, one screen, no navigation library. Deliberately crude.
 
 | Mode | What you do | What it records |
 |---|---|---|
-| **enroll** | Type a product label, point at the product, tap *Capture reference shot*. Repeat 3–5× per product from different angles. | A 1024-d L2-normalized vector per shot |
+| **enroll** | Type a product label, point at the product, tap *Capture reference shot*. Repeat 3–5× per product from different angles. | A 1280-d L2-normalized vector per shot |
 | **scan** | Just point. Live top-3 with cosine scores and the top1−top2 margin. | Nothing — this is the "does it feel right" mode |
 | **collect** | Type the **true** label of what you're pointing at, tap *Record test frame*. | A labeled vector + in-worklet latency |
 
@@ -97,20 +97,47 @@ real camera sees under real store lighting.
 > If the phone is a budget Android (the real target market per `TR-02`), that is the *better*
 > device to measure on, not the worse one.
 
+#### Taking the phone off the laptop — build the release variant
+
+A debug build loads its JavaScript from the Metro dev server over the USB cable, so unplugging
+the phone kills the app. That makes the store trip impossible, which is the wrong reason to shoot
+desk photos. The fix is a release build: Gradle embeds the JS bundle into the APK, and the phone
+becomes standalone.
+
+```bash
+npx expo run:android --variant release
+```
+
+No signing setup is needed — `android/app/build.gradle` signs the release build type with the
+debug keystore. Because the signature matches the debug build, this installs as an upgrade and any
+dataset already captured survives.
+
+Two things follow from this, both worth having:
+
+- The phone leaves the desk, so A-3 can be shot where `TR-02` says it matters.
+- The **140–248 ms** latency in `PROJECT_STATUS.md` was measured on a *debug* build — unoptimised
+  JS, dev-mode bridge assertions. The release figure is the honest one. Record it as a separate
+  row; do not overwrite the debug measurement.
+
 ### A-3. Reference photos of ~20 real products, shot in an actual store
 
 **This is the single blocking input and no amount of code substitutes for it.** The thesis is
 about real packaging under real lighting on real shelves. Photos of products on your desk will
 give an optimistic number that collapses in Phase 3.
 
-Per `PROJECT_STATUS.md`, the set must include the nasty cases:
+The set must include near-identical pairs — they are what the spike actually tests. The specific
+brands do not matter; the *shape* of the confusion does. Two classes are required:
 
-- [ ] Two Palmolive sachet variants (near-identical colours)
-- [ ] Kopiko 3-in-1 vs 2-in-1
-- [ ] 250 ml and 1 L Coke (tests `L-02`)
-- [ ] Two repacked clear bags (tests `L-01`)
+| Class | Why it matters | Example on hand (2026-09-13) |
+|---|---|---|
+| **Same brand, different variant** | Near-identical artwork, different product and price. This is the sharpest test of whether the embedder separates SKUs at all. | Two Nissin ramen variants |
+| **Same product, different pack size** | Tests `L-02`. Solo and twin-pack share the artwork; only the count differs. | Creamy white solo vs twin pack |
 
-Plus ~16 ordinary SKUs to fill out the catalog.
+Plus ~18 ordinary SKUs to fill out the catalog.
+
+> **Not covered by the current set:** two repacked clear bags (`L-01`). `L-01` is already an
+> accepted limitation with a quick-pick-grid workaround, so leaving it unmeasured costs nothing —
+> but do not later read a passing gate as evidence that clear-bag repacks work. They were not tested.
 
 **Labelling convention that the analysis script depends on:** prefix the known-unsolvable items
 with `ambiguous:` — for example `ambiguous:repack-sugar-1kg`. The script excludes those from the
@@ -125,8 +152,13 @@ In **collect** mode, in the store, pointing at products you have already enrolle
 distance and lighting — that variation is the measurement. Roughly 5 frames per product across
 20 products gets you to 100.
 
-Record some frames of **un-enrolled** products too, labelled `unknown:<whatever>`. `NFR-03` wants
-≥85% correct rejection and you cannot measure rejection without negatives.
+Record some frames of **un-enrolled** products too, labelled `unknown:<whatever>` — roughly 15 of
+the 100. `NFR-03` wants ≥85% correct rejection and you cannot measure rejection without negatives.
+
+These are scored separately from the gate: `analyze.mjs` keeps `unknown:` frames out of the top-1
+denominator (they can never match an enrolled label) and reports them as an NFR-03 rejection rate.
+Accepting one still counts as a false positive under `NFR-02` — a confident price for a product
+that is not in the catalog is the worst failure the app has.
 
 ### A-5. Decisions only you can make
 
@@ -160,10 +192,17 @@ npm run android              # first build is slow: Gradle downloads a lot
 `npm run android` runs `expo run:android`, which prebuilds `android/` and installs the dev build.
 After the first build, `npm start` is enough for JS changes.
 
-**On first launch, check the panel header.** It prints `dim <n>`. If that is not **1024**, stop —
-`TR-20` and the `vec_shots` schema both assume 1024 and the number must be corrected in
-`ARCHITECTURE.md` before Phase 1. If the latency reads wildly higher than ~40 ms, note it; that is
-a real `NFR-07` signal, not a bug to hide.
+**First launch happened on 2026-09-13, and both checks fired.** Recorded here rather than left as
+instructions, because both assumptions turned out to be wrong:
+
+- `dim` reads **1280**, not 1024. `TR-20`, the `vec_shots` schema and the pipeline diagram have
+  been corrected. No code hard-coded 1024 — the spike reads the model's reported `dim` — so this
+  was a documentation error only.
+- Latency reads **140–248 ms (median ~148)**, against a ~40 ms expectation. Noted, not hidden:
+  see the `NFR-07` note in `ARCHITECTURE.md` §8 for the three caveats and the first diagnostic.
+
+Neither blocks enrollment. The Phase 0 gate is accuracy, and accuracy is unaffected by how long
+each frame takes.
 
 Then:
 
@@ -182,11 +221,12 @@ Flagging these honestly now rather than discovering them at 11pm in a store.
 
 | Risk | Why | If it bites |
 |---|---|---|
-| **Frame → Image → crop → resize chain is unproven on device** | `react-native-fast-tflite`'s official VisionCamera **v5** integration example is behind a GitHub sponsorship; the glue in `src/spike/embed.ts` is written from the published Nitro type definitions, not from a working reference. The types are right; the runtime behaviour is not yet observed. | Most likely failure is a pixel-format or disposal issue. `channelLayout()` already handles all eight RGB layouts, and `dim` printing in the header is the canary. |
+| **Frame → Image → crop → resize chain is unproven on device** | `react-native-fast-tflite`'s official VisionCamera **v5** integration example is behind a GitHub sponsorship; the glue in `src/spike/embed.ts` is written from the published Nitro type definitions, not from a working reference. The types are right; the runtime behaviour is not yet observed. **Retired 2026-09-13** — observed working end to end on an Infinix X6823 in both debug and release: 1280-d embeddings, plausible top-3 ranking. | Most likely failure is a pixel-format or disposal issue. `channelLayout()` already handles all eight RGB layouts, and `dim` printing in the header is the canary. |
 | **Channel order** | Android hands back RGBA, iOS usually BGRA. Swapped channels do not throw — they just quietly cost accuracy. | If top-1 is implausibly bad, log `raw.pixelFormat` before blaming the model. |
 | **Input range** | The model's own tensor description says `[0.0, 1.0]` per channel, so `INPUT_SCALE = 1/255`. A `[-1, 1]` assumption would silently degrade every score. | Confirmed from the model file, not assumed. |
-| **GPU delegate is off** | `useTensorflowModel(..., [])` loads on CPU. Latency is therefore a pessimistic number. | Pass `['android-gpu']` once correctness is established, and re-measure. Record both. |
+| **GPU delegate is off** | `loadTensorflowModel(..., [])` loads on CPU. Latency is therefore a pessimistic number. | Pass `['android-gpu']` once correctness is established, and re-measure. Record both. |
 | **Desk photos** | Enrolling at a desk and testing at a desk produces a number that means nothing. | See A-3. This is the most likely way Phase 0 produces a confidently wrong PASS. |
+| **Debug-only code paths** | The release build is a different animal: the JS is bundled and assets are packed as Android resources. This already bit once — the model loaded fine under Metro for a day and then failed on the first release APK (ADR-011, `TR-29`). | Capture from the **release** APK, and re-verify anything asset- or path-shaped there rather than trusting the debug run. |
 
 ---
 

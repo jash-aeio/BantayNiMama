@@ -43,15 +43,64 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   native `android/` project on Gradle 9.3.1. This clears Phase 0 blocker A-1 and is what makes a
   dev build possible at all (`TR-03`). Versions are recorded in `docs/TOOLING.md` → "Verified local toolchain".
   **No APK has been compiled and no device has run the app yet**; no NDK is installed.
+- `expo-asset` ~57.0.17 as a direct dependency — required to resolve the bundled `.tflite` to a
+  real `file://` path in release builds (see **Fixed** below, and ADR-011). It was already in the
+  tree transitively and its native module was already autolinked, so nothing new compiles in. For
+  an embedded asset it copies out of the APK rather than opening a socket; confirmed in airplane
+  mode on device (`TR-50`, `TR-51`, `TR-53`).
 
 ### Changed
+- Phase 0 capture now runs from a **release-variant APK** rather than the debug build. A debug
+  build streams its JS from the Metro dev server over USB, which pinned the phone to the laptop
+  and would have forced A-3 to be shot at a desk — the one failure mode `PHASE_0_RUNBOOK.md`
+  Part D calls the most likely way to produce a confidently wrong PASS. The release build embeds
+  `index.android.bundle`, so the phone is standalone. No signing work was needed: the release
+  build type is already signed with the debug keystore, so it installs as an upgrade and any
+  captured dataset survives. Verified by inspecting the APK — bundle present, model asset
+  present, zero dev-launcher classes. Consequence for `NFR-07`: the recorded 140–248 ms is a
+  **debug** figure and the release number will differ; `analyze.mjs` reports in-worklet latency
+  from the dataset, so the store run measures it directly.
+- **TR-20 corrected:** the embedder's output is **1280-d, not 1024-d** — measured on device
+  2026-09-13. Propagated to the `vec_shots` schema, the pipeline diagram and the worklet output
+  rule in `ARCHITECTURE.md`, and to `DECISIONS.md` (ADR brute-force sizing). No code changed: the
+  spike already read the model's reported `dim`, so this was a documentation error throughout.
+- `docs/ARCHITECTURE.md` §8 performance budget now carries **measured** per-frame latency:
+  140–248 ms (median ~148) on an Infinix X6823, debug build, against a 9–43 ms budget. `NFR-07`
+  is **not met**; the three caveats and the first diagnostic are recorded alongside it.
 - **TR-01 amended:** Expo SDK 55 / RN 0.83 → **SDK 57 / RN 0.86**. See ADR-009.
 - **TR-11 amended:** `vision-camera-resize-plugin` → `react-native-nitro-image`. See ADR-010.
 - **TR-21 clarified:** the model's own tensor description specifies input normalized to
   `[0.0, 1.0]` per channel; recorded so it is never re-derived by guesswork.
 
 ### Fixed
-- _nothing yet_
+- **The release APK could not load the embedding model at all** — the spike stopped at "Model
+  failed to load: `java.net.MalformedURLException: no protocol: assets_models_mobilenet_v3_large`",
+  while the debug build had been loading the same model for a day. `react-native-fast-tflite` v3.0.1
+  resolves a `require()`d model via `Image.resolveAssetSource()` and feeds the result to
+  `java.net.URL` (`HybridAssetLoader.kt:14`). Under Metro that is `http://127.0.0.1:8081/...` and
+  works; in a release build RN packages the asset as an Android resource and the call returns a bare
+  name with no scheme, so the loader throws. The model was in the APK the whole time (`res/pW.tflite`,
+  10,889,458 bytes, byte-identical to the source) — only its address was unusable. `App.tsx` now
+  resolves the asset through `Asset.fromModule(...).downloadAsync()` and passes the resulting
+  `file://` URI to `loadTensorflowModel({ url })` (`TR-29`, ADR-011). Confirmed on an Infinix X6823:
+  model loads, 1280-d embeddings at ~140–144 ms. This affected **every** release build of the app,
+  not only the spike.
+- `scripts/analyze.mjs` counted `unknown:` negatives as top-1 ranking failures. The runbook (A-4)
+  asks for un-enrolled products to be recorded as `unknown:<label>` so that rejection can be
+  measured, but no enrolled label can ever match one — so every negative silently cost a point of
+  top-1 accuracy. On a synthetic dataset where every enrolled frame ranks correctly, 15 negatives
+  out of 95 scored frames dragged the gate to 84.2% and reported **FAIL on a perfect dataset**.
+  Negatives are now partitioned out of the gate denominator and scored against `NFR-03` instead,
+  which also means NFR-03 is measured at all for the first time. Accepting an un-enrolled product
+  still counts as a false positive under `NFR-02`.
+- `scripts/analyze.mjs` re-ranked every test frame inside the (τ, δ) sweep — ~4,200 pairs ×
+  100 frames × 80 shots × 1280 dimensions. Frames are now ranked once up front; the sweep reads
+  the cached ranking. Full analysis of a 20-product / 99-frame dataset runs in 0.19 s.
+- Metro could not start: `babel-preset-expo` was installed nested under `node_modules/expo/`
+  instead of hoisted, so Babel failed to resolve it from the project root and the transformer
+  threw `Cannot find module 'babel-preset-expo'` while the dev server still claimed to be
+  listening. Now declared as an explicit devDependency — a build-time preset only, so `TR-50`
+  and `TR-51` are unaffected.
 
 ### Removed
 - _nothing yet_

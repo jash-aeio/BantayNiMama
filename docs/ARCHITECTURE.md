@@ -55,7 +55,7 @@ This is the most important thing to understand about the codebase.
 | **JS thread** | Vector search, matching policy, stability buffer, DB reads, enrollment | Run inference on live frames |
 | **UI thread** | Overlay rendering via Reanimated shared values | Re-render React on the hot path |
 
-**Rule:** the worklet's only output is a `Float32Array(1024)` posted to the JS thread. Nothing else
+**Rule:** the worklet's only output is a `Float32Array(1280)` posted to the JS thread. Nothing else
 crosses that boundary per frame.
 
 ---
@@ -71,9 +71,9 @@ crosses that boundary per frame.
 ║  3. Crop + resize          reticle → 224×224 RGB Float32     1–3 ms    ║
 ║     via nitro-image        crop() → resize() → toRawPixelData()        ║
 ║  4. model.runSync()        TFLite forward pass               8–40 ms   ║
-║  5. L2-normalize           1024-d unit vector                <0.1 ms   ║
+║  5. L2-normalize           1280-d unit vector                <0.1 ms   ║
 ╚════════╤═══════════════════════════════════════════════════════════════╝
-         │  post Float32Array(1024)
+         │  post Float32Array(1280)
 ╔════════▼═══════════════════ JS THREAD ═════════════════════════════════╗
 ║  6. sqlite-vec KNN         brute force over ≤2500 vectors    0.5–3 ms  ║
 ║  7. Aggregate shots→products   best shot wins per product    <1 ms     ║
@@ -146,7 +146,7 @@ CREATE TABLE product_shots (
 CREATE VIRTUAL TABLE vec_shots USING vec0(
   shot_id    TEXT PRIMARY KEY,
   product_id TEXT,
-  embedding  FLOAT[1024]              -- L2-normalized at write time (TR-22)
+  embedding  FLOAT[1280]              -- L2-normalized at write time (TR-22)
 );
 
 CREATE TABLE price_history (
@@ -251,18 +251,44 @@ BantayNiMama/
 **The `src/domain/` boundary matters.** Anything that can be a pure function goes there and gets
 unit tests. Everything hard to test (camera, native modules) stays thin and delegates to it.
 
+**Loading the model is not a plain `require()`.** `src/ml/` — and `App.tsx` while Phase 0 stands in
+for it — resolves the bundled `.tflite` through `expo-asset` to a real `file://` path before handing
+it to `react-native-fast-tflite`. A bare `require()` resolves to an `http://` Metro URL in debug and
+to a schemeless Android resource name in release, and the library's loader understands only URLs. So
+a `require()` that works throughout development fails on the first release build (TR-29, ADR-011).
+
 ---
 
 ## 8. Performance Budget
 
 | Stage | Budget | Measured |
 |---|---|---|
-| Sharpness gate | ~1 ms | _pending Phase 0_ |
-| Crop + resize | 1–3 ms | _pending Phase 0_ |
-| TFLite inference | 8–40 ms | _pending Phase 0_ |
+| Sharpness gate | ~1 ms | not isolated by the spike |
+| Crop + resize | 1–3 ms | not isolated — folded into the row below |
+| TFLite inference | 8–40 ms | not isolated — folded into the row below |
+| **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **140–248 ms, median ~148 ms** (see note) |
 | sqlite-vec KNN | 0.5–3 ms | _pending Phase 1_ |
 | Policy + stability | <2 ms | _pending Phase 1_ |
-| **Total per frame** | **≤ 60 ms** (NFR-07) | _pending_ |
+| **Total per frame** | **≤ 60 ms** (NFR-07) | _pending — but already exceeded by the row above_ |
+
+**Measurement, 2026-09-13.** 7 samples read off the spike's on-screen counter (`elapsedMs`, timed
+inside the worklet around crop → resize → `runSync` → L2-normalize): 140.5, 142.4, 147.5, 148.2,
+161.1, 167.3, 248.3 ms. Device: Infinix X6823 (Unisoc T616, armeabi-v7a 32-bit, Android 12, 2 GB RAM).
+
+> **This is 4–6× over budget and `NFR-07` is not currently met.** Three caveats before anyone
+> redesigns the pipeline around it:
+>
+> 1. **It is a debug build.** Inference itself is native C++ and largely indifferent to JS debug
+>    overhead, so this will not explain the whole gap — but it is unmeasured until a release build
+>    is timed.
+> 2. **The device is 32-bit `armeabi-v7a`.** TFLite gives up its arm64 kernels there. A 64-bit
+>    budget phone is the more representative target and has not been measured.
+> 3. **The stages are not separated.** We do not yet know whether crop/resize or `runSync`
+>    dominates. Separating them is the first diagnostic, not a model swap.
+>
+> At `TR-26`'s 4 fps (250 ms per frame) a 148 ms median leaves the camera thread busy ~60% of each
+> interval, and the 248 ms sample saturates it outright. The throttle holds for now; it has no
+> headroom.
 
 > **Claude: fill the "Measured" column as real numbers arrive.** Do not leave it as estimates once
 > the spike has run.

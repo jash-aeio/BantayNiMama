@@ -1,3 +1,4 @@
+import { Asset } from 'expo-asset';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,7 +19,10 @@ import {
   useFrameOutput,
   usePreviewOutput,
 } from 'react-native-vision-camera';
-import { useTensorflowModel } from 'react-native-fast-tflite';
+import {
+  loadTensorflowModel,
+  type TensorflowModel,
+} from 'react-native-fast-tflite';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { MODEL_ID, RETICLE_FRACTION, TARGET_FPS } from './src/spike/config';
@@ -36,14 +40,48 @@ type Mode = 'scan' | 'enroll' | 'collect';
 
 const DEVICE_NAME = `${Platform.OS} ${Platform.Version}`;
 
+const MODEL_ASSET = require('./assets/models/mobilenet_v3_large.tflite');
+
+type TfliteState =
+  | { state: 'loading' }
+  | { state: 'loaded'; model: TensorflowModel }
+  | { state: 'error'; error: Error };
+
+// fast-tflite resolves a require()d model via Image.resolveAssetSource, which in a release
+// build returns a bare Android resource name ("assets_models_...") instead of a URL, and its
+// native loader passes that straight to java.net.URL — MalformedURLException. Routing through
+// expo-asset copies the model out of the APK and yields a real file:// path the loader can
+// read. The asset is embedded, so this is a local copy and not a download (TR-50).
+function useTfliteModel(): TfliteState {
+  const [state, setState] = useState<TfliteState>({ state: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const asset = await Asset.fromModule(MODEL_ASSET).downloadAsync();
+        const model = await loadTensorflowModel(
+          { url: asset.localUri ?? asset.uri },
+          [],
+        );
+        if (!cancelled) setState({ state: 'loaded', model });
+      } catch (e) {
+        if (!cancelled) setState({ state: 'error', error: e as Error });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
+}
+
 export default function App() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
   const preview = usePreviewOutput();
-  const tflite = useTensorflowModel(
-    require('./assets/models/mobilenet_v3_large.tflite'),
-    [],
-  );
+  const tflite = useTfliteModel();
   const model = tflite.state === 'loaded' ? tflite.model : undefined;
 
   const [mode, setMode] = useState<Mode>('enroll');

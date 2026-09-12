@@ -34,7 +34,8 @@
         {
           "enableAndroidGpuLibraries": true
         }
-      ]
+      ],
+      "expo-asset"
     ]
   }
 }
