@@ -49,7 +49,7 @@ moving inference to the JS thread gets re-evaluated then.
 
 ## ADR-003 — sqlite-vec over a dedicated vector database
 
-**Status:** Accepted · 2026-09-12
+**Status:** Accepted · 2026-09-12 · *sqlite-vec half superseded by ADR-014 (it cannot load on 32-bit ARM); op-sqlite and the one-file layout stand*
 
 **Context.** The app needs KNN over a few thousand embeddings, entirely offline.
 
@@ -66,7 +66,7 @@ Phase 4 is a zip, not a migration.
 
 ## ADR-004 — No ANN index; brute-force KNN
 
-**Status:** Accepted · Revisit above ~50,000 vectors · 2026-09-12
+**Status:** Accepted · Revisit above ~50,000 vectors · 2026-09-12 · *Where brute force runs amended by ADR-014 (JS for now; the "sub-millisecond" figure below was an estimate for native code — JS measured 234 ms at 2,500 shots)*
 
 **Context.** Vector search must return in single-digit milliseconds.
 
@@ -318,3 +318,66 @@ elsewhere. Shipping one also means shipping its JPEGs, so it can be re-embedded 
 - Negatives change the schema: a shot must be distinguishable as a negative. Phase 1 builds none,
   but schema v1 should not block one (`PHASE_1_PLAN.md` §7).
 - The 3-of-5 stability gate (`TR-36`) is not modelled. How much it removes is unmeasured.
+
+---
+
+## ADR-014 — Vectors as BLOBs, searched in JavaScript, until native search works on 32-bit ARM
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Partly supersedes ADR-003 (its sqlite-vec
+half; op-sqlite stays) · Amends `TR-13`, `TR-30`, `TR-40`
+
+**Context.** P1-2's day-one checkpoint (Infinix X6823, release APK, 2026-09-14) found two things:
+
+- **op-sqlite's bundled sqlite-vec does not load on 32-bit ARM.** Its prebuilt `armeabi-v7a`
+  `libsqlite_vec.so` calls `ceil` but does not declare `libm.so`, so `open()` throws
+  `dlopen failed: cannot locate symbol "ceil"`. 18.2.1 is the latest release. Reported as
+  [op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456).
+- **32-bit matters.** The test phone is 32-bit only, and the budget phones this app targets
+  (`TR-02`) often are too.
+
+A second checkpoint build, with sqlite-vec switched off, measured on the same phone:
+
+| Measurement | Result |
+|---|---|
+| Plain SQLite | opens `bantay.db` in the document directory |
+| 1280-d `Float32Array` stored as a BLOB and read back | bit-exact |
+| Read 2,500 vector BLOBs | 56.3 ms |
+| JS brute-force search, 100 shots | median 9.2 ms |
+| JS brute-force search, 2,500 shots, inline loop | median 234.0 ms |
+| JS brute-force search, 2,500 shots, `dot()` per shot | median 831.1 ms |
+
+**Decision** (operator's call, after the measurement):
+
+1. Each shot's vector is stored as a **BLOB in `product_shots.embedding`**: little-endian Float32
+   × `embedding_dim`, L2-normalized (`TR-22`), stamped with its `model_id` (`TR-23`). The `vec0`
+   table leaves the schema.
+2. **Search is a pure inline brute-force loop** in `src/domain`. It runs over one contiguous
+   `Float32Array` matrix held in memory, rebuilt from SQLite at startup and extended after each
+   enrollment commits. It keeps the top 10 (`TR-30`) and hands them to `rankProducts` (`TR-31`).
+3. op-sqlite stays, as plain SQLite with `"sqliteVec": false`.
+
+**Rejected.**
+
+- *Building sqlite-vec ourselves now.* It keeps `vec0` and targets `NFR-09` from the start, but
+  puts a native build step, maintained across upgrades, ahead of a phase whose job is the data
+  path. Its speed on 32-bit ARM is also unmeasured.
+- *Waiting for op-sqlite#456.* That blocks Phase 1 for an unknown time.
+
+**Consequences.**
+
+- **`NFR-09` is not met by this search on the test phone.** At 500 products (2,500 shots), 234 ms
+  is nearly the whole 250 ms frame interval at 4 fps (`TR-26`). Native search is **owed before
+  Phase 4**: our own sqlite-vec build, a fixed op-sqlite, or another native path. It is tracked in
+  `PROJECT_STATUS.md` and revisited in Phase 3, where it must be measured on the same phone.
+- **Switching later needs no data migration.** A native index is rebuilt from the BLOBs, the same
+  way `TR-24` re-embeds from JPEGs.
+- **The per-frame loop must be written inline over the contiguous matrix.** Calling `dot()` per shot
+  allocates a `subarray` each time, which measured 3.5× slower on Hermes (no JIT).
+- **The matrix is a derived index, never the source of truth.** It only changes after a commit
+  succeeds, so a rolled-back enrollment is never searchable (`TR-45`).
+- **"KNN starvation" goes away** (`PHASE_1_PLAN.md` §7). Soft-deleted shots and vectors from
+  another `model_id` are simply left out when the matrix is built.
+- **Memory:** 2,500 × 1280 × 4 bytes ≈ 12.8 MB for the matrix at 500 products. That figure is
+  computed, not measured.
+- **ADR-004 stands.** There is still no approximate index; brute force is still the algorithm.
+  Only where it runs changed.

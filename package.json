@@ -12,7 +12,11 @@
     "fetch-model": "node scripts/fetch-model.mjs",
     "analyze": "node scripts/analyze.mjs"
   },
+  "op-sqlite": {
+    "sqliteVec": false
+  },
   "dependencies": {
+    "@op-engineering/op-sqlite": "~18.2.1",
     "expo": "~57.0.22",
     "expo-asset": "~57.0.17",
     "expo-dev-client": "~57.0.19",

@@ -36,6 +36,7 @@ import {
   type TestFrame,
 } from './src/spike/dataset';
 import { rankProducts, type Candidate, type Shot } from './src/spike/vectors';
+import { describeProbe, probeDatabase } from './src/db/probe';
 
 type Mode = 'scan' | 'enroll' | 'collect';
 
@@ -84,6 +85,13 @@ export default function App() {
   const preview = usePreviewOutput();
   const tflite = useTfliteModel();
   const model = tflite.state === 'loaded' ? tflite.model : undefined;
+
+  // P1-2 checkpoint: run once, show on screen and in logcat (tag ReactNativeJS).
+  const dbProbe = useMemo(() => {
+    const text = describeProbe(probeDatabase());
+    console.log(`[P1-2 checkpoint]\n${text}`);
+    return text;
+  }, []);
 
   const [mode, setMode] = useState<Mode>('enroll');
   const [label, setLabel] = useState('');
@@ -293,6 +301,7 @@ export default function App() {
           {dataset.shots.length} shots / {Object.keys(shotCounts).length} products ·{' '}
           {dataset.frames.length} test frames
         </Text>
+        <Text style={styles.meta}>{dbProbe}</Text>
 
         {mode !== 'scan' && (
           <TextInput

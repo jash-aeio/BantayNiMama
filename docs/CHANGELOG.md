@@ -150,6 +150,67 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every installed `@types` package by default. Adding `node` globally would leak Node's types
   (e.g. `setTimeout`'s return type) into React Native app code, so test files are excluded from
   the app typecheck and checked separately.
+- **P1-2 (in progress) — `@op-engineering/op-sqlite` ~18.2.1 with sqlite-vec enabled** through
+  `"op-sqlite": { "sqliteVec": true }` in `package.json` (`TR-13`, `TR-40`, ADR-003).
+  - **Network audit (`TR-51`):** there is no network code in its JS API, Android Kotlin or core
+    C++. Network code exists only in the optional libsql and turso backends, which stay disabled;
+    `openSync` / `openRemote` need them.
+  - **Versions:** it bundles sqlite-vec **v0.1.7-alpha.2** (read from the `armeabi-v7a`
+    `libsqlite_vec.so`), loaded as an extension inside `open()`, which throws if it cannot load.
+  - `src/db/open.ts` — `openDatabase()` opens `bantay.db` in the document directory, next to
+    `photos/` (`TR-46`). The location is explicit because op-sqlite otherwise defaults to Android's
+    `databases/` folder, outside the export layout. A location starting with `/` is used as-is
+    (read from `OPSqlite.cpp`).
+  - `src/db/probe.ts` — the P1-2 day-one checkpoint, shown in the spike app and written to logcat.
+    It checks three things:
+    - `open()` succeeds and `vec_version()` answers on `bantay.db`;
+    - an in-memory `vec0` table with the `ARCHITECTURE.md` §5 shape (text `shot_id` primary key,
+      `product_id`, `float[1280]`, cosine) returns nearest-neighbour rows;
+    - a nearest-neighbour query can filter on `product_id` (`PHASE_1_PLAN.md` §7).
+
+    Temporary — removed once schema v1 lands.
+  - **Checkpoint FAILED on device.** Infinix X6823, Android 12, release APK built for
+    `armeabi-v7a` only (Gradle 5m 47s), 2026-09-14. All three probe steps throw
+    `dlopen failed: cannot locate symbol "ceil" referenced by …/lib/armeabi-v7a/libsqlite_vec.so`.
+    - **Cause (`llvm-readelf`, NDK 27.1):** op-sqlite 18.2.1's prebuilt `armeabi-v7a`
+      `libsqlite_vec.so` leaves `ceil` undefined but lists only `libdl.so` and `libc.so` as
+      `NEEDED`; `ceil` lives in `libm.so`.
+    - **64-bit:** the `arm64-v8a` build has no undefined `ceil`, so 64-bit phones would probably
+      load it. Not tested: this phone reports `abilist` = `armeabi-v7a,armeabi`.
+    - **Not the cause:** the APK was packaged correctly (`libop-sqlite.so`, `libsqlite_vec.so`,
+      embedded JS bundle), and SQLite itself was never the problem.
+    - **Upstream:** 18.2.1 is the latest release and no existing issue matched, so the bug is now
+      reported as [OP-Engineering/op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456).
+  - **Response, decided with the operator:** measure JS search on the phone before choosing
+    between building sqlite-vec ourselves and searching in JS.
+    - op-sqlite's bundled sqlite-vec is switched **off** (`"sqliteVec": false`). Both fixes need
+      it off: with it on, `open()` throws before SQLite is usable.
+    - `src/db/probe.ts` now checks that plain SQLite opens `bantay.db`, and that a 1280-d
+      `Float32Array` survives a BLOB round trip bit for bit. It also times reading 2,500 vector
+      BLOBs, and brute-force JS KNN at 100 and 2,500 shots (inline loop, and through
+      `src/domain`'s `dot()`).
+    - **Results** — Infinix X6823, release APK, Hermes, `armeabi-v7a`, Gradle 1m 35s, 2026-09-14.
+      The APK no longer contains `libsqlite_vec.so`.
+      - Plain SQLite 3.51.3 opens `/data/user/0/com.jash.bantaynimama/files/bantay.db`, the same
+        folder as `photos/` (`TR-46`).
+      - Vector BLOBs: a 1280-d `Float32Array` round trip is bit-exact, and reading 2,500 BLOBs
+        takes **56.3 ms**.
+      - JS brute-force KNN (score every shot → top 10 → `rankProducts`), n = 10 runs after one
+        warm-up. With an inline loop over one `Float32Array`: 100 shots median **9.2 ms**;
+        2,500 shots median **234.0 ms** (p90 234.4). Calling `src/domain`'s `dot()` per shot:
+        2,500 shots median **831.1 ms**, 3.5× slower. A `subarray` per call is costly on Hermes,
+        which has no JIT.
+      - **Consequence:** cost grows in proportion to shots (25× the shots took 25× the time). JS
+        search fits Phase 1's 20 products. At `NFR-09`'s 500 products (2,500 shots) it would take
+        ~234 ms of the 250 ms frame interval at 4 fps (`TR-26`), so it cannot meet `NFR-09` on
+        this phone.
+      - The first screen stayed white for about a minute: the checkpoint runs synchronously during
+        the first render. Checkpoint-only; not a finding about the app.
+  - **Decision (operator, ADR-014): vectors as BLOBs, searched in JS; native search later.**
+    - Vectors move into `product_shots.embedding` (BLOB), and the `vec0` table leaves the schema.
+    - Search becomes a pure inline loop over an in-memory matrix rebuilt from SQLite.
+    - `TR-13`, `TR-30` and `TR-40` are amended, and ADR-003's sqlite-vec half is superseded.
+    - Native search stays owed for `NFR-09` and is tracked for Phase 3.
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.

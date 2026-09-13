@@ -148,7 +148,7 @@ object proposal replacing the fixed reticle.
 | **TR-10** | `react-native-vision-camera` v5 + `react-native-vision-camera-worklets` | Camera + frame processors. The only RN camera with real frame processors; v5 is Nitro/worklets-based so a TFLite model is callable directly inside the worklet. v5 uses an outputs-based API (`usePreviewOutput`, `useFrameOutput`) and ships **no config plugin** — camera permissions are declared directly in `app.json`. |
 | **TR-11** | `react-native-nitro-image` | Native in-worklet crop, resize and raw-pixel access, via `HybridFrameConverter.convertFrameToImage()`. *Amended from `vision-camera-resize-plugin`, which targets VisionCamera v4 — see ADR-010.* Float32 conversion and channel-order mapping are done in application code. |
 | **TR-12** | `react-native-fast-tflite` | TFLite runtime. Runs synchronously inside worklets; GPU delegate on Android, CoreML on iOS. |
-| **TR-13** | `@op-engineering/op-sqlite` with **sqlite-vec** enabled | Metadata + vector storage in one SQLite file. |
+| **TR-13** | `@op-engineering/op-sqlite`, plain SQLite. *Amended 2026-09-14: sqlite-vec is off because its 32-bit ARM build cannot load (op-sqlite#456) — ADR-014.* | Metadata + vector storage (vectors as BLOBs) in one SQLite file. |
 | **TR-14** | `expo-router` | File-based tab navigation. |
 | **TR-15** | `zustand` | UI/session state only. SQLite remains the source of truth. |
 | **TR-16** | `i18next`, `react-i18next`, `expo-localization` | `en` + `fil` from the first commit. |
@@ -174,7 +174,7 @@ object proposal replacing the fixed reticle.
 
 | ID | Requirement |
 |---|---|
-| **TR-30** | KNN over `vec_shots` with `LIMIT 10`. |
+| **TR-30** | Brute-force nearest-neighbour over every live shot vector, keeping the top 10. *Amended 2026-09-14 from "KNN over `vec_shots` with `LIMIT 10`" — ADR-014. Native search is still owed for `NFR-09`.* |
 | **TR-31** | Aggregate shots to products; a product's score is its **best** shot similarity. |
 | **TR-32** | **ACCEPT** when `top1 ≥ τ` **and** `(top1 − top2) ≥ δ`, top2 being the best *different* product. |
 | **TR-33** | **DISAMBIGUATE** when `top1 ≥ τ` but the margin is `< δ`. |
@@ -183,13 +183,13 @@ object proposal replacing the fixed reticle.
 | **TR-36** | Temporal stability gate: lock a result only when **3 of the last 5** frame decisions agree. |
 | **TR-37** | The matching policy must be a **pure function** over `(candidates, τ, δ, buffer)` so it is unit-testable without a camera. |
 | **TR-38** | The `SR-13` cutoff is stored in `app_meta` as `confirm_below`, calibrated empirically and never hard-coded — the same rule as `TR-35`. **No value chosen yet:** on Phase 0 data even 25 products leave 2.9% of un-enrolled frames accepted, so it comes from store data in Phase 3 (ADR-013). |
-| **TR-39** | Negative shots (`SR-14`) are stored in `vec_shots` like any shot, stamped with `model_id` (`TR-23`), with their JPEG kept (`TR-24`). They rank alongside products. If a negative is top-1 → **UNKNOWN**. As top-2 it still counts toward δ. A negative is never named, priced or shown as a chip. |
+| **TR-39** | Negative shots (`SR-14`) are stored in `product_shots` like any shot (vector as a BLOB — ADR-014), stamped with `model_id` (`TR-23`), with their JPEG kept (`TR-24`). They rank alongside products. If a negative is top-1 → **UNKNOWN**. As top-2 it still counts toward δ. A negative is never named, priced or shown as a chip. |
 
 ### 7.5 Data
 
 | ID | Requirement |
 |---|---|
-| **TR-40** | Single SQLite database file holding both product metadata and the `vec0` virtual table. |
+| **TR-40** | Single SQLite database file holding both product metadata and the shot vectors (`product_shots.embedding`, BLOB). *Amended 2026-09-14 from the `vec0` virtual table — ADR-014.* |
 | **TR-41** | **Money stored as integer centavos.** Floats are forbidden for currency anywhere in the codebase. |
 | **TR-42** | Reference photos: 512 px longest edge, JPEG q80, max 5 per product. |
 | **TR-43** | Photo paths stored **relative** to the document directory, never absolute. |

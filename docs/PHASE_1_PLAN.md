@@ -103,6 +103,11 @@ device. Each step has a *done when*.
 
 ### P1-2 · Storage — first device checkpoint
 
+> **Amended 2026-09-14 (ADR-014).** The checkpoint did its job: op-sqlite's bundled sqlite-vec
+> cannot load on 32-bit ARM (op-sqlite#456). Vectors are now BLOBs in `product_shots`, searched by a
+> pure inline JS loop over an in-memory matrix (9.2 ms at 100 shots, 234 ms at 2,500, measured on
+> the Infinix). The sqlite-vec and `vec0` bullets below are kept as the original plan.
+
 - Add `@op-engineering/op-sqlite` with `"op-sqlite": { "sqliteVec": true }` in `package.json`
   (`TR-13`). **Never enable `libsql` / `turso`** — those are the only paths in the library that open a
   socket (`openSync`, `openRemote`); plain `open()` is local (`TR-51`, source checked 2026-09-14).
@@ -207,7 +212,8 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
 
 ## 7. Design questions P1-2 must settle (not decisions for you — engineering)
 
-- **KNN starvation.** `TR-30` takes `LIMIT 10` from `vec_shots`, then joins products. Once soft delete
+- **KNN starvation.** *Resolved by ADR-014: with search in JS, soft-deleted shots and other
+  `model_id`s are simply left out of the in-memory matrix.* Original note: `TR-30` takes `LIMIT 10` from `vec_shots`, then joins products. Once soft delete
   (`SR-32`) or a second `model_id` exists, stale vectors can fill those 10 slots and hide live
   products. Phase 1 has neither, but schema v1 should not paint Phase 2 into a corner — either filter
   inside the `vec0` query (metadata column, if the bundled version supports it) or delete vectors on
@@ -241,7 +247,7 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
 | What | Where it goes |
 |---|---|
 | Crop+resize vs `runSync` split, CPU vs GPU delegate | `ARCHITECTURE.md` §8 |
-| sqlite-vec KNN latency; policy + stability latency | `ARCHITECTURE.md` §8 (`pending Phase 1` rows) |
+| KNN latency (JS brute force, ADR-014); policy + stability latency | `ARCHITECTURE.md` §8 (`pending Phase 1` rows) |
 | Frame-vs-JPEG embedding agreement | `ARCHITECTURE.md` §4, `PROJECT_STATUS.md` |
 | Bytes per shot / per product (`NFR-08`) | `PROJECT_STATUS.md` measured table |
 | Gate result: counts, self-match scores, ACCEPT vs chip split | `PROJECT_STATUS.md`, `CHANGELOG.md` |

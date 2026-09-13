@@ -2,7 +2,8 @@
 
 > **Last updated:** 2026-09-14 · **Schema version:** 1 · **Model:** `mobilenet_v3_large_embedder_v1`
 >
-> **Stack:** Expo SDK 57 / RN 0.86.3 (ADR-009) · VisionCamera v5.2.3 · react-native-fast-tflite v3.0.1
+> **Stack:** Expo SDK 57 / RN 0.86.3 (ADR-009) · VisionCamera v5.2.3 · react-native-fast-tflite v3.0.1 ·
+> op-sqlite 18.2.1, plain SQLite *(sqlite-vec off: its 32-bit ARM build cannot load — ADR-014)*
 >
 > **Claude: update this document whenever you change the data model, the pipeline, the matching
 > policy, or a core dependency.** See [`../CLAUDE.md`](../CLAUDE.md).
@@ -31,7 +32,7 @@
 │   └─────┬──────┘        └─────┬──────┘                       │
 │         │                     │                              │
 │   ┌─────▼──────┐        ┌─────▼────────────────┐             │
-│   │  TFLite    │        │ SQLite + sqlite-vec  │             │
+│   │  TFLite    │        │ SQLite · BLOB vectors│             │
 │   │ MobileNetV3│        │ bantay.db            │             │
 │   └────────────┘        └──────────────────────┘             │
 │                         ┌──────────────────────┐             │
@@ -75,7 +76,7 @@ crosses that boundary per frame.
 ╚════════╤═══════════════════════════════════════════════════════════════╝
          │  post Float32Array(1280)
 ╔════════▼═══════════════════ JS THREAD ═════════════════════════════════╗
-║  6. sqlite-vec KNN         brute force over ≤2500 vectors    0.5–3 ms  ║
+║  6. JS brute-force KNN     inline loop, in-memory matrix     9–234 ms  ║
 ║  7. Aggregate shots→products   best shot wins per product    <1 ms     ║
 ║  8. τ/δ policy             ACCEPT | DISAMBIGUATE | UNKNOWN   <1 ms     ║
 ║  9. Stability ring buffer  require 3-of-5 agreement          <1 ms     ║
@@ -109,8 +110,8 @@ Tap "Add"
   → duplicate check: KNN vs catalog       (SR-23)  match > τ → "Ganito ba ito?"
   → ONE transaction:                      (TR-45)
        INSERT products
-       INSERT product_shots  × 3–5
-       INSERT vec_shots      × 3–5
+       INSERT product_shots  × 3–5   (photo path + embedding BLOB)
+  → add the vectors to the in-memory search matrix — only after COMMIT succeeds
   → live on the very next frame           (SR-24)
 ```
 
@@ -119,6 +120,18 @@ Tap "Add"
 ## 5. Data Model
 
 Single SQLite file: `documentDirectory/bantay.db`.
+
+**Opening it** (`src/db/open.ts`). op-sqlite is called with the document directory as an explicit,
+absolute `location`. With no location it would put the file in Android's `databases/` folder,
+which is outside the one-file-plus-`photos/` export layout (`TR-46`). Verified on the Infinix: SQLite
+3.51.3 opens `/data/user/0/com.jash.bantaynimama/files/bantay.db` (2026-09-14).
+
+**No sqlite-vec (ADR-014).** op-sqlite's bundled sqlite-vec cannot load on 32-bit ARM: its
+`libsqlite_vec.so` calls `ceil` without declaring `libm.so` (op-sqlite#456). So `package.json` has
+`"sqliteVec": false`. Each shot's vector is a `Float32Array` stored as a BLOB in `product_shots`,
+and that round trip is bit-exact on device. Search runs in JS over an in-memory matrix built from
+those rows (§3, §8). A native index can be added later without a data migration, because it is
+rebuilt from the BLOBs.
 
 ```sql
 CREATE TABLE products (
@@ -140,13 +153,8 @@ CREATE TABLE product_shots (
   product_id TEXT NOT NULL REFERENCES products(id),
   photo_path TEXT NOT NULL,           -- RELATIVE to documentDirectory (TR-43)
   model_id   TEXT NOT NULL,           -- stamp: which model produced this vector (TR-23)
+  embedding  BLOB NOT NULL,           -- Float32 × embedding_dim, L2-normalized (TR-22, ADR-014)
   created_at INTEGER NOT NULL
-);
-
-CREATE VIRTUAL TABLE vec_shots USING vec0(
-  shot_id    TEXT PRIMARY KEY,
-  product_id TEXT,
-  embedding  FLOAT[1280]              -- L2-normalized at write time (TR-22)
 );
 
 CREATE TABLE price_history (
@@ -172,6 +180,9 @@ CREATE INDEX idx_shots_product     ON product_shots(product_id);
 4. **One product owns 3–5 vectors**, one per shot. Matching aggregates shots → products.
 5. **Enrollment is one transaction.** A half-written product with vectors but no metadata will
    produce confident matches against a nonexistent item (TR-45).
+6. **The in-memory search matrix is derived, never authoritative** (ADR-014). It is rebuilt from
+   `product_shots` at startup and extended only after an enrollment commits. It leaves out
+   soft-deleted products and vectors from any other `model_id`.
 
 ---
 
@@ -201,7 +212,7 @@ flickering between neighbours.
 The pseudocode above is literal, with these edge cases pinned down by tests:
 
 - **Entry point.** `match(rows, { tau, delta })` is `decide(rankProducts(rows), …)`. Rows carry
-  **cosine similarity**. The DB layer converts sqlite-vec distances before calling (P1-2).
+  **cosine similarity**, which the JS search computes directly as a dot product (ADR-014).
 - **Ties.** Equal product scores rank by `productId` in code-unit order, so the result does not
   depend on the phone's locale. An **exact top-1 / top-2 tie always disambiguates**, even at
   δ = 0, because accepting would be a coin flip.
@@ -326,6 +337,8 @@ BantayNiMama/
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   ├── db/                    ← schema, migrations, repositories
+│   │   ├── open.ts            ← openDatabase(): bantay.db in documentDirectory (TR-46)
+│   │   └── probe.ts           ← TEMPORARY P1-2 checkpoint; removed when schema v1 lands
 │   ├── features/
 │   │   ├── scanner/
 │   │   ├── enrollment/
@@ -354,7 +367,8 @@ a `require()` that works throughout development fails on the first release build
 | Crop + resize | 1–3 ms | not isolated — folded into the row below |
 | TFLite inference | 8–40 ms | not isolated — folded into the row below |
 | **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **Release: median 145.5 ms, p90 160.1 ms, range 126.5–339.5 ms** (n = 226 test frames). Debug: 140–248 ms, median ~148 ms (7 spot readings). See note. |
-| sqlite-vec KNN | 0.5–3 ms | _pending Phase 1_ |
+| sqlite-vec KNN | 0.5–3 ms | **Could not run** — sqlite-vec does not load on 32-bit ARM (§5). Measured as a substitute: **JS brute force, 100 shots median 9.2 ms; 2,500 shots median 234.0 ms** (inline loop over one `Float32Array`, n = 10), and 831.1 ms at 2,500 when calling `dot()` per shot. Infinix X6823, release APK, 2026-09-14. |
+| Read vectors from SQLite | — | **56.3 ms** for 2,500 × 1280-d BLOBs, bit-exact round trip. Same device and date. |
 | Policy + stability | <2 ms | _pending Phase 1_ |
 | **Total per frame** | **≤ 60 ms** (NFR-07) | _pending — but already exceeded by the row above_ |
 
@@ -389,11 +403,15 @@ min 126.5, median 145.5, p90 160.1, max 339.5 ms. Same device.
 
 ## 9. Architectural Constraints
 
-- **No ANN index.** 500 SKUs × 5 shots = 2,500 vectors. Brute-force cosine is sub-millisecond.
-  HNSW here is complexity for zero gain. Revisit only above ~50,000 vectors.
+- **No ANN index.** 500 SKUs × 5 shots = 2,500 vectors, few enough for brute force. The original
+  "sub-millisecond" figure was an estimate for native code. The JS brute force used for now
+  (ADR-014) **measured 234 ms at 2,500 shots** on the Infinix, which is why native search is still
+  owed for `NFR-09`. HNSW would not fix that and adds complexity; revisit only above ~50,000 vectors.
 - **No backend, no API keys, no auth** (TR-50). If a feature seems to need one, it is out of scope.
 - **No runtime network I/O from any dependency** (TR-51). Audit every package before adding it.
 - **SQLite is the source of truth.** Zustand holds UI state only; never cache catalog data in it.
+  The in-memory search matrix is a derived index rebuilt from SQLite, not a cache of record
+  (ADR-014).
 - **Inference never runs on the JS thread** during live scanning (TR-25). Enrollment is exempt.
 
 ---
