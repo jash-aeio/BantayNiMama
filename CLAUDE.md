@@ -104,6 +104,10 @@ You can run `/feature-done` to walk this checklist.
 - Do not start the next phase before the current phase's gate has been measured and recorded.
 - Flag honestly when something is a known limitation (`L-01`–`L-04`) rather than working around it.
   Two of them are genuinely unsolvable; pretending otherwise ships a feature that fails silently.
+- **Ask questions with the `AskUserQuestion` tool, never as plain text.** Whenever you need the
+  developer to clarify, choose, confirm, or supply an answer, call `AskUserQuestion` instead of
+  writing the question in your reply. Offer concrete options, and put your recommended one first.
+  Don't end a turn with a question that only lives in prose.
 
 ## Commands
 
