@@ -227,3 +227,39 @@ embeddings (`TR-53`; Infinix X6823, 2026-09-13).
 **Note.** This is not a Phase 0 quirk. Every release build of this app hits it, so the resolution step
 belongs in `src/ml/` when Phase 1 replaces the spike — hence a requirement (`TR-29`) rather than a
 runbook footnote.
+
+---
+
+## ADR-012 — `node --test` for the domain layer; the Phase 0 golden replay stays local-only
+
+**Status:** Accepted · 2026-09-14 · Phase 1 decisions D-2 and D-3 (`PHASE_1_PLAN.md` §3)
+
+**Context.** `src/domain/` is where recognition correctness is proven (`TR-37`), so Phase 1 needs a
+test runner. The Phase 0 labeled dataset is the only real ground truth the project has, and the new
+matching policy should be held to it. It is 9.6 MB of JSON and gitignored.
+
+**Decision.**
+1. Run domain tests with **Node's built-in `node --test`** (Node 24 runs `.ts` files directly by
+   stripping types).
+2. The **golden replay** — the new `match.ts` over
+   `spike-dataset-20260913-233955.labeled.json` at τ 0.46 / δ 0.075, asserting 86/91 top-1, 68/91
+   accepts and 3/196 false accepts — reads the file from `spike/results/`. **When the file is
+   absent, the test fails with a message naming the file.** It does not skip.
+
+**Rejected.**
+- *`jest-expo`* (~57.0.5) — the Expo default and better documented. But it adds hundreds of
+  transitive packages, each of which `TR-51` says to audit. The domain layer is pure by rule and
+  needs none of the React Native test environment.
+- *Committing the dataset*, raw or packed to binary (~2.7 MB, estimate). Every clone would carry it
+  forever.
+- *Silently skipping when absent.* A skipped regression test reads as a passing one.
+
+**Consequence.**
+- Domain code is limited to syntax that type stripping can erase: no `enum`, no `namespace`, no
+  constructor parameter properties.
+- It imports siblings by relative path with the `.ts` extension, not through the `@/` alias.
+  `tsconfig.json` needs the matching flags (`allowImportingTsExtensions`, `erasableSyntaxOnly`);
+  confirm them in P1-1.
+- **A fresh clone's `npm test` fails until `spike/results/` is restored from backup.** That is
+  deliberate. It is also why backing up that folder is a Phase 1 prerequisite (`PHASE_1_PLAN.md`
+  §2). `TR-53` is unaffected: the test reads a local file and needs no network.

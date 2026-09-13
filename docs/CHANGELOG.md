@@ -105,6 +105,25 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - `NFR-03`: only **49.5%** (52/105) un-enrolled frames return Unknown; 50 fall into disambiguate.
     `analyze.mjs` prints 97.1% because it counts anything not auto-accepted as rejected.
   - Latency, release APK: median 145.5 ms, p90 160.1 ms, max 339.5 ms (n = 226); `NFR-07` not met.
+- `docs/PHASE_1_PLAN.md` — Phase 1 plan, approved 2026-09-14. It sets out the readiness verdict,
+  housekeeping, and work steps P1-1 to P1-8 in risk order: a device checkpoint for
+  op-sqlite + sqlite-vec comes first. It also lists what is deferred to Phases 2–4, the risks
+  carried in (`NFR-07` latency, the untested frame-vs-JPEG enrollment gap), and the measurements
+  Phase 1 must record. Decisions settled with the operator:
+  - **D-1 gate:** after force stop and relaunch, row counts, `app_meta` and photo paths must
+    survive. Every stored JPEG must re-embed to its own nearest vector (`TR-24`). Each of 20
+    products must lock correctly or appear as a disambiguation chip (`TR-32`, `TR-33`). Any
+    wrong lock fails the gate (`NFR-02`).
+  - **D-2:** `node --test` for `src/domain/` (ADR-012).
+  - **D-3:** the golden replay of the Phase 0 dataset is a local-only test that fails loudly
+    when the file is absent (ADR-012).
+  - **D-4:** Claude drafts `fil.json` and the operator corrects it (`SR-42`).
+- Checked before planning (2026-09-14):
+  - `@op-engineering/op-sqlite` 18.2.1 bundles `libsqlite_vec.so` for `armeabi-v7a`, the test
+    phone's ABI.
+  - Its only socket-opening paths are `openSync` / `openRemote`, which need the `libsql` build
+    flag (`TR-51`).
+  - `scripts/analyze.mjs` and `relabel.mjs` import nothing from `src/spike/`.
 
 ### Changed
 - Phase 0 gate **verified** with `/phase-gate` (2026-09-13). The result was reproduced from the

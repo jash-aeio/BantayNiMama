@@ -1,7 +1,7 @@
 # BantayNiMama — Project Specification
 
-> **Status:** Approved · **Version:** 1.0 · **Last updated:** 2026-09-12
-> **Owner:** Jasper · **Phase:** 0 (Embedding Viability Spike)
+> **Status:** Approved · **Version:** 1.0 · **Last updated:** 2026-09-14
+> **Owner:** Jasper · **Phase:** 1 (Proof of concept — real data path; Phase 0 gate passed 2026-09-13)
 
 Offline-first, AI-assisted visual product scanner for Philippine sari-sari stores.
 Point the camera at a product; see its name and price. Teach it new products in seconds.
@@ -238,6 +238,7 @@ These ship as documented limitations, not bugs. Do not open issues to "fix" them
 ## 10. Related Documents
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — system design, data flow, schema
+- [`PHASE_1_PLAN.md`](./PHASE_1_PLAN.md) — Phase 1 work breakdown, gate and deferrals
 - [`PHASE_0_RUNBOOK.md`](./PHASE_0_RUNBOOK.md) — how to run the Phase 0 spike and what it needs from you
 - [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) — current phase, gates, what's next
 - [`CHANGELOG.md`](./CHANGELOG.md) — what shipped, when
