@@ -4,8 +4,8 @@
 > decided.** Keep it short — it is a dashboard, not a journal. The journal is `CHANGELOG.md`.
 
 **Last updated:** 2026-09-13
-**Current phase:** Phase 0 — Embedding Viability Spike
-**Overall health:** 🟡 Unvalidated — the core thesis has not yet been tested
+**Current phase:** Phase 1 — Proof of concept, real data path *(Phase 0 gate passed and verified 2026-09-13)*
+**Overall health:** 🟢 Core thesis holds at the Phase 0 gate — latency (`NFR-07`) and un-enrolled handling are open
 
 ---
 
@@ -13,12 +13,12 @@
 
 | | |
 |---|---|
-| **Working on** | Phase 0 spike — **release APK runs untethered and loads the model** (2026-09-13). Awaiting store data. |
-| **Next action** | Enroll ~20 products × 3–5 shots (A-3) — 8 products × 1 shot so far; undo/delete controls installed (2026-09-13), then ~100 labeled test frames (A-4) — **on a shelf, not at a desk**. See [`PHASE_0_RUNBOOK.md`](./PHASE_0_RUNBOOK.md). |
-| **Blocked on** | Reference shots of ~20 real products (A-3), then ~100 labeled test frames (A-4). Nothing technical is blocking. |
-| **Watch out for** | Per-frame latency **140–248 ms** vs a 25–40 ms budget — `NFR-07` is not met. Does not block the accuracy gate; see `ARCHITECTURE.md` §8. Release build is **not** materially faster (on-screen spot readings 140.7 / 144.0 ms), so the debug figure stands until a dataset run replaces it. |
-| **Known soft spot** | If enrollment is shot at a desk rather than on a shelf, the gate number is optimistic and Phase 3 will regress against it. Record the capture setting alongside the number. |
-| **Biggest risk** | Q-1 — unproven that a generic embedding model separates sari-sari SKUs |
+| **Working on** | **Phase 1 — real data path.** Phase 0 gate verified by `/phase-gate` (2026-09-13): top-1 **94.5%** (86/91) on 19 gated products, reproduced from the raw phone backup (SHA-256 `a9f9232c…`) through `relabel.mjs` → `analyze.mjs`. |
+| **Next action** | Start Phase 1 toward its gate: enroll 20 → force-quit → relaunch → scan all 20, on a physical device. Carry forward: τ 0.46 / δ 0.075 go into `app_meta` (`TR-35`), never constants. |
+| **Blocked on** | Nothing. |
+| **Watch out for** | Per-frame latency **median 145.5 ms, p90 160.1 ms** on the release APK (n = 226) vs a 25–40 ms budget — `NFR-07` is not met, and the release build did not fix it. See `ARCHITECTURE.md` §8. |
+| **Known soft spot** | **Un-enrolled products.** At τ/δ, 50 of 105 un-enrolled frames land in *disambiguate* (two wrong chips), so only 49.5% return Unknown (`NFR-03` ≥ 85%, not met). `analyze.mjs`'s 97.1% counts "not auto-accepted". All 3 false accepts are Zonrox bottles → Datu Puti vinegar. |
+| **Biggest risk** | Correct accepts are **74.7%** at τ/δ vs `NFR-01` ≥ 90%. Ranking is strong (top-3 100%) but margins are thin, so many correct matches fall to disambiguate. A Phase 3 problem — the Phase 0 gate measures ranking only. |
 
 ---
 
@@ -26,8 +26,8 @@
 
 | Phase | Name | Status | Gate |
 |---|---|---|---|
-| **0** | Embedding viability spike | 🔵 In progress | ≥ 85% top-1 on non-ambiguous items |
-| 1 | Proof of concept — real data path | ⚪ Not started | Enroll 20 → force-quit → relaunch → scan all 20 |
+| **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
+| **1** | Proof of concept — real data path | 🔵 In progress | Enroll 20 → force-quit → relaunch → scan all 20 |
 | 2 | UI / UX | ⚪ Not started | — |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
@@ -57,15 +57,23 @@ Legend: ⚪ not started · 🔵 in progress · 🟢 passed gate · 🔴 gate fai
       `MalformedURLException` because `react-native-fast-tflite` cannot address a `require()`d asset
       outside Metro. Fixed by resolving through `expo-asset` (`TR-29`, ADR-011). Re-verified on the
       Infinix X6823, including **in airplane mode** (`TR-53`) *(2026-09-13)*.
-- [ ] ~20 reference products captured — including the near-identical pairs:
-  - [ ] Two Nissin ramen variants (same brand, different variant)
-  - [ ] Creamy white solo vs twin pack (tests L-02)
-  - [ ] ~~Two repacked clear bags (L-01)~~ — not in the set on hand; L-01 stays unmeasured
+- [x] ~20 reference products captured — **25 products × 6 shots (150 shots)**, 2026-09-13
+      (first 26 × 6; oil repacks swapped for monggo, Nescafe twin swapped — see CHANGELOG).
+      Capture setting: **held in hand under store lighting** (operator-reported). Test frames must
+      span shelf / in hand / counter so the gate is not measured on the enrollment setting alone.
+  - [x] Two Nissin ramen variants (same brand, different variant)
+  - [x] Creamy white solo 20g vs true twin pack 40g — size-only, so `ambiguous:` (L-02). Runbook A-3.
+  - [x] Size families (L-02): `dishwashing-liquid-green-500ml` / `-1liter`, `monggo-pack-10p` / `-20p`,
+        Nescafe solo / twin — all `ambiguous:`. **19 of 25 products gated.**
+  - [x] Repacked clear bags (L-01) — the `monggo-pack-*` repacks
 - [x] In-JS cosine match, top-3 printed on screen with scores
-- [ ] ~100 labeled test frames collected
-- [x] Top-1 / top-3 accuracy computed — `scripts/analyze.mjs`, verified on synthetic data (PASS and FAIL paths)
-- [x] Score histogram produced; **τ and δ read off it** — sweep implemented, constrained to the NFR-02 ceiling
-- [ ] **GATE:** ≥ 85% top-1 on non-ambiguous items
+- [x] ~100 labeled test frames collected — **230 recorded, 226 after `scripts/relabel.mjs`** (91 gated ·
+      30 `ambiguous:` · 105 `unknown:`), 2026-09-13, release APK. Setting split **2 shelf / 2 in hand /
+      1 counter per product** (operator-reported; frames do not record it, so per-setting accuracy
+      cannot be computed). `happy-absorbent-cotton-10g` has only 1 frame.
+- [x] Top-1 / top-3 accuracy computed — top-1 **94.5%** (86/91), top-3 **100%**
+- [x] Score histogram produced; **τ = 0.46, δ = 0.075** read off it — `ARCHITECTURE.md` §6
+- [x] **GATE PASSED:** ≥ 85% top-1 on non-ambiguous items → **94.5%** (86/91; 95% CI 87.8–97.6%)
 
 ### If the gate fails
 
@@ -82,13 +90,17 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 
 | Metric | Target | Measured | Date |
 |---|---|---|---|
-| Top-1 accuracy (non-ambiguous) | ≥ 85% | — | — |
-| Top-3 accuracy | — | — | — |
-| τ (tau) | — | — | — |
-| δ (delta) | — | — | — |
+| Top-1 accuracy (non-ambiguous) | ≥ 85% | **94.5%** (86/91; 95% CI 87.8–97.6%) — 19 gated products | 2026-09-13 |
+| Top-1 accuracy, all enrolled incl. `ambiguous:` | — | **92.6%** (112/121); all 30 ambiguous frames land in the right size family | 2026-09-13 |
+| Top-3 accuracy (non-ambiguous) | — | **100%** (91/91) | 2026-09-13 |
+| τ (tau) | — | **0.46** — admits 95% of correct top-1s (p05 0.465) | 2026-09-13 |
+| δ (delta) | — | **0.075** — wrong enrolled matches all had margin ≤ 0.039; set higher to hold un-enrolled FP under 2% | 2026-09-13 |
+| Correct accepts at τ/δ (`NFR-01`) | ≥ 90% | **74.7%** (68/91) — not met; 19 go to disambiguate, 4 to unknown | 2026-09-13 |
+| False positives at τ/δ (`NFR-02`) | ≤ 2% | **1.5%** (3/196; 95% CI 0.5–4.4%) — all three are Zonrox bottles → Datu Puti vinegar | 2026-09-13 |
+| Unknown rejection (`NFR-03`) | ≥ 85% | **49.5%** (52/105) return Unknown — not met. 97.1% (102/105) are not auto-accepted; the other 50 land in disambiguate | 2026-09-13 |
 | Embedding dimensionality | assumed 1024 | **1280** | 2026-09-13 |
 | Per-frame worklet latency, budget Android | 25–40 ms | **140–248 ms, median ~148** — Infinix X6823 (Unisoc T616, armeabi-v7a), **debug build**; covers crop+resize+inference+L2 as one | 2026-09-13 |
-| Same, release build | 25–40 ms | **140.7 and 144.0 ms** — same device, release APK. Two on-screen readings only, not a dataset run; enough to show the release build is not materially faster, not enough for a distribution. | 2026-09-13 |
+| Same, release build | 25–40 ms | **median 145.5 ms · p90 160.1 · range 126.5–339.5** — Infinix X6823, release APK, n = 226 test frames. Earlier spot readings (140.7 / 144.0 ms) agree. | 2026-09-13 |
 | Inference latency, iOS | 8–15 ms | — | — |
 
 ---
@@ -97,8 +109,8 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 
 | # | Question | Owner | Needed by |
 |---|---|---|---|
-| Q-1 | Does MobileNetV3 clear the 85% gate? | Phase 0 measurement | Now |
-| Q-2 | Empirical τ and δ | Phase 0 measurement | Now |
+| Q-1 | ~~Does MobileNetV3 clear the 85% gate?~~ **Yes — 94.5%** | Phase 0 measurement | Resolved 2026-09-13 |
+| Q-2 | ~~Empirical τ and δ~~ **τ 0.46, δ 0.075** (Phase 0; retune in Phase 3) | Phase 0 measurement | Resolved 2026-09-13 |
 | Q-3 | MobileCLIP vs MobileNetV3 | Phase 3 bake-off | Phase 3 |
 | Q-4 | INT8 accuracy cost | Phase 3 | Phase 3 |
 

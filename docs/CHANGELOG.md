@@ -56,8 +56,71 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   wrong" (`NFR-02`), are in `PHASE_0_RUNBOOK.md`. Release APK rebuilt (3m 12s) and installed on
   the Infinix X6823 as an upgrade; the existing 8-shot dataset survived and *Undo last shot*
   renders with its label. The three actions themselves have **not yet been exercised** on device.
+- `scripts/analyze.mjs`: warns, before any numbers, about test-frame labels that match no enrolled
+  product (after stripping `ambiguous:`; `unknown:` frames are skipped). Collect-mode labels are
+  typed by hand, and a typo'd label silently scores as a top-1 miss. Verified on a 6-frame
+  synthetic fixture: flags exactly the two mis-spelt labels, passes the correct and `unknown:` ones.
+- `PHASE_0_RUNBOOK.md` A-4: test frames must span settings (shelf / in hand / counter), because
+  enrollment was shot held in hand under store lighting. A-3 records the dishwashing-liquid and
+  cooking-oil size families as further `L-02` cases.
+- `PHASE_0_RUNBOOK.md`: labelling decisions for the gate, fixed before any test frame — oil repacks
+  and dishwashing-liquid sizes are `ambiguous:` (`L-01`, `L-02`); the Nescafe solo / sugar-free
+  twin pair counts in the gate as a variant pair. 21 of 26 products are gated. Also documents the
+  USB export route (debug-APK swap + `run-as`), because this phone's share sheet has no local
+  save target and Bluetooth failed.
+- Phase 0 spike app: *Save dataset to folder* — writes a timestamped copy of the dataset into a
+  folder picked with the Android folder picker (`expo-file-system` `Directory.pickDirectoryAsync`,
+  already a dependency; local storage only, `TR-50`). The folder is reused for the rest of the
+  session and no copy overwrites another. Added because this phone's share sheet offers no local
+  save target. Release APK rebuilt (Gradle 3m 59s), same signing certificate, installed on the
+  Infinix X6823 as an upgrade. **Verified on device** (2026-09-13): saved
+  `Download/BantayNiMama/spike-dataset-20260913-134211.json`, 4,022,207 bytes, SHA-256 identical to
+  the pre-upgrade USB copy — so the upgrade kept all 156 shots and the save is byte-exact. The
+  second-tap folder reuse was not exercised.
+- `scripts/relabel.mjs`: ground-truth corrections for test-frame labels, applied on the laptop
+  because the app cannot edit an old frame. Writes a new file and never overwrites the phone
+  backup; idempotent, so it re-applies to later exports. It holds only operator-mistake rules, and
+  every rule was decided before any analysis ran (runbook A-4, `NFR-02`). Applied to
+  `spike-dataset-20260913-232309.json` (225 frames → 221) and `-233955.json` (230 → 226; adds the
+  5 retaken egg frames):
+  - `unknown:` added to 21 un-enrolled products (105 frames, `NFR-03`), including `oil-pack-5p`,
+    which was removed from the catalog.
+  - The Nescafe solo / twin frames get `ambiguous:` (`L-02`).
+  - The Nissin spicy seafood `55g` typo becomes the enrolled `59g`.
+  - 4 frames labelled Dove pink are dropped: the model put egg first, and the operator could not
+    confirm they were eggs, so relabelling from the model's guess would have scored them correct
+    by construction.
+- **Phase 0 gate PASSED** (2026-09-13). Infinix X6823, release APK, `mobilenet_v3_large_embedder_v1`
+  (1280-d), 25 products × 6 shots. Test frames (A-4): 230 recorded, 226 after `relabel.mjs` —
+  91 gated + 30 `ambiguous:` + 105 `unknown:`, split 2 shelf / 2 in hand / 1 counter per product
+  (operator-reported). Source: `spike-dataset-20260913-233955.labeled.json`.
+  - Gate (Q-1): top-1 **94.5%** (86/91; 95% CI 87.8–97.6%) ≥ 85% → **PASS**. Top-3 **100%**.
+    Including `ambiguous:` frames, top-1 92.6% (112/121), and all 30 land in the right size family.
+  - The 5 misses: Dove pink → blue ×2, Dove blue → pink, Datu Puti vinegar bottle → Clover chips,
+    Datu Puti sakto vinegar → Colgate sachet. The Nissin pair was 10/10.
+  - Distributions: correct top-1 p05 0.465, median 0.653; wrong top-1 0.486–0.642; un-enrolled
+    top-1 median 0.460. Correct margins median 0.169; wrong margins all ≤ 0.039.
+  - τ = 0.46, δ = 0.075 (Q-2): correct accepts **74.7%** (`NFR-01` ≥ 90%, not met); false
+    positives **1.5%** (3/196, `NFR-02` ≤ 2%), all Zonrox bottles accepted as Datu Puti vinegar.
+  - `NFR-03`: only **49.5%** (52/105) un-enrolled frames return Unknown; 50 fall into disambiguate.
+    `analyze.mjs` prints 97.1% because it counts anything not auto-accepted as rejected.
+  - Latency, release APK: median 145.5 ms, p90 160.1 ms, max 339.5 ms (n = 226); `NFR-07` not met.
 
 ### Changed
+- Phase 0 gate **verified** with `/phase-gate` (2026-09-13). The result was reproduced from the
+  raw phone backup `spike-dataset-20260913-233955.json` (SHA-256 `a9f9232c…`, matching the phone
+  copy): `relabel.mjs` rebuilt the `.labeled.json` byte for byte, and `analyze.mjs` again gave
+  top-1 94.5% (86/91) → PASS. Phase 1 is now in progress.
+- Phase 0 catalog is now **25 products × 6 shots (150)**, down from 26 × 6:
+  - Removed: `oil-pack-5p` / `-10p` / `-20p`. Added: `monggo-pack-10p` / `-20p` (repacks, still
+    `L-01` + `L-02`, `ambiguous:`).
+  - `nescafe-creamywhite-sugarfree-twin-pack-22.4g` was replaced by
+    `nescafe-creamywhite-twin-pack-40g`, the true twin of the solo pack. That makes the pair
+    size-only, so under the fixed size-family rule it is `ambiguous:`, not gated.
+  - Gated products: 21 → 19. Runbook A-3 amended; the change was made before any analysis ran.
+- `docs/PROJECT_STATUS.md`: A-3 recorded from the exported dataset — 26 products × 6 shots
+  (156 shots, 1280-d, `mobilenet_v3_large_embedder_v1`), held in hand under store lighting.
+  `L-01` moves from "unmeasured" to in the set (oil repacks).
 - Phase 0 capture now runs from a **release-variant APK** rather than the debug build. A debug
   build streams its JS from the Metro dev server over USB, which pinned the phone to the laptop
   and would have forced A-3 to be shot at a desk — the one failure mode `PHASE_0_RUNBOOK.md`

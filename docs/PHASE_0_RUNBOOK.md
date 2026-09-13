@@ -33,6 +33,34 @@ cannot be picked out — delete the product and re-shoot it instead.
 *Export dataset JSON* hands `spike-dataset.json` to the Android share sheet. Get it onto the
 laptop any way you like — USB, SD card, a file manager. **No network path is used or needed.**
 
+*Save dataset to folder* is the backup to use during collection — no laptop needed. The first
+tap opens Android's folder picker; later taps in the same app session reuse that folder. Every
+save is a **new** file, `spike-dataset-YYYYMMDD-HHMMSS.json`, so no backup is ever overwritten.
+Android 11+ will not let an app pick the root of internal storage or the `Download` folder itself,
+so in the picker create a subfolder — e.g. `Download/BantayNiMama` — and pick that. To collect the
+backups on the laptop:
+
+```powershell
+adb pull /sdcard/Download/BantayNiMama spike/results/
+```
+
+> **On the Infinix X6823 the share sheet has no local target** (2026-09-13). Only 8 apps accept
+> `application/json`: Bluetooth, Quick Share, XShare, and five that upload (Gmail, Messenger,
+> Viber, WhatsApp, WPS) — the uploaders are off-limits (`TR-50`). Bluetooth to the laptop failed
+> twice. What worked: swap in the debug APK, which is `debuggable` and signed with the same key,
+> so `adb install -r` keeps app data; copy the file with `run-as`; reinstall the release APK.
+>
+> ```powershell
+> adb install -r android\app\build\outputs\apk\debug\app-debug.apk
+> cmd /c "adb exec-out run-as com.jash.bantaynimama cat files/spike-dataset.json > spike\results\spike-dataset.json"
+> adb shell run-as com.jash.bantaynimama sha256sum files/spike-dataset.json   # compare with Get-FileHash
+> adb install -r android\app\build\outputs\apk\release\app-release.apk
+> ```
+>
+> Do not open the app while the debug APK is installed — without Metro it only shows an error.
+> Check that both APKs still share a signing certificate (`apksigner verify --print-certs`) before
+> swapping: a mismatch makes the install fail, and uninstalling to "fix" it deletes the dataset.
+
 Then, on the laptop:
 
 ```bash
@@ -143,13 +171,36 @@ brands do not matter; the *shape* of the confusion does. Two classes are require
 | Class | Why it matters | Example on hand (2026-09-13) |
 |---|---|---|
 | **Same brand, different variant** | Near-identical artwork, different product and price. This is the sharpest test of whether the embedder separates SKUs at all. | Two Nissin ramen variants |
-| **Same product, different pack size** | Tests `L-02`. Solo and twin-pack share the artwork; only the count differs. | Creamy white solo vs twin pack |
+| **Same product, different pack size** | Tests `L-02`. Solo and twin-pack share the artwork; only the count differs. | `nescafe-creamywhite-solo-pack-20g` vs `nescafe-creamywhite-twin-pack-40g`; `dishwashing-liquid-green-500ml` vs `-1liter`; `monggo-pack-10p` / `-20p` |
+| **Same brand, different product** | Same bottle and label layout, different contents and price. | `datu-puti-bottle-soysauce-385ml` vs `datu-puti-bottle-vinegar-385ml`; `dove-shampoo-blue-sachet` vs `dove-shampoo-pink-sachet` |
 
 Plus ~18 ordinary SKUs to fill out the catalog.
 
-> **Not covered by the current set:** two repacked clear bags (`L-01`). `L-01` is already an
-> accepted limitation with a quick-pick-grid workaround, so leaving it unmeasured costs nothing —
-> but do not later read a passing gate as evidence that clear-bag repacks work. They were not tested.
+> **Repacked clear bags (`L-01`) are in the set** as `monggo-pack-10p` / `-20p` — store-repacked
+> mung beans sold by peso value. They are both `L-01` (clear bag, little artwork) and `L-02` (same
+> contents, different size). They replaced the `oil-pack-*` repacks, which were removed from the
+> catalog; the `oil-pack-5p` test frames are kept as `unknown:` hard negatives.
+
+**Labelling decisions — fixed 2026-09-13, before any test frame was recorded.** Deciding after
+seeing results would be moving the goalposts, so these do not change once collection starts.
+
+*Amended 2026-09-13, after the catalog changed and **before any analysis ran**:* oil → monggo
+follows the same repack rule. The Nescafe twin is now the true twin of the solo, not a sugar-free
+variant, so the pair falls under the existing size-family rule.
+
+| Products | Test-frame label | Why |
+|---|---|---|
+| `monggo-pack-10p` / `-20p` | `ambiguous:` prefix | `L-01` + `L-02`; the app handles them with the quick-pick grid |
+| `dishwashing-liquid-green-500ml` / `-1liter` | `ambiguous:` prefix | `L-02`; the app handles it with the size chip (`SR-09`) |
+| `nescafe-creamywhite-solo-pack-20g` / `-twin-pack-40g` | `ambiguous:` prefix | `L-02`: same variant, only the count differs |
+| Every other product, including the Nissin pair, `datu-puti` soy sauce vs vinegar, and the Dove sachets | plain — counts in the gate | |
+
+That leaves 19 of 25 products in the gate. `ambiguous:` products stay in the catalog, so other
+products' frames can still be mis-matched *to* them — those misses still count.
+
+**Label fixes after collection go in `scripts/relabel.mjs`, never by hand-editing the JSON.** The
+phone backup stays the raw record; the script writes a `.labeled.json` copy and holds every
+correction with its reason. Run it before `analyze.mjs` on each new export.
 
 **Labelling convention that the analysis script depends on:** prefix the known-unsolvable items
 with `ambiguous:` — for example `ambiguous:repack-sugar-1kg`. The script excludes those from the
@@ -163,6 +214,12 @@ Use lowercase-hyphenated labels: `palmolive-green-sachet`, `kopiko-3in1`, `coke-
 In **collect** mode, in the store, pointing at products you have already enrolled. Vary angle,
 distance and lighting — that variation is the measurement. Roughly 5 frames per product across
 20 products gets you to 100.
+
+**Vary the setting too, not just the pose.** The app has to recognise a product wherever the
+tindera meets it — on the shelf, held in hand, on the counter. Enrollment (2026-09-13) was shot
+**held in hand under store lighting**, so test frames taken the same way would measure the easy
+case only. Spread each product's frames across settings, e.g. 2 on the shelf, 2 in hand, 1 on the
+counter, and note the split in the spike report.
 
 Record some frames of **un-enrolled** products too, labelled `unknown:<whatever>` — roughly 15 of
 the 100. `NFR-03` wants ≥85% correct rejection and you cannot measure rejection without negatives.
