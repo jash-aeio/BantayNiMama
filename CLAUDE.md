@@ -108,8 +108,8 @@ You can run `/feature-done` to walk this checklist.
 ## Commands
 
 ```bash
-npm run typecheck     # tsc --noEmit
-npm test              # domain unit tests
+npm run typecheck     # tsc on the app, then on src/domain/ tests (tsconfig.test.json)
+npm test              # domain unit tests + Phase 0 golden replay (needs spike/results/ — ADR-012)
 npx expo start --dev-client   # requires a development build; Expo Go will NOT work (TR-03)
 ```
 

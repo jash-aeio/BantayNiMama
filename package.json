@@ -7,8 +7,8 @@
     "start": "expo start --dev-client",
     "android": "expo run:android",
     "ios": "expo run:ios",
-    "typecheck": "tsc --noEmit",
-    "test": "node -e \"console.log('No domain tests yet: src/domain/ and its unit tests arrive in Phase 1 (TR-37). Phase 0 is throwaway by design.')\"",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/domain/**/*.test.ts\"",
     "fetch-model": "node scripts/fetch-model.mjs",
     "analyze": "node scripts/analyze.mjs"
   },
@@ -29,6 +29,7 @@
     "react-native-worklets": "0.10.1"
   },
   "devDependencies": {
+    "@types/node": "~22.20.2",
     "@types/react": "~19.2.2",
     "babel-preset-expo": "~57.0.11",
     "typescript": "~6.0.3"

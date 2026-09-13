@@ -124,8 +124,41 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - Its only socket-opening paths are `openSync` / `openRemote`, which need the `libsql` build
     flag (`TR-51`).
   - `scripts/analyze.mjs` and `relabel.mjs` import nothing from `src/spike/`.
+- **P1-1 — `src/domain/`, the pure domain layer** (2026-09-14). 40 tests under `node --test`;
+  no device and no network needed (`TR-37`, `TR-53`).
+  - `match.ts` — groups shots into products by best shot, then ACCEPT / DISAMBIGUATE / UNKNOWN
+    at τ/δ (`TR-30`–`TR-35`). Beyond the spike's `decide()`:
+    - an exact top-1/top-2 tie never auto-accepts;
+    - a NaN or out-of-range τ/δ throws instead of accepting everything (`NFR-02`);
+    - non-finite similarities are dropped.
+  - `stability.ts` — 3-of-5 lock (`TR-36`, `SR-12`). A disambiguation pair agrees in either
+    order, Unknown can lock, and the lock returns the newest agreeing decision.
+  - `money.ts` — `parsePesos` works on the typed digits, never a float (`"0.29"` → `29`), and
+    rejects anything it would have to round. `formatCentavos` renders `₱1,250.00` (`TR-41`,
+    ADR-007).
+  - `vector.ts` — `dot` throws on a dimension mismatch rather than truncating (`TR-23`);
+    `l2Normalize` refuses a zero or NaN vector (`TR-22`).
+  - `match.golden.test.ts` — replays the Phase 0 labeled dataset through the new policy. It
+    reproduces the gate exactly: top-1 86/91; enrolled frames 68 / 19 / 4
+    (accept / disambiguate / unknown); un-enrolled frames 3 / 50 / 52; all 3 false accepts →
+    Datu Puti vinegar. It also proves `TR-30`'s `LIMIT 10` never changes top-1 or top-2 on that
+    data. **Verified:** without `spike/results/` it fails with restore instructions rather than
+    skipping (ADR-012).
+- `@types/node` ~22.20.2 as an explicit devDependency. It was already installed, but only as a
+  dependency of another package; it is types only, with no runtime code (`TR-51`).
+- `tsconfig.test.json` — typechecks `src/domain/` with Node types. TypeScript 6 no longer loads
+  every installed `@types` package by default. Adding `node` globally would leak Node's types
+  (e.g. `setTimeout`'s return type) into React Native app code, so test files are excluded from
+  the app typecheck and checked separately.
 
 ### Changed
+- `npm test` runs the domain tests instead of printing a placeholder:
+  `node --test "src/domain/**/*.test.ts"`, with Node's `MODULE_TYPELESS_PACKAGE_JSON` warning
+  silenced. Adding `"type": "module"` to `package.json` would break the CommonJS
+  `babel.config.js` and `metro.config.js`. `npm run typecheck` now runs `tsc` twice: once on the
+  app, once on `tsconfig.test.json`.
+- `tsconfig.json`: `allowImportingTsExtensions` and `erasableSyntaxOnly` enabled, and
+  `**/*.test.ts` excluded (ADR-012).
 - Phase 0 gate **verified** with `/phase-gate` (2026-09-13). The result was reproduced from the
   raw phone backup `spike-dataset-20260913-233955.json` (SHA-256 `a9f9232c…`, matching the phone
   copy): `relabel.mjs` rebuilt the `.labeled.json` byte for byte, and `analyze.mjs` again gave

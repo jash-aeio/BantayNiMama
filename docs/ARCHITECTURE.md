@@ -1,6 +1,6 @@
 # BantayNiMama — Architecture
 
-> **Last updated:** 2026-09-12 · **Schema version:** 1 · **Model:** `mobilenet_v3_large_embedder_v1`
+> **Last updated:** 2026-09-14 · **Schema version:** 1 · **Model:** `mobilenet_v3_large_embedder_v1`
 >
 > **Stack:** Expo SDK 57 / RN 0.86.3 (ADR-009) · VisionCamera v5.2.3 · react-native-fast-tflite v3.0.1
 >
@@ -196,6 +196,40 @@ Then the **temporal stability gate** (TR-36): push each decision into a 5-slot r
 locked result only when 3 of 5 agree on the same `product_id`. This is what stops the overlay from
 flickering between neighbours.
 
+### As implemented — `src/domain/` (P1-1, 2026-09-14)
+
+The pseudocode above is literal, with these edge cases pinned down by tests:
+
+- **Entry point.** `match(rows, { tau, delta })` is `decide(rankProducts(rows), …)`. Rows carry
+  **cosine similarity**. The DB layer converts sqlite-vec distances before calling (P1-2).
+- **Ties.** Equal product scores rank by `productId` in code-unit order, so the result does not
+  depend on the phone's locale. An **exact top-1 / top-2 tie always disambiguates**, even at
+  δ = 0, because accepting would be a coin flip.
+- **Bad thresholds throw.** A NaN τ or δ makes every `<` comparison false, which would turn the
+  policy into "accept everything". Thresholds come from `app_meta` as TEXT, so `decide()` refuses
+  anything non-finite or out of range with a `RangeError`. Non-finite similarities are dropped
+  before ranking.
+- **A lone candidate** at or above τ is ACCEPTed with `margin: null`. **Consequence:** δ does the
+  un-enrolled rejection (see calibration below). In a catalog of one product there is no top-2
+  for δ to act on, and a catalog of a few gives it little to work with. So in the first days of
+  SR-44's "add your first five" flow, un-enrolled items that clear τ will be accepted. How often
+  is **unmeasured**: every Phase 0 number came from a 25-product catalog. Address with SR-44 and
+  the Phase 3 retune.
+- **`LIMIT 10` is safe (TR-30).** The golden replay checks, for all 196 Phase 0 frames, that
+  top-1 and top-2 from the 10 nearest shots equal the full brute-force ranking. That holds while
+  a product has ≤ 6 shots; `TR-42` caps it at 5.
+- **Stability.**
+  - **What agrees:** ACCEPTs agree on the product. DISAMBIGUATEs agree on the **unordered** pair,
+    because near-tied products swap order frame to frame, which is the flicker this gate stops.
+    UNKNOWNs agree with each other, so "Unknown Item" locks too (`SR-04`).
+  - **What is returned:** the lock is the *most recent* decision with the winning key, so the
+    confidence shown is current. It is `null` until something reaches quorum.
+  - **Quorum rule:** quorum must exceed half the window, so two results can never lock at once.
+- **Golden replay.** `match.golden.test.ts` runs this policy over the Phase 0 dataset. It must
+  reproduce 86/91 top-1 and 68 / 19 / 4 accept / disambiguate / unknown on enrolled frames. On
+  un-enrolled frames it must give 3 / 50 / 52, with all 3 false accepts → Datu Puti vinegar
+  (ADR-012).
+
 ### Threshold calibration
 
 `τ` and `δ` live in `app_meta`, **never hard-coded** (TR-35). They are read from the score
@@ -254,7 +288,9 @@ BantayNiMama/
 │   ├── domain/                ← PURE TS. No I/O. Unit-tested.
 │   │   ├── match.ts           ← τ/δ policy
 │   │   ├── stability.ts       ← ring buffer
-│   │   └── money.ts           ← centavo arithmetic
+│   │   ├── money.ts           ← centavo arithmetic
+│   │   ├── vector.ts          ← dot, L2-normalize
+│   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   ├── db/                    ← schema, migrations, repositories
 │   ├── features/

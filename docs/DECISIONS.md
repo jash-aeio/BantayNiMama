@@ -258,8 +258,15 @@ matching policy should be held to it. It is 9.6 MB of JSON and gitignored.
 - Domain code is limited to syntax that type stripping can erase: no `enum`, no `namespace`, no
   constructor parameter properties.
 - It imports siblings by relative path with the `.ts` extension, not through the `@/` alias.
-  `tsconfig.json` needs the matching flags (`allowImportingTsExtensions`, `erasableSyntaxOnly`);
-  confirm them in P1-1.
+  `tsconfig.json` enables the matching flags, `allowImportingTsExtensions` and
+  `erasableSyntaxOnly` — *confirmed in P1-1, 2026-09-14*.
+- *Found in P1-1:* TypeScript 6 no longer loads every installed `@types` package, so test files
+  cannot see `node:test`. Declaring `node` types globally would leak Node's types into React
+  Native code. Test files are therefore excluded from `tsconfig.json` and typechecked through
+  `tsconfig.test.json`; `npm run typecheck` runs both.
+- *Found in P1-1:* Node warns `MODULE_TYPELESS_PACKAGE_JSON` for each `.ts` test file. The fix
+  it suggests, `"type": "module"`, would break the CommonJS `babel.config.js` and
+  `metro.config.js`, so `npm test` disables that one warning instead.
 - **A fresh clone's `npm test` fails until `spike/results/` is restored from backup.** That is
   deliberate. It is also why backing up that folder is a Phase 1 prerequisite (`PHASE_1_PLAN.md`
   §2). `TR-53` is unaffected: the test reads a local file and needs no network.
