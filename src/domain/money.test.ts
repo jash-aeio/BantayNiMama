@@ -1,7 +1,20 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { formatCentavos, parsePesos } from './money.ts';
+import { formatCentavos, isCentavos, parsePesos } from './money.ts';
+
+describe('isCentavos (TR-41)', () => {
+  test('accepts whole, non-negative centavos', () => {
+    assert.equal(isCentavos(0), true);
+    assert.equal(isCentavos(1250), true);
+  });
+
+  test('rejects floats, negatives, NaN and non-numbers', () => {
+    for (const bad of [12.5, -1, NaN, Infinity, 2 ** 53, '1250', null]) {
+      assert.equal(isCentavos(bad), false, String(bad));
+    }
+  });
+});
 
 describe('parsePesos (TR-41)', () => {
   test('parses the ways a price gets typed', () => {

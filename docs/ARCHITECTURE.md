@@ -134,14 +134,18 @@ those rows (§3, §8). A native index can be added later without a data migratio
 rebuilt from the BLOBs.
 
 ```sql
+-- Schema v1, as src/db/schema.ts (migration 1) creates it.
+-- "centavos" below means: INTEGER CHECK (col IS NULL OR (typeof(col) = 'integer' AND col >= 0))
+-- so SQLite itself rejects a float or negative price (TR-41).
+
 CREATE TABLE products (
-  id              TEXT PRIMARY KEY,   -- uuid
-  name            TEXT NOT NULL,
-  price_piece     INTEGER,            -- centavos; NEVER float (TR-41)
-  price_pack      INTEGER,            -- nullable; the "buo" price (SR-06)
+  id              TEXT PRIMARY KEY,   -- uuid v4
+  name            TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  price_piece     INTEGER,            -- centavos (TR-41)
+  price_pack      INTEGER,            -- centavos; the "buo" price (SR-06)
   unit_label      TEXT,               -- "sachet", "bote", "piraso"
   category        TEXT,
-  is_ambiguous    INTEGER DEFAULT 0,  -- 1 → quick-pick grid, skip recognition (SR-10)
+  is_ambiguous    INTEGER NOT NULL DEFAULT 0 CHECK (is_ambiguous IN (0, 1)),  -- SR-10
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
   last_scanned_at INTEGER,
@@ -153,22 +157,44 @@ CREATE TABLE product_shots (
   product_id TEXT NOT NULL REFERENCES products(id),
   photo_path TEXT NOT NULL,           -- RELATIVE to documentDirectory (TR-43)
   model_id   TEXT NOT NULL,           -- stamp: which model produced this vector (TR-23)
-  embedding  BLOB NOT NULL,           -- Float32 × embedding_dim, L2-normalized (TR-22, ADR-014)
+  embedding  BLOB NOT NULL CHECK (typeof(embedding) = 'blob'),
+                                      -- little-endian Float32 × embedding_dim, L2-normalized (TR-22, ADR-014)
   created_at INTEGER NOT NULL
 );
 
 CREATE TABLE price_history (
-  id TEXT PRIMARY KEY, product_id TEXT, price_piece INTEGER,
-  price_pack INTEGER, changed_at INTEGER
+  id          TEXT PRIMARY KEY,
+  product_id  TEXT NOT NULL REFERENCES products(id),
+  price_piece INTEGER,                -- centavos
+  price_pack  INTEGER,                -- centavos
+  changed_at  INTEGER NOT NULL
 );
 
-CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT);
--- schema_version, model_id, model_version, embedding_dim, tau, delta
+CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- Created before any migration runs, because schema_version lives in it.
+-- schema_version, model_id, embedding_dim, tau, delta; confirm_below once calibrated (TR-38)
 
 CREATE INDEX idx_products_name     ON products(name);
 CREATE INDEX idx_products_deleted  ON products(deleted_at);
 CREATE INDEX idx_shots_product     ON product_shots(product_id);
 ```
+
+**How the schema gets there** (`src/db/`, P1-2):
+
+- **Migrations are forward-only (`TR-44`).** `migrate()` plans with `planMigrations`, then runs
+  each version in its own transaction together with its `schema_version` bump. A crash therefore
+  leaves the database at the last version that fully applied. A database **newer** than the app is
+  refused, not opened: an older APK must not guess at tables whose meaning has changed.
+- **Seeded once, as data (`TR-35`, ADR-008).** Migration 1 writes the Phase 0 calibration
+  (`model_id`, `embedding_dim` 1280, τ 0.46, δ 0.075) into `app_meta`. After that, code only reads
+  them. `parseAppMeta` refuses a blank or malformed value, because `Number('')` is 0 and a zero τ
+  accepts everything. `confirm_below` is not seeded (`TR-38`).
+- **Transactions are synchronous `BEGIN IMMEDIATE … COMMIT`.** Because it runs through
+  `executeSync`, nothing else on the JS thread can interleave with a half-written enrollment.
+  `insertProductWithShots` validates everything before `BEGIN`: centavos, 3–5 shots, relative
+  paths, dimension, unit length.
+- **Per connection:** `PRAGMA foreign_keys = ON`. The default journal mode stays, because WAL's
+  `-wal` / `-shm` side files would break the one-file layout (`TR-46`).
 
 ### Invariants
 
@@ -333,12 +359,22 @@ BantayNiMama/
 │   │   ├── match.ts           ← τ/δ policy
 │   │   ├── stability.ts       ← ring buffer
 │   │   ├── money.ts           ← centavo arithmetic
-│   │   ├── vector.ts          ← dot, L2-normalize
+│   │   ├── vector.ts          ← dot, L2-normalize, BLOB codec
+│   │   ├── knn.ts             ← brute-force top-10 over the in-memory matrix (TR-30, ADR-014)
+│   │   ├── appMeta.ts         ← strict app_meta parsing (TR-35, TR-38)
+│   │   ├── migrations.ts      ← migration planning (TR-44)
+│   │   ├── photoPath.ts       ← relative photo paths only (TR-43)
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   ├── db/                    ← schema, migrations, repositories
 │   │   ├── open.ts            ← openDatabase(): bantay.db in documentDirectory (TR-46)
-│   │   └── probe.ts           ← TEMPORARY P1-2 checkpoint; removed when schema v1 lands
+│   │   ├── schema.ts          ← migrations, forward-only (TR-44)
+│   │   ├── migrate.ts         ← applies them, one transaction per version
+│   │   ├── transaction.ts     ← synchronous BEGIN IMMEDIATE / COMMIT / ROLLBACK
+│   │   ├── products.ts        ← insertProductWithShots (TR-45), getProduct
+│   │   ├── shots.ts           ← loadVectorIndex from embedding BLOBs (ADR-014)
+│   │   ├── meta.ts · ids.ts   ← read app_meta · UUID v4
+│   │   └── devCheck.ts        ← TEMPORARY P1-2 device check; replaced by enrollment in P1-5
 │   ├── features/
 │   │   ├── scanner/
 │   │   ├── enrollment/

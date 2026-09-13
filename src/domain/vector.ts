@@ -36,3 +36,43 @@ export function l2Normalize(v: Vector): Float32Array {
   for (let i = 0; i < v.length; i++) out[i] = v[i]! / norm;
   return out;
 }
+
+const HOST_IS_LITTLE_ENDIAN = new Uint8Array(new Uint16Array([1]).buffer)[0] === 1;
+
+/**
+ * Serialize a vector for `product_shots.embedding` (ADR-014): Float32, always little-endian, in a
+ * fresh buffer. The byte order is fixed so an exported bantay.db (SR-45) reads the same on any
+ * phone. ARM and x86 are little-endian, so the fast path is the one that runs; the DataView path
+ * exists for correctness and cannot be exercised on those hosts.
+ */
+export function vectorToBlob(v: Float32Array): ArrayBuffer {
+  if (HOST_IS_LITTLE_ENDIAN) return v.slice().buffer as ArrayBuffer;
+  const view = new DataView(new ArrayBuffer(v.length * Float32Array.BYTES_PER_ELEMENT));
+  for (let i = 0; i < v.length; i++) view.setFloat32(i * Float32Array.BYTES_PER_ELEMENT, v[i]!, true);
+  return view.buffer;
+}
+
+/**
+ * Parse a stored embedding. Throws unless it holds exactly `dim` Float32 values: a vector of
+ * the wrong size was written by a different model (TR-23) and must never be searched.
+ *
+ * Always copies, because a BLOB can arrive as a view at an odd byte offset, where a Float32Array
+ * cannot be laid directly over the bytes.
+ */
+export function blobToVector(blob: ArrayBuffer | ArrayBufferView, dim: number): Float32Array {
+  const bytes =
+    blob instanceof ArrayBuffer ? new Uint8Array(blob) : new Uint8Array(blob.buffer, blob.byteOffset, blob.byteLength);
+  if (bytes.byteLength !== dim * Float32Array.BYTES_PER_ELEMENT) {
+    throw new RangeError(
+      `Embedding has ${bytes.byteLength} bytes; ${dim} dimensions need ${dim * Float32Array.BYTES_PER_ELEMENT}`,
+    );
+  }
+  const out = new Float32Array(dim);
+  if (HOST_IS_LITTLE_ENDIAN) {
+    new Uint8Array(out.buffer).set(bytes);
+    return out;
+  }
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  for (let i = 0; i < dim; i++) out[i] = view.getFloat32(i * Float32Array.BYTES_PER_ELEMENT, true);
+  return out;
+}

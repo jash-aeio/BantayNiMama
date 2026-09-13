@@ -36,7 +36,7 @@ import {
   type TestFrame,
 } from './src/spike/dataset';
 import { rankProducts, type Candidate, type Shot } from './src/spike/vectors';
-import { describeProbe, probeDatabase } from './src/db/probe';
+import { runStorageCheck } from './src/db/devCheck';
 
 type Mode = 'scan' | 'enroll' | 'collect';
 
@@ -86,10 +86,10 @@ export default function App() {
   const tflite = useTfliteModel();
   const model = tflite.state === 'loaded' ? tflite.model : undefined;
 
-  // P1-2 checkpoint: run once, show on screen and in logcat (tag ReactNativeJS).
+  // P1-2 storage check: run once, show on screen and in logcat (tag ReactNativeJS).
   const dbProbe = useMemo(() => {
-    const text = describeProbe(probeDatabase());
-    console.log(`[P1-2 checkpoint]\n${text}`);
+    const text = runStorageCheck();
+    console.log(`[P1-2 storage check]\n${text}`);
     return text;
   }, []);
 

@@ -25,9 +25,14 @@ export function parsePesos(input: string): number | null {
   return Number.isSafeInteger(total) ? total : null;
 }
 
+/** True for a valid stored price: whole, non-negative centavos within the safe-integer range. */
+export function isCentavos(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+}
+
 /** Render centavos as "₱1,250.00". The only place money becomes text (ADR-007). */
 export function formatCentavos(centavos: number): string {
-  if (!Number.isSafeInteger(centavos) || centavos < 0) {
+  if (!isCentavos(centavos)) {
     throw new RangeError(`Centavos must be a non-negative safe integer, got ${centavos}`);
   }
   const cents = centavos % 100;

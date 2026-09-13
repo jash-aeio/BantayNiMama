@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). P1-1 done: `src/domain/` under `npm test`, 40 tests, and the golden replay reproduces the Phase 0 gate numbers exactly. **P1-2:** sqlite-vec failed on the Infinix, so vectors are stored as BLOBs and searched in JS (ADR-014). |
-| **Next action** | P1-2 proper: a pure inline KNN in `src/domain` (tested), schema v1 with `product_shots.embedding` BLOB, forward-only migration and `app_meta` seed, and the in-memory search matrix — then retire the checkpoint probe. Carry forward: τ 0.46 / δ 0.075 go into `app_meta` (`TR-35`), never constants. |
+| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). P1-1 done: the golden replay reproduces the Phase 0 gate exactly. Domain tests now 74. **P1-2 done:** schema v1 migrates on the Infinix, and the enroll, reopen and search round trip passes. Vectors are stored as BLOBs and searched in JS (ADR-014). |
+| **Next action** | P1-3, the ML module. Move model loading and the frame embedder out of the spike into `src/ml/`; the worklet posts a `Float32Array`. Add the still-image embedder for enrollment. Time crop/resize separately from `runSync`, and try the GPU delegate (`TR-25`, `TR-29`). |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | Per-frame latency **median 145.5 ms, p90 160.1 ms** on the release APK (n = 226) vs a 25–40 ms budget — `NFR-07` is not met, and the release build did not fix it. See `ARCHITECTURE.md` §8. |
@@ -51,10 +51,12 @@ Detail and "done when" for each step: [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md) §5. 
 - [x] P1-1 Domain layer — `match`, `stability`, `money`, `vector` under `node --test`; golden replay
       reproduces Phase 0 (86/91 top-1, 68/91 accepts, 3/196 false accepts) (`TR-30`–`TR-37`, `TR-41`)
       *(2026-09-14, 40 tests)*
-- [ ] P1-2 Storage — day-one device checkpoint; schema v1 + `app_meta` seed (`TR-13`, `TR-35`, `TR-44`, ADR-014)
+- [x] P1-2 Storage — day-one device checkpoint; schema v1 + `app_meta` seed (`TR-13`, `TR-35`, `TR-44`, ADR-014) *(2026-09-14)*
   - [x] op-sqlite ~18.2.1 added, `sqliteVec` on, network-audited (`TR-51`); `openDatabase()` + checkpoint probe written *(2026-09-14)*
   - [x] **Checkpoint on the Infinix, release APK** *(2026-09-14)* — sqlite-vec **failed** to load (op-sqlite#456). The second build passed: plain SQLite opens `bantay.db`, BLOB vectors are bit-exact, JS KNN takes 9.2 ms at 100 shots and 234 ms at 2,500 → ADR-014
-  - [ ] Pure inline KNN in `src/domain` with tests; schema v1 (`product_shots.embedding` BLOB) + migration + `app_meta` seed; in-memory search matrix; enroll-then-read round trip on device
+  - [x] Pure inline KNN, BLOB codec, `app_meta` parsing and migration planning in `src/domain` — tests 40 → 74 *(2026-09-14)*
+  - [x] Schema v1 (`product_shots.embedding` BLOB), forward-only migration, `app_meta` seed, `insertProductWithShots` (one transaction), `loadVectorIndex` *(2026-09-14)*
+  - [x] **On the Infinix** *(2026-09-14)*: `bantay.db` migrated 0 → 1 with `app_meta` intact. Enroll, close, reopen and search found each shot's own vector top-1 at 1.000000, with the price back as 1250 centavos (3 shots reloaded in 0.6 ms). A failed transaction left no row.
 - [ ] P1-3 ML module — frame + still embedders; crop/resize vs `runSync` split timed; GPU delegate tried (`TR-25`, `TR-29`)
 - [ ] P1-4 Photo store — relative paths; frame-vs-JPEG agreement and bytes/shot measured (`TR-42`, `TR-43`, `NFR-08`)
 - [ ] P1-5 Enrollment — one transaction, photos first (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`)

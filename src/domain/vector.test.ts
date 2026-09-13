@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { dot, l2Normalize } from './vector.ts';
+import { blobToVector, dot, l2Normalize, vectorToBlob } from './vector.ts';
 
 const close = (actual: number, expected: number) =>
   assert.ok(Math.abs(actual - expected) < 1e-6, `expected ${expected}, got ${actual}`);
@@ -34,5 +34,34 @@ describe('l2Normalize (TR-22)', () => {
     assert.throws(() => l2Normalize([0, 0, 0]), RangeError);
     assert.throws(() => l2Normalize([NaN, 1]), RangeError);
     assert.throws(() => l2Normalize([Infinity, 1]), RangeError);
+  });
+});
+
+describe('vectorToBlob / blobToVector (ADR-014)', () => {
+  test('round-trips a vector bit for bit', () => {
+    const v = l2Normalize([0.1, -2.5, 3.25, 1e-7]);
+    assert.deepEqual(blobToVector(vectorToBlob(v), 4), v);
+  });
+
+  test('stores little-endian Float32, so the file reads the same on any phone', () => {
+    assert.deepEqual([...new Uint8Array(vectorToBlob(new Float32Array([1])))], [0, 0, 128, 63]);
+  });
+
+  test('writes a fresh buffer, not the source vector memory', () => {
+    const v = new Float32Array([1, 2]);
+    const blob = vectorToBlob(v);
+    v[0] = 99;
+    assert.equal(blobToVector(blob, 2)[0], 1);
+  });
+
+  test('reads a BLOB handed over as a view at an odd byte offset', () => {
+    const padded = new Uint8Array(9);
+    padded.set(new Uint8Array(vectorToBlob(new Float32Array([0.5, -1]))), 1);
+    assert.deepEqual(blobToVector(padded.subarray(1), 2), new Float32Array([0.5, -1]));
+  });
+
+  test('refuses a BLOB of the wrong size — a different model wrote it (TR-23)', () => {
+    assert.throws(() => blobToVector(new ArrayBuffer(12), 4), RangeError);
+    assert.throws(() => blobToVector(new ArrayBuffer(16), 1280), RangeError);
   });
 });

@@ -12,6 +12,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
 
+import { buildIndex, KNN_LIMIT, nearestShots } from './knn.ts';
 import { decide, rankProducts, type Decision, type ShotMatch } from './match.ts';
 import { dot } from './vector.ts';
 
@@ -20,7 +21,6 @@ const DATASET_PATH = join(import.meta.dirname, '..', '..', 'spike', 'results', D
 
 /** The Phase 0 calibration (ARCHITECTURE.md §6). A test fixture — the app reads app_meta (TR-35). */
 const PHASE_0_THRESHOLDS = { tau: 0.46, delta: 0.075 };
-const KNN_LIMIT = 10; // TR-30
 
 interface LabeledDataset {
   shots: { label: string; vector: number[] }[];
@@ -43,6 +43,14 @@ type Tally = Record<Decision['kind'], number>;
 test('Phase 0 golden replay: the Phase 1 policy reproduces the gate result at τ 0.46 / δ 0.075', () => {
   const { shots, frames } = loadDataset();
 
+  // Search exactly as the app does (ADR-014): shots stored as Float32 in one matrix, inline loop,
+  // top 10. The Phase 0 vectors are float64 JSON, so this also proves Float32 storage does not
+  // move a single decision.
+  const index = buildIndex(
+    shots[0]!.vector.length,
+    shots.map((s, i) => ({ shotId: `shot-${i}`, productId: s.label, vector: s.vector })),
+  );
+
   let positives = 0;
   let negatives = 0;
   let top1 = 0;
@@ -54,13 +62,15 @@ test('Phase 0 golden replay: the Phase 1 policy reproduces the gate result at τ
   for (const frame of frames) {
     if (frame.trueLabel.startsWith('ambiguous:')) continue; // L-01 / L-02, excluded from the gate
 
-    const rows: ShotMatch[] = shots.map((s) => ({ productId: s.label, similarity: dot(frame.vector, s.vector) }));
-    const knn = [...rows].sort((a, b) => b.similarity - a.similarity).slice(0, KNN_LIMIT);
-    const ranked = rankProducts(knn);
+    const ranked = rankProducts(nearestShots(index, frame.vector, KNN_LIMIT));
 
-    // TR-30's LIMIT 10 is only safe if it never changes top-1 or top-2. With ≤ 6 shots per
-    // product it cannot — this proves it on real data rather than asserting it.
-    assert.deepEqual(ranked.slice(0, 2), rankProducts(rows).slice(0, 2));
+    // Keeping only the top 10 (TR-30) is safe only if it never changes top-1 or top-2. With ≤ 6
+    // shots per product it cannot — checked against a full float64 ranking of every shot.
+    const full = rankProducts(shots.map((s): ShotMatch => ({ productId: s.label, similarity: dot(frame.vector, s.vector) })));
+    assert.deepEqual(
+      ranked.slice(0, 2).map((p) => p.productId),
+      full.slice(0, 2).map((p) => p.productId),
+    );
 
     const decision = decide(ranked, PHASE_0_THRESHOLDS);
 

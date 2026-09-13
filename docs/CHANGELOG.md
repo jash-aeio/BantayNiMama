@@ -211,6 +211,48 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - Search becomes a pure inline loop over an in-memory matrix rebuilt from SQLite.
     - `TR-13`, `TR-30` and `TR-40` are amended, and ADR-003's sqlite-vec half is superseded.
     - Native search stays owed for `NFR-09` and is tracked for Phase 3.
+- **P1-2 — search, schema v1 and the storage layer** (2026-09-14). Domain tests 40 → **74**;
+  typecheck clean.
+  - **Domain (pure, tested):**
+    - `knn.ts` — brute-force top 10 over one contiguous Float32 matrix. It uses an inline loop and
+      a small sorted buffer rather than a full sort (`TR-30`, ADR-014). Vectors of the wrong
+      dimension are refused (`TR-23`), and non-finite similarities never rank.
+    - `vector.ts` — `vectorToBlob` / `blobToVector`: always little-endian Float32, size-checked.
+    - `appMeta.ts` — strict parsing of `app_meta` text: a blank τ is refused, not read as 0
+      (`TR-35`). `confirm_below` stays optional until calibrated (`TR-38`).
+    - `migrations.ts` — forward-only plan; refuses gaps, repeats, and a database newer than the
+      app (`TR-44`).
+    - `photoPath.ts` — only relative, non-escaping photo paths (`TR-43`). `money.ts` gains
+      `isCentavos`.
+    - The golden replay now searches through `knn.ts`. It reproduces the Phase 0 gate exactly,
+      so Float32 storage moved no decision.
+  - **Storage (`src/db/`):**
+    - `schema.ts` — migration 1: `products`, `product_shots` with `embedding BLOB`,
+      `price_history` and indexes. `CHECK` constraints make SQLite reject float or negative prices
+      (`TR-41`). It seeds `model_id`, `embedding_dim`, τ 0.46 and δ 0.075 once, as data.
+    - `migrate.ts` — one transaction per version, including its `schema_version` bump.
+    - `transaction.ts` — synchronous `BEGIN IMMEDIATE` / `COMMIT` / `ROLLBACK`.
+    - `products.ts` — `insertProductWithShots` validates everything before `BEGIN`, then writes
+      product + shots in one transaction (`TR-45`). Also `getProduct`.
+    - `shots.ts` — `loadVectorIndex`. Shots from another model are counted, not silently dropped
+      (`TR-24`).
+    - `meta.ts` reads `app_meta`; `ids.ts` makes UUID v4s without a native crypto dependency.
+    - `open.ts` turns foreign keys on per connection, and keeps SQLite's default journal mode so
+      the database stays one file (`TR-46`).
+  - `devCheck.ts` replaces the checkpoint probe. On the phone it migrates `bantay.db`, runs
+    enroll → close → reopen → search on a throwaway file, and checks that a failed transaction
+    leaves no row.
+  - **Verified on device** — Infinix X6823, release APK (`armeabi-v7a`, Gradle 42 s), 2026-09-14.
+    All three checks passed:
+    - `bantay.db` migrated from schema 0 to 1. `app_meta` parsed back as
+      `mobilenet_v3_large_embedder_v1`, 1280-d, τ 0.46, δ 0.075, `confirm_below` not set
+      (`TR-35`, `TR-38`, `TR-44`).
+    - Enroll → close → reopen → search: 3 shots reloaded from BLOBs in 0.6 ms. Each shot's own
+      vector came back as the top hit at similarity 1.000000, and the price read back as 1250
+      centavos (`TR-41`, `TR-45`, ADR-014).
+    - A transaction that threw after its first `INSERT` left no row behind (`TR-45`).
+  - **Found in passing:** the phone's font drew the `→` arrows in these debug lines as a wrong
+    glyph, while τ and δ rendered correctly. Keep arrows out of user-facing copy (P1-7, `SR-42`).
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.
