@@ -77,6 +77,8 @@ You can run `/feature-done` to walk this checklist.
   If logic can be pure, put it there — it is the only part testable without a device.
 - Native/camera/DB layers stay thin and delegate to `src/domain/`.
 - **Worklet code must carry the `'worklet'` directive** and must not touch React state or async JS.
+  Declare worklet helpers **above** the worklets that call them. A helper declared below is captured
+  as `undefined`, which typecheck and tests cannot see (`ARCHITECTURE.md` §2).
 - **Every user-facing string goes through i18n** (`en` + `fil`). No hardcoded copy in components —
   including error messages (`SR-42`).
 - Filipino retail terms (*tingi*, *buo*, *tindera*) are domain vocabulary. Use them in code and copy

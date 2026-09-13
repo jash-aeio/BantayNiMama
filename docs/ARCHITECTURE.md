@@ -57,7 +57,19 @@ This is the most important thing to understand about the codebase.
 | **UI thread** | Overlay rendering via Reanimated shared values | Re-render React on the hot path |
 
 **Rule:** the worklet's only output is a `Float32Array(1280)` posted to the JS thread. Nothing else
-crosses that boundary per frame.
+crosses that boundary per frame. An explicit capture during enrollment is the one exception: it
+also sends that frame's reticle crop, once per button press (P1-4).
+
+**One model instance per thread.** The camera worklet calls `runSync` on its model continuously. A
+single TFLite interpreter must not run on two threads at once, so JS-thread embedding uses its own
+CPU-only instance: saved JPEGs at enrollment, and `TR-24` re-embeds. That costs a second copy of
+the model in memory.
+
+**Worklet helpers are declared above their callers.** The worklets Babel plugin captures what a
+`'worklet'` function references at the moment that function object is created, not when it runs.
+A helper declared further down the file is captured as `undefined`. JavaScript hoisting hides this
+from `tsc` and from `node --test`, so it only shows on the device, as every frame failing with
+"undefined is not a function" (P1-4).
 
 ---
 
@@ -105,7 +117,7 @@ Separate path. Quality matters, latency does not, so this runs on the JS thread.
 Tap "Add"
   → guided capture of 3–5 angles          (SR-20)
   → quality check per frame               (SR-22)  blown out? dark? blurry?
-  → save each as 512px q80 JPEG           (TR-42)  documentDirectory/photos/
+  → save each as q80 JPEG, ≤ 512 px        (TR-42)  documentDirectory/photos/  (never upscaled)
   → embed each once on the JS thread
   → duplicate check: KNN vs catalog       (SR-23)  match > τ → "Ganito ba ito?"
   → ONE transaction:                      (TR-45)
@@ -114,6 +126,21 @@ Tap "Add"
   → add the vectors to the in-memory search matrix — only after COMMIT succeeds
   → live on the very next frame           (SR-24)
 ```
+
+**Enrollment embeds a JPEG, scanning embeds a frame** (measured in P1-4). Both come from the same
+reticle crop (`captureReference`). The enrolled vector goes through one more resize and JPEG q80;
+the live one does not.
+
+- **Measured:** on the Infinix, the two vectors agree at dot min 0.9803, median 0.9843, over 10
+  captures of one static scene.
+- **What that allows:** unit vectors at 0.984 are √(2 − 2·0.984) ≈ 0.18 apart, which is the most a
+  similarity score can move (δ = 0.075). The typical move is far smaller, but it is unmeasured on
+  real products.
+- **Consequence:** Phase 0 calibrated τ/δ on live-frame vectors on both sides. The P1-8 gate and
+  the Phase 3 retune must therefore use JPEG-path enrollment vectors.
+- **Size:** the frame is 1280 × 720, so the reticle crop is 396 px. It is stored at that size rather
+  than upscaled to 512: 17.5 KB median per shot, ~88 KB per 5-shot product against `NFR-08`'s
+  200 KB.
 
 ---
 
@@ -365,6 +392,7 @@ BantayNiMama/
 │   │   ├── photoPath.ts       ← relative photo paths only (TR-43)
 │   │   ├── pixels.ts          ← channel layout, model input, reticle rect — worklet-callable (TR-21)
 │   │   ├── stats.ts           ← nearest-rank median / p90 for device measurements
+│   │   ├── referencePhoto.ts  ← photo path per shot; 512 px cap without upscaling (TR-42)
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
@@ -378,8 +406,11 @@ BantayNiMama/
 │   │   ├── transaction.ts     ← synchronous BEGIN IMMEDIATE / COMMIT / ROLLBACK
 │   │   ├── products.ts        ← insertProductWithShots (TR-45), getProduct
 │   │   ├── shots.ts           ← loadVectorIndex from embedding BLOBs (ADR-014)
+│   │   ├── photos.ts          ← reference JPEG store in documentDirectory/photos/ (TR-42, TR-43)
 │   │   ├── meta.ts · ids.ts   ← read app_meta · UUID v4
 │   │   └── devCheck.ts        ← TEMPORARY P1-2 device check; replaced by enrollment in P1-5
+│   ├── dev/                   ← TEMPORARY device checks
+│   │   └── referenceCheck.ts  ← P1-4 frame-vs-JPEG agreement, photo sizes, relaunch re-embed
 │   ├── features/
 │   │   ├── scanner/
 │   │   ├── enrollment/

@@ -302,6 +302,56 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **Found in passing:** `adb` twice lost its shell channel mid-install. `adb shell` answered
     `error: closed` while `adb devices` still listed the phone. Restarting the local adb server
     fixed it; this was not an app fault.
+- **P1-4 — the reference photo store** (2026-09-14). Domain tests 88 → **93**;
+  typecheck clean.
+  - `src/domain/referencePhoto.ts` — `referencePhotoPath(shotId)` gives `photos/<id>.jpg`,
+    relative (`TR-43`), and refuses ids unsafe as file names. `referenceSide` applies `TR-42`'s
+    512 px cap but never upscales: at 0.55 of a 720 px frame edge, the reticle is 396 px, and
+    enlarging it only adds bytes (`NFR-08`).
+  - `src/db/photos.ts` — saves a square crop as a q80 JPEG under `photos/`, lists photos with
+    sizes, deletes one. Absolute paths are worked out at use and never stored. A missing or empty
+    file after saving throws, because a shot without its photo could never be re-embedded
+    (`TR-24`).
+  - `src/ml/frameEmbedder.ts` — `captureReference` cuts **one** reticle crop and uses it twice:
+    through the scanning path for the live vector, and at the stored size for the JPEG. The only
+    differences left to measure are the extra resize and the JPEG encoding. The pixel buffer is
+    copied before the native image is freed.
+  - **One model instance per thread.** JPEGs are embedded on the JS thread with a **second,
+    CPU-only** model instance, because the camera worklet is running `runSync` on the first, and
+    one TFLite interpreter must not run on two threads at once. P1-5 enrollment inherits this.
+  - `src/dev/referenceCheck.ts` (temporary) — for each capture it records the frame-vs-JPEG dot
+    product and the JPEG size. A sidecar lets the next launch re-embed every stored photo and
+    compare it with its saved vector.
+  - The spike app gains "P1-4 capture" (a synchronizable flag the worklet reads) and
+    "Clear P1-4".
+  - **Measured on device** — Infinix X6823, release APK, CPU, 10 captures of **one static scene**,
+    2026-09-14:
+    - Frame-vs-JPEG vector agreement: dot **min 0.9803, median 0.9843**.
+    - JPEG size: **median 17.5 KB, max 17.6 KB** per shot, so about 88 KB per 5-shot product
+      against `NFR-08`'s 200 KB. A busier label may compress less well.
+    - The frame is **1280 × 720**, so the reticle crop is **396 px** and is stored at 396 px,
+      not upscaled to 512.
+  - **What the agreement means:** a dot of 0.984 puts the two unit vectors √(2 − 2·0.984) ≈ 0.18
+    apart. That is the most any similarity score can move. The typical move is far smaller, but it
+    has not been measured on real products, and δ is 0.075. Phase 0 calibrated τ/δ on live-frame
+    vectors, while enrolled vectors now come from JPEGs. So the P1-8 gate and the Phase 3 retune
+    must use JPEG-path vectors.
+  - **Survives a force-stop.** After `am force-stop` and relaunch, all 10 photos were on disk
+    (175.5 KB total). Each re-embedded to dot **1.000000** with the vector saved before the stop.
+    So the store persists, and re-embedding from JPEGs is deterministic on CPU (`TR-24`,
+    `TR-43`). The 10 test photos stay on the phone for now; P1-5 clears them.
+  - **Fixed before it shipped: every frame failed with "undefined is not a function".**
+    - **Symptom:** the first P1-4 APK processed no frames at all.
+    - **Diagnosis:** a diagnostic build with stack lines pointed inside `embedFrame`, not at the
+      new capture flag.
+    - **Cause:** declaration order. The worklets Babel plugin turns each `'worklet'` function into
+      an object that captures the functions it references when that object is created. The new
+      `embedCrop` helper was declared *below* `embedFrame` and `captureReference`, so both
+      captured it as `undefined`.
+    - **Why nothing caught it:** plain JavaScript hoists function declarations, so neither the
+      typecheck nor the Node tests could see it.
+    - **Fix:** helpers now sit above the worklets that call them, and the rule is recorded in
+      `ARCHITECTURE.md` §2 and `CLAUDE.md`.
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.

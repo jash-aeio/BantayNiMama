@@ -18,12 +18,25 @@ import {
   useFrameOutput,
   usePreviewOutput,
 } from 'react-native-vision-camera';
-import { scheduleOnRN } from 'react-native-worklets';
+import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
 import { runStorageCheck } from './src/db/devCheck';
+import {
+  clearReferenceCheck,
+  describeCaptures,
+  measureCapture,
+  verifyStoredPhotos,
+  type CaptureResult,
+} from './src/dev/referenceCheck';
 import { summarize } from './src/domain/stats.ts';
 import { dot } from './src/domain/vector.ts';
-import { embedFrame, type FrameEmbedding, type StageTimings } from './src/ml/frameEmbedder';
+import {
+  captureReference,
+  embedFrame,
+  type FrameEmbedding,
+  type ReferenceCapture,
+  type StageTimings,
+} from './src/ml/frameEmbedder';
 import { loadEmbeddingModel, type Accelerator, type LoadedModel } from './src/ml/loadModel';
 import { MODEL_ID, RETICLE_FRACTION, TARGET_FPS } from './src/ml/model';
 import {
@@ -88,6 +101,25 @@ export default function App() {
   const modelState = useEmbeddingModel(accelerator);
   const model = modelState.state === 'loaded' ? modelState.loaded.model : undefined;
 
+  // P1-4: a second, CPU-only model instance for embedding saved JPEGs on the JS thread. The camera
+  // worklet calls runSync on `model` continuously, and one TFLite interpreter must never run on
+  // two threads at once.
+  const stillModelState = useEmbeddingModel('cpu');
+  const stillModel = stillModelState.state === 'loaded' ? stillModelState.loaded.model : undefined;
+  // Set from JS, read by the worklet on its next processed frame.
+  const captureRequest = useMemo(() => createSynchronizable(false), []);
+  const [captures, setCaptures] = useState<CaptureResult[]>([]);
+  const [storeCheck, setStoreCheck] = useState('P1-4 store: waiting for the still-image model');
+
+  useEffect(() => {
+    if (stillModel === undefined) return;
+    try {
+      setStoreCheck(verifyStoredPhotos(stillModel));
+    } catch (e) {
+      setStoreCheck(`P1-4 store check failed: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }, [stillModel]);
+
   // P1-2 storage check: run once, show on screen and in logcat (tag ReactNativeJS).
   const dbProbe = useMemo(() => {
     const text = runStorageCheck();
@@ -136,6 +168,27 @@ export default function App() {
     setFrameError((previous) => (previous === message ? previous : message));
   }, []);
 
+  const onReference = useCallback(
+    (capture: ReferenceCapture) => {
+      onEmbedding(capture.embedding);
+      if (stillModel === undefined) {
+        setFrameError('P1-4 capture: the still-image model has not loaded yet');
+        return;
+      }
+      measureCapture(capture, stillModel).then(
+        (result) => setCaptures((previous) => [...previous, result]),
+        (e: unknown) => setFrameError(`P1-4 capture failed: ${e instanceof Error ? e.message : String(e)}`),
+      );
+    },
+    [onEmbedding, stillModel],
+  );
+
+  const onClearCaptures = useCallback(() => {
+    const removed = clearReferenceCheck();
+    setCaptures([]);
+    setStoreCheck(`P1-4 store: cleared ${removed} photos`);
+  }, []);
+
   // TR-26: throttle inside the worklet. Holding the interval on the camera
   // thread is what makes the dropped frames actually free — bouncing to JS to
   // decide whether to skip would defeat the point.
@@ -152,9 +205,15 @@ export default function App() {
         if (now - lastRun.current < minIntervalMs) return;
         lastRun.current = now;
 
-        scheduleOnRN(onEmbedding, embedFrame(frame, model));
+        if (captureRequest.getDirty()) {
+          captureRequest.setBlocking(false);
+          scheduleOnRN(onReference, captureReference(frame, model));
+        } else {
+          scheduleOnRN(onEmbedding, embedFrame(frame, model));
+        }
       } catch (e) {
-        scheduleOnRN(onFrameError, e instanceof Error ? e.message : String(e));
+        const stack = e instanceof Error ? (e.stack ?? '').split('\n').slice(0, 4).join(' | ') : '';
+        scheduleOnRN(onFrameError, e instanceof Error ? `${e.message} — ${stack}` : String(e));
       } finally {
         frame.dispose();
       }
@@ -341,6 +400,16 @@ export default function App() {
         <Text style={styles.meta}>{describeTimings(timings.current)}</Text>
         {frameError !== null && <Text style={styles.error}>frame error: {frameError}</Text>}
         <Text style={styles.meta}>{dbProbe}</Text>
+        <Text style={styles.meta}>{describeCaptures(captures)}</Text>
+        <Text style={styles.meta}>{storeCheck}</Text>
+        <View style={styles.row}>
+          <View style={styles.flex}>
+            <Button label="P1-4 capture" onPress={() => captureRequest.setBlocking(true)} />
+          </View>
+          <View style={styles.flex}>
+            <Button label="Clear P1-4" onPress={onClearCaptures} secondary />
+          </View>
+        </View>
 
         {mode !== 'scan' && (
           <TextInput
@@ -476,6 +545,7 @@ const styles = StyleSheet.create({
   panel: { maxHeight: '48%', backgroundColor: '#0b0f14' },
   panelContent: { padding: 14, gap: 10, paddingBottom: 32 },
   row: { flexDirection: 'row', gap: 8 },
+  flex: { flex: 1 },
   tab: {
     flex: 1,
     paddingVertical: 8,

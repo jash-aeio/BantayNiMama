@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). P1-1 done: the golden replay reproduces the Phase 0 gate exactly. Domain tests now 74. **P1-2 done:** schema v1 migrates on the Infinix, and the enroll, reopen and search round trip passes. Vectors are stored as BLOBs and searched in JS (ADR-014). **P1-3 done:** `src/ml/` runs on the Infinix; a frame takes 100.7 ms on CPU and 81.2 ms with the GPU delegate (budget 60). |
-| **Next action** | P1-4, the photo store. Save the reticle crop as a 512 px q80 JPEG under a relative path, run `stillEmbedder` on it, and measure frame-vs-JPEG vector agreement and bytes per shot (`TR-42`, `TR-43`, `NFR-08`). |
+| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). P1-1 done: the golden replay reproduces the Phase 0 gate exactly. Domain tests now 74. **P1-2 done:** schema v1 migrates on the Infinix, and the enroll, reopen and search round trip passes. Vectors are stored as BLOBs and searched in JS (ADR-014). **P1-3 done:** `src/ml/` runs on the Infinix; a frame takes 100.7 ms on CPU and 81.2 ms with the GPU delegate (budget 60). **P1-4 done:** reference JPEGs survive a force-stop and re-embed identically, at ~17.5 KB per shot. |
+| **Next action** | P1-5, enrollment. A name and price form, 3–5 captures, JPEGs saved first, then product + shots + vectors in one transaction. A duplicate check against the catalog, and the new product matchable on the next frame (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`). |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms). Split on the Infinix (P1-3): `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms either way. Totals: 100.7 ms CPU, 81.2 ms GPU. The GPU helps but is not enough, and crop + resize is the next lever. See `ARCHITECTURE.md` §8. |
@@ -62,7 +62,11 @@ Detail and "done when" for each step: [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md) §5. 
   - [x] **On the Infinix** *(2026-09-14)*: live frames give 1280-d vectors at length 1.00000. Per-frame total median **100.7 ms on CPU, 81.2 ms with `android-gpu`**; `runSync` 62.8 → 43.2 ms; crop+resize ~37 ms either way (n = 40 each; `ARCHITECTURE.md` §8)
   - [ ] Before adopting the GPU delegate: check its vectors agree with CPU's (τ/δ were calibrated on CPU)
   - [ ] `stillEmbedder` on device — needs reference JPEGs, so it happens in P1-4
-- [ ] P1-4 Photo store — relative paths; frame-vs-JPEG agreement and bytes/shot measured (`TR-42`, `TR-43`, `NFR-08`)
+- [x] P1-4 Photo store — relative paths; frame-vs-JPEG agreement and bytes/shot measured (`TR-42`, `TR-43`, `NFR-08`) *(2026-09-14)*
+  - [x] `referencePhoto.ts` (path, size cap without upscaling), `db/photos.ts` (save / list / delete), `captureReference` (one crop, two uses), second CPU model instance for JPEGs; tests 88 → 93 *(2026-09-14)*
+  - [x] **On the Infinix** *(2026-09-14, 10 captures, one static scene, CPU)*: frame-vs-JPEG dot min 0.9803 / median 0.9843; JPEG 17.5 KB median per shot (~88 KB per 5-shot product, `NFR-08` ≤ 200 KB); 396 px crop of a 1280×720 frame, not upscaled
+  - [x] Photos survive a force-stop *(2026-09-14)*: after `am force-stop` and relaunch, all 10 photos were on disk (175.5 KB), and each re-embedded to dot 1.000000 with its saved vector (`TR-24`)
+  - [ ] Owed before the P1-8 gate: effect of JPEG-path enrollment on real decisions. Phase 0's τ/δ came from live-frame vectors; a 0.984 dot can move a score by up to 0.18 (δ = 0.075)
 - [ ] P1-5 Enrollment — one transaction, photos first (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`)
 - [ ] P1-6 Scanner — lock / chips / Unknown; KNN and policy latency timed (`SR-02`–`SR-04`, `SR-09`, `SR-12`)
 - [ ] P1-7 App shell — two tabs, `en` + `fil` (Claude drafts, operator corrects); spike code deleted (`TR-14`, `TR-16`, `SR-42`)
@@ -140,6 +144,8 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Read 2,500 × 1280-d vector BLOBs | — | **56.3 ms**, bit-exact round trip — Infinix X6823, release APK | 2026-09-14 |
 | Per-frame worklet stages, CPU (P1-3) | ≤ 60 ms total (`NFR-07`) | crop+resize **36.9** · `runSync` **62.8** · normalize **0.9** · total **100.7** ms median (total p90 109.1), n = 40 — Infinix X6823, release APK. Not met. | 2026-09-14 |
 | Per-frame worklet stages, `android-gpu` delegate (P1-3) | ≤ 60 ms total (`NFR-07`) | crop+resize **36.6** · `runSync` **43.2** · normalize **0.9** · total **81.2** ms median (total p90 83.0), n = 40 — Infinix X6823, release APK. Not met. **Not adopted:** GPU-vs-CPU vector agreement unmeasured. | 2026-09-14 |
+| Frame-vs-JPEG vector agreement (P1-4) | no target yet; must not move decisions | dot **min 0.9803 · median 0.9843**, n = 10 captures of **one static scene** — Infinix X6823, release APK, CPU | 2026-09-14 |
+| Reference photo size (`NFR-08`) | ≤ 200 KB per 5-shot product | **17.5 KB median, 17.6 KB max per shot** → ~88 KB per product (one scene); 396 px crop of a 1280×720 frame, JPEG q80 | 2026-09-14 |
 
 ---
 
