@@ -1,3 +1,4 @@
+import { Asset } from 'expo-asset';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -18,7 +19,10 @@ import {
   useFrameOutput,
   usePreviewOutput,
 } from 'react-native-vision-camera';
-import { useTensorflowModel } from 'react-native-fast-tflite';
+import {
+  loadTensorflowModel,
+  type TensorflowModel,
+} from 'react-native-fast-tflite';
 import { scheduleOnRN } from 'react-native-worklets';
 
 import { MODEL_ID, RETICLE_FRACTION, TARGET_FPS } from './src/spike/config';
@@ -27,6 +31,7 @@ import {
   exportDataset,
   load,
   save,
+  saveDatasetToFolder,
   type SpikeDataset,
   type TestFrame,
 } from './src/spike/dataset';
@@ -36,14 +41,48 @@ type Mode = 'scan' | 'enroll' | 'collect';
 
 const DEVICE_NAME = `${Platform.OS} ${Platform.Version}`;
 
+const MODEL_ASSET = require('./assets/models/mobilenet_v3_large.tflite');
+
+type TfliteState =
+  | { state: 'loading' }
+  | { state: 'loaded'; model: TensorflowModel }
+  | { state: 'error'; error: Error };
+
+// fast-tflite resolves a require()d model via Image.resolveAssetSource, which in a release
+// build returns a bare Android resource name ("assets_models_...") instead of a URL, and its
+// native loader passes that straight to java.net.URL — MalformedURLException. Routing through
+// expo-asset copies the model out of the APK and yields a real file:// path the loader can
+// read. The asset is embedded, so this is a local copy and not a download (TR-50).
+function useTfliteModel(): TfliteState {
+  const [state, setState] = useState<TfliteState>({ state: 'loading' });
+
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const asset = await Asset.fromModule(MODEL_ASSET).downloadAsync();
+        const model = await loadTensorflowModel(
+          { url: asset.localUri ?? asset.uri },
+          [],
+        );
+        if (!cancelled) setState({ state: 'loaded', model });
+      } catch (e) {
+        if (!cancelled) setState({ state: 'error', error: e as Error });
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return state;
+}
+
 export default function App() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
   const preview = usePreviewOutput();
-  const tflite = useTensorflowModel(
-    require('./assets/models/mobilenet_v3_large.tflite'),
-    [],
-  );
+  const tflite = useTfliteModel();
   const model = tflite.state === 'loaded' ? tflite.model : undefined;
 
   const [mode, setMode] = useState<Mode>('enroll');
@@ -137,9 +176,56 @@ export default function App() {
     persist({ ...dataset, dim: result.dim, frames: [...dataset.frames, frame] });
   }, [dataset, label, persist]);
 
+  // Undo is by position because a shot carries no id, timestamp or photo — the
+  // last one captured is the only one the operator can reliably point at.
+  const undoLastShot = useCallback(() => {
+    if (dataset.shots.length === 0) return;
+    persist({ ...dataset, shots: dataset.shots.slice(0, -1) });
+  }, [dataset, persist]);
+
+  const undoLastFrame = useCallback(() => {
+    if (dataset.frames.length === 0) return;
+    persist({ ...dataset, frames: dataset.frames.slice(0, -1) });
+  }, [dataset, persist]);
+
+  // Test frames are deliberately left alone: dropping frames as a side effect
+  // would silently change what the gate is scored on. The prompt warns instead,
+  // because frames whose label has no shots can only ever score as misses.
+  const deleteProduct = useCallback(
+    (name: string) => {
+      const shotCount = dataset.shots.filter((s) => s.label === name).length;
+      const frameCount = dataset.frames.filter((f) => f.trueLabel === name).length;
+      const warning =
+        frameCount > 0
+          ? `\n\n${frameCount} test frame(s) still use this label. With no shots they will all score as misses.`
+          : '';
+      Alert.alert(`Delete "${name}"?`, `Removes all ${shotCount} reference shot(s).${warning}`, [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: () =>
+            persist({ ...dataset, shots: dataset.shots.filter((s) => s.label !== name) }),
+        },
+      ]);
+    },
+    [dataset, persist],
+  );
+
   const onExport = useCallback(() => {
     exportDataset().catch((e: Error) => Alert.alert('Export failed', e.message));
   }, []);
+
+  const onSaveToFolder = useCallback(() => {
+    saveDatasetToFolder()
+      .then((path) =>
+        Alert.alert(
+          'Saved',
+          `${path}\n${dataset.shots.length} shots · ${dataset.frames.length} test frames`,
+        ),
+      )
+      .catch((e: Error) => Alert.alert('Save failed', e.message));
+  }, [dataset]);
 
   if (!hasPermission) {
     return (
@@ -176,6 +262,8 @@ export default function App() {
   const shotCounts = countByLabel(dataset.shots.map((s) => s.label));
   const first = ranked[0];
   const second = ranked[1];
+  const lastShot = dataset.shots[dataset.shots.length - 1];
+  const lastFrame = dataset.frames[dataset.frames.length - 1];
 
   return (
     <View style={styles.root}>
@@ -223,7 +311,17 @@ export default function App() {
         )}
 
         {mode === 'enroll' && <Button label="Capture reference shot" onPress={captureShot} />}
+        {mode === 'enroll' && lastShot !== undefined && (
+          <Button label={`Undo last shot (${lastShot.label})`} onPress={undoLastShot} secondary />
+        )}
         {mode === 'collect' && <Button label="Record test frame" onPress={captureFrame} />}
+        {mode === 'collect' && lastFrame !== undefined && (
+          <Button
+            label={`Undo last test frame (${lastFrame.trueLabel})`}
+            onPress={undoLastFrame}
+            secondary
+          />
+        )}
 
         <Text style={styles.heading}>Top 3</Text>
         {ranked.length === 0 && <Text style={styles.dim}>No reference shots enrolled yet.</Text>}
@@ -240,13 +338,25 @@ export default function App() {
         )}
 
         <Text style={styles.heading}>Enrolled</Text>
-        <Text style={styles.dim}>
-          {Object.entries(shotCounts)
-            .map(([k, v]) => `${k} (${v})`)
-            .join(', ') || '—'}
-        </Text>
+        {Object.keys(shotCounts).length === 0 ? (
+          <Text style={styles.dim}>—</Text>
+        ) : (
+          <>
+            <Text style={styles.dim}>Tap a product to delete all its shots.</Text>
+            <View style={styles.chips}>
+              {Object.entries(shotCounts).map(([k, v]) => (
+                <Pressable key={k} onPress={() => deleteProduct(k)} style={styles.chip}>
+                  <Text style={styles.chipText}>
+                    {k} ({v}) ✕
+                  </Text>
+                </Pressable>
+              ))}
+            </View>
+          </>
+        )}
 
-        <Button label="Export dataset JSON" onPress={onExport} />
+        <Button label="Save dataset to folder" onPress={onSaveToFolder} />
+        <Button label="Export dataset JSON" onPress={onExport} secondary />
       </ScrollView>
     </View>
   );
@@ -262,9 +372,17 @@ function Centered({ children }: { children: React.ReactNode }) {
   return <View style={[styles.root, styles.centered]}>{children}</View>;
 }
 
-function Button({ label, onPress }: { label: string; onPress: () => void }) {
+function Button({
+  label,
+  onPress,
+  secondary = false,
+}: {
+  label: string;
+  onPress: () => void;
+  secondary?: boolean;
+}) {
   return (
-    <Pressable onPress={onPress} style={styles.button}>
+    <Pressable onPress={onPress} style={[styles.button, secondary && styles.buttonSecondary]}>
       <Text style={styles.buttonText}>{label}</Text>
     </Pressable>
   );
@@ -312,7 +430,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   button: { backgroundColor: '#2b6cb0', borderRadius: 6, paddingVertical: 12, alignItems: 'center' },
+  buttonSecondary: { backgroundColor: '#1b2430' },
   buttonText: { color: '#ffffff', fontWeight: '700' },
+  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  chip: { backgroundColor: '#1b2430', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 },
+  chipText: { color: '#e6eaef', fontSize: 12 },
   heading: { color: '#ffffff', fontWeight: '700', marginTop: 4 },
   dim: { color: '#7b8794', fontSize: 12 },
   info: { color: '#ffffff', textAlign: 'center' },

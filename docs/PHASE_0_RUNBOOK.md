@@ -14,12 +14,52 @@ Three modes, one screen, no navigation library. Deliberately crude.
 
 | Mode | What you do | What it records |
 |---|---|---|
-| **enroll** | Type a product label, point at the product, tap *Capture reference shot*. Repeat 3–5× per product from different angles. | A 1024-d L2-normalized vector per shot |
+| **enroll** | Type a product label, point at the product, tap *Capture reference shot*. Repeat 3–5× per product from different angles. | A 1280-d L2-normalized vector per shot |
 | **scan** | Just point. Live top-3 with cosine scores and the top1−top2 margin. | Nothing — this is the "does it feel right" mode |
 | **collect** | Type the **true** label of what you're pointing at, tap *Record test frame*. | A labeled vector + in-worklet latency |
 
+**Fixing mistakes.** Every capture is saved immediately, so there are three ways to take one back:
+
+- *Undo last shot (label)* in **enroll** — removes the most recent reference shot. Use it for a
+  blurry shot, a shot outside the reticle, or a shot under the wrong label.
+- *Undo last test frame (label)* in **collect** — removes the most recent test frame.
+- Tap a product in the **Enrolled** list — after a confirmation, deletes every shot for that label.
+  Use it for a typo'd label, or to re-enroll a product from scratch. Its test frames are **not**
+  deleted; the prompt warns you if any exist, because frames with no enrolled shots score as misses.
+
+Undo works only on the latest capture. Shots carry no id, timestamp or photo, so an older one
+cannot be picked out — delete the product and re-shoot it instead.
+
 *Export dataset JSON* hands `spike-dataset.json` to the Android share sheet. Get it onto the
 laptop any way you like — USB, SD card, a file manager. **No network path is used or needed.**
+
+*Save dataset to folder* is the backup to use during collection — no laptop needed. The first
+tap opens Android's folder picker; later taps in the same app session reuse that folder. Every
+save is a **new** file, `spike-dataset-YYYYMMDD-HHMMSS.json`, so no backup is ever overwritten.
+Android 11+ will not let an app pick the root of internal storage or the `Download` folder itself,
+so in the picker create a subfolder — e.g. `Download/BantayNiMama` — and pick that. To collect the
+backups on the laptop:
+
+```powershell
+adb pull /sdcard/Download/BantayNiMama spike/results/
+```
+
+> **On the Infinix X6823 the share sheet has no local target** (2026-09-13). Only 8 apps accept
+> `application/json`: Bluetooth, Quick Share, XShare, and five that upload (Gmail, Messenger,
+> Viber, WhatsApp, WPS) — the uploaders are off-limits (`TR-50`). Bluetooth to the laptop failed
+> twice. What worked: swap in the debug APK, which is `debuggable` and signed with the same key,
+> so `adb install -r` keeps app data; copy the file with `run-as`; reinstall the release APK.
+>
+> ```powershell
+> adb install -r android\app\build\outputs\apk\debug\app-debug.apk
+> cmd /c "adb exec-out run-as com.jash.bantaynimama cat files/spike-dataset.json > spike\results\spike-dataset.json"
+> adb shell run-as com.jash.bantaynimama sha256sum files/spike-dataset.json   # compare with Get-FileHash
+> adb install -r android\app\build\outputs\apk\release\app-release.apk
+> ```
+>
+> Do not open the app while the debug APK is installed — without Metro it only shows an error.
+> Check that both APKs still share a signing certificate (`apksigner verify --print-certs`) before
+> swapping: a mismatch makes the install fail, and uninstalling to "fix" it deletes the dataset.
 
 Then, on the laptop:
 
@@ -37,11 +77,28 @@ on the gate. It exits non-zero on FAIL.
 
 These are blocking. Nothing else in Phase 0 matters until A-3 is done.
 
-### A-1. Install JDK 17 and put the Android SDK on PATH
+### A-1. Install JDK 17 and put the Android SDK on PATH — ✅ **DONE (2026-09-12)**
 
-Your machine has the Android SDK at `%LOCALAPPDATA%\Android\Sdk`, but `ANDROID_HOME` is unset,
-`adb` is not on PATH, and your JDKs are 8, 11 and 20. **Expo SDK 57 / RN 0.86 needs JDK 17** —
-20 is not a supported AGP toolchain and 11 is too old.
+Verified on this machine:
+
+| Check | Value |
+|---|---|
+| `java -version` | `17.0.20.1` (Microsoft OpenJDK) |
+| `JAVA_HOME` | `C:\Program Files\Microsoft\jdk-17.0.20.101-hotspot` |
+| `ANDROID_HOME` | `C:\Users\Jasper\AppData\Local\Android\Sdk` |
+| `adb` | on PATH, runs (lists no devices — that is A-2) |
+| SDK platform | `android-36`; build-tools 35.0.0 / 36.0.0 |
+
+`npx expo prebuild` has since generated `android/` with Gradle 9.3.1.
+
+> **One gap remains.** `$ANDROID_HOME/ndk` is empty. The first `npm run android` compiles native
+> C++ for `react-native-fast-tflite` and `react-native-nitro-modules`; Gradle will either
+> auto-download the NDK it wants or stop with "NDK not configured". If it stops, install the
+> version it names via Android Studio's SDK Manager. Budget time for this — it is a long download.
+
+The original instructions are kept below for reproducibility on a fresh machine.
+
+**Expo SDK 57 / RN 0.86 needs JDK 17** — 20 is not a supported AGP toolchain and 11 is too old.
 
 ```powershell
 winget install Microsoft.OpenJDK.17
@@ -80,20 +137,70 @@ real camera sees under real store lighting.
 > If the phone is a budget Android (the real target market per `TR-02`), that is the *better*
 > device to measure on, not the worse one.
 
+#### Taking the phone off the laptop — build the release variant
+
+A debug build loads its JavaScript from the Metro dev server over the USB cable, so unplugging
+the phone kills the app. That makes the store trip impossible, which is the wrong reason to shoot
+desk photos. The fix is a release build: Gradle embeds the JS bundle into the APK, and the phone
+becomes standalone.
+
+```bash
+npx expo run:android --variant release
+```
+
+No signing setup is needed — `android/app/build.gradle` signs the release build type with the
+debug keystore. Because the signature matches the debug build, this installs as an upgrade and any
+dataset already captured survives.
+
+Two things follow from this, both worth having:
+
+- The phone leaves the desk, so A-3 can be shot where `TR-02` says it matters.
+- The **140–248 ms** latency in `PROJECT_STATUS.md` was measured on a *debug* build — unoptimised
+  JS, dev-mode bridge assertions. The release figure is the honest one. Record it as a separate
+  row; do not overwrite the debug measurement.
+
 ### A-3. Reference photos of ~20 real products, shot in an actual store
 
 **This is the single blocking input and no amount of code substitutes for it.** The thesis is
 about real packaging under real lighting on real shelves. Photos of products on your desk will
 give an optimistic number that collapses in Phase 3.
 
-Per `PROJECT_STATUS.md`, the set must include the nasty cases:
+The set must include near-identical pairs — they are what the spike actually tests. The specific
+brands do not matter; the *shape* of the confusion does. Two classes are required:
 
-- [ ] Two Palmolive sachet variants (near-identical colours)
-- [ ] Kopiko 3-in-1 vs 2-in-1
-- [ ] 250 ml and 1 L Coke (tests `L-02`)
-- [ ] Two repacked clear bags (tests `L-01`)
+| Class | Why it matters | Example on hand (2026-09-13) |
+|---|---|---|
+| **Same brand, different variant** | Near-identical artwork, different product and price. This is the sharpest test of whether the embedder separates SKUs at all. | Two Nissin ramen variants |
+| **Same product, different pack size** | Tests `L-02`. Solo and twin-pack share the artwork; only the count differs. | `nescafe-creamywhite-solo-pack-20g` vs `nescafe-creamywhite-twin-pack-40g`; `dishwashing-liquid-green-500ml` vs `-1liter`; `monggo-pack-10p` / `-20p` |
+| **Same brand, different product** | Same bottle and label layout, different contents and price. | `datu-puti-bottle-soysauce-385ml` vs `datu-puti-bottle-vinegar-385ml`; `dove-shampoo-blue-sachet` vs `dove-shampoo-pink-sachet` |
 
-Plus ~16 ordinary SKUs to fill out the catalog.
+Plus ~18 ordinary SKUs to fill out the catalog.
+
+> **Repacked clear bags (`L-01`) are in the set** as `monggo-pack-10p` / `-20p` — store-repacked
+> mung beans sold by peso value. They are both `L-01` (clear bag, little artwork) and `L-02` (same
+> contents, different size). They replaced the `oil-pack-*` repacks, which were removed from the
+> catalog; the `oil-pack-5p` test frames are kept as `unknown:` hard negatives.
+
+**Labelling decisions — fixed 2026-09-13, before any test frame was recorded.** Deciding after
+seeing results would be moving the goalposts, so these do not change once collection starts.
+
+*Amended 2026-09-13, after the catalog changed and **before any analysis ran**:* oil → monggo
+follows the same repack rule. The Nescafe twin is now the true twin of the solo, not a sugar-free
+variant, so the pair falls under the existing size-family rule.
+
+| Products | Test-frame label | Why |
+|---|---|---|
+| `monggo-pack-10p` / `-20p` | `ambiguous:` prefix | `L-01` + `L-02`; the app handles them with the quick-pick grid |
+| `dishwashing-liquid-green-500ml` / `-1liter` | `ambiguous:` prefix | `L-02`; the app handles it with the size chip (`SR-09`) |
+| `nescafe-creamywhite-solo-pack-20g` / `-twin-pack-40g` | `ambiguous:` prefix | `L-02`: same variant, only the count differs |
+| Every other product, including the Nissin pair, `datu-puti` soy sauce vs vinegar, and the Dove sachets | plain — counts in the gate | |
+
+That leaves 19 of 25 products in the gate. `ambiguous:` products stay in the catalog, so other
+products' frames can still be mis-matched *to* them — those misses still count.
+
+**Label fixes after collection go in `scripts/relabel.mjs`, never by hand-editing the JSON.** The
+phone backup stays the raw record; the script writes a `.labeled.json` copy and holds every
+correction with its reason. Run it before `analyze.mjs` on each new export.
 
 **Labelling convention that the analysis script depends on:** prefix the known-unsolvable items
 with `ambiguous:` — for example `ambiguous:repack-sugar-1kg`. The script excludes those from the
@@ -108,8 +215,24 @@ In **collect** mode, in the store, pointing at products you have already enrolle
 distance and lighting — that variation is the measurement. Roughly 5 frames per product across
 20 products gets you to 100.
 
-Record some frames of **un-enrolled** products too, labelled `unknown:<whatever>`. `NFR-03` wants
-≥85% correct rejection and you cannot measure rejection without negatives.
+**Vary the setting too, not just the pose.** The app has to recognise a product wherever the
+tindera meets it — on the shelf, held in hand, on the counter. Enrollment (2026-09-13) was shot
+**held in hand under store lighting**, so test frames taken the same way would measure the easy
+case only. Spread each product's frames across settings, e.g. 2 on the shelf, 2 in hand, 1 on the
+counter, and note the split in the spike report.
+
+Record some frames of **un-enrolled** products too, labelled `unknown:<whatever>` — roughly 15 of
+the 100. `NFR-03` wants ≥85% correct rejection and you cannot measure rejection without negatives.
+
+These are scored separately from the gate: `analyze.mjs` keeps `unknown:` frames out of the top-1
+denominator (they can never match an enrolled label) and reports them as an NFR-03 rejection rate.
+Accepting one still counts as a false positive under `NFR-02` — a confident price for a product
+that is not in the catalog is the worst failure the app has.
+
+> **Undo a test frame only for an operator mistake** — wrong label typed, product not in the
+> reticle, lens covered. **Never undo one because the top-3 showed the wrong product.** Wrong
+> matches are exactly what this step measures; removing them inflates top-1 and hides false
+> positives, which is how the gate produces a confidently wrong PASS (`NFR-02`).
 
 ### A-5. Decisions only you can make
 
@@ -143,10 +266,17 @@ npm run android              # first build is slow: Gradle downloads a lot
 `npm run android` runs `expo run:android`, which prebuilds `android/` and installs the dev build.
 After the first build, `npm start` is enough for JS changes.
 
-**On first launch, check the panel header.** It prints `dim <n>`. If that is not **1024**, stop —
-`TR-20` and the `vec_shots` schema both assume 1024 and the number must be corrected in
-`ARCHITECTURE.md` before Phase 1. If the latency reads wildly higher than ~40 ms, note it; that is
-a real `NFR-07` signal, not a bug to hide.
+**First launch happened on 2026-09-13, and both checks fired.** Recorded here rather than left as
+instructions, because both assumptions turned out to be wrong:
+
+- `dim` reads **1280**, not 1024. `TR-20`, the `vec_shots` schema and the pipeline diagram have
+  been corrected. No code hard-coded 1024 — the spike reads the model's reported `dim` — so this
+  was a documentation error only.
+- Latency reads **140–248 ms (median ~148)**, against a ~40 ms expectation. Noted, not hidden:
+  see the `NFR-07` note in `ARCHITECTURE.md` §8 for the three caveats and the first diagnostic.
+
+Neither blocks enrollment. The Phase 0 gate is accuracy, and accuracy is unaffected by how long
+each frame takes.
 
 Then:
 
@@ -165,11 +295,12 @@ Flagging these honestly now rather than discovering them at 11pm in a store.
 
 | Risk | Why | If it bites |
 |---|---|---|
-| **Frame → Image → crop → resize chain is unproven on device** | `react-native-fast-tflite`'s official VisionCamera **v5** integration example is behind a GitHub sponsorship; the glue in `src/spike/embed.ts` is written from the published Nitro type definitions, not from a working reference. The types are right; the runtime behaviour is not yet observed. | Most likely failure is a pixel-format or disposal issue. `channelLayout()` already handles all eight RGB layouts, and `dim` printing in the header is the canary. |
+| **Frame → Image → crop → resize chain is unproven on device** | `react-native-fast-tflite`'s official VisionCamera **v5** integration example is behind a GitHub sponsorship; the glue in `src/spike/embed.ts` is written from the published Nitro type definitions, not from a working reference. The types are right; the runtime behaviour is not yet observed. **Retired 2026-09-13** — observed working end to end on an Infinix X6823 in both debug and release: 1280-d embeddings, plausible top-3 ranking. | Most likely failure is a pixel-format or disposal issue. `channelLayout()` already handles all eight RGB layouts, and `dim` printing in the header is the canary. |
 | **Channel order** | Android hands back RGBA, iOS usually BGRA. Swapped channels do not throw — they just quietly cost accuracy. | If top-1 is implausibly bad, log `raw.pixelFormat` before blaming the model. |
 | **Input range** | The model's own tensor description says `[0.0, 1.0]` per channel, so `INPUT_SCALE = 1/255`. A `[-1, 1]` assumption would silently degrade every score. | Confirmed from the model file, not assumed. |
-| **GPU delegate is off** | `useTensorflowModel(..., [])` loads on CPU. Latency is therefore a pessimistic number. | Pass `['android-gpu']` once correctness is established, and re-measure. Record both. |
+| **GPU delegate is off** | `loadTensorflowModel(..., [])` loads on CPU. Latency is therefore a pessimistic number. | Pass `['android-gpu']` once correctness is established, and re-measure. Record both. |
 | **Desk photos** | Enrolling at a desk and testing at a desk produces a number that means nothing. | See A-3. This is the most likely way Phase 0 produces a confidently wrong PASS. |
+| **Debug-only code paths** | The release build is a different animal: the JS is bundled and assets are packed as Android resources. This already bit once — the model loaded fine under Metro for a day and then failed on the first release APK (ADR-011, `TR-29`). | Capture from the **release** APK, and re-verify anything asset- or path-shaped there rather than trusting the debug run. |
 
 ---
 

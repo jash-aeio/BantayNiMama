@@ -73,7 +73,7 @@ Phase 4 is a zip, not a migration.
 **Decision.** Brute-force cosine via sqlite-vec, no HNSW or IVF index.
 
 **Rationale.** A large sari-sari store holds ~500 SKUs × 5 shots = 2,500 vectors. SIMD brute force
-over 2,500 × 1024 floats is sub-millisecond. An approximate index would add build time, tuning
+over 2,500 × 1280 floats is sub-millisecond. An approximate index would add build time, tuning
 parameters, recall loss and update complexity for no measurable gain.
 
 ---
@@ -189,3 +189,77 @@ resolved from `raw.pixelFormat` at runtime rather than assumed per platform.
 GitHub sponsorship. The library itself is MIT and its Nitro type definitions are complete, so the
 glue was written from the types. It is **type-correct but not yet observed running on a device** —
 tracked as a risk in `PHASE_0_RUNBOOK.md` Part D.
+
+---
+
+## ADR-011 — Resolve the model through `expo-asset` instead of patching `react-native-fast-tflite`
+
+**Status:** Accepted · 2026-09-13 · Adds `TR-29`
+
+**Context.** The first release-variant APK launched and then stopped at "Model failed to load:
+`java.net.MalformedURLException: no protocol: assets_models_mobilenet_v3_large`". The debug build had
+been loading the same model successfully for a day. `react-native-fast-tflite` v3.0.1 resolves a
+`require()`d model with `Image.resolveAssetSource()` and passes the result straight to `java.net.URL`
+(`HybridAssetLoader.kt:14`). Under Metro that value is `http://127.0.0.1:8081/assets/...`; in a release
+build React Native packs the asset into the APK as an Android resource and the same call returns the
+bare name `assets_models_mobilenet_v3_large`, which is not a URL. The model was in the APK throughout
+(`res/pW.tflite`, 10,889,458 bytes, byte-identical to the source file) — only its address was unusable.
+
+**Decision.** Resolve the asset with `Asset.fromModule(...).downloadAsync()` and pass the resulting
+`localUri` to `loadTensorflowModel({ url })`. `expo-asset`'s native `AssetModule` copies an embedded
+asset out of the APK into the cache directory and hands back a real `file://` path, which the library's
+loader opens unmodified.
+
+**Rejected.** *Patching `HybridAssetLoader.kt`* to resolve resource names natively — correct at the
+source, but it puts a `patch-package` step and a fork of a native file between this project and every
+future upgrade of the library, to fix a spike that is throwaway by design.
+*Shipping the model in `android/app/src/main/assets/`* and loading `file:///android_asset/...` — that
+prefix is a WebView convention, not a filesystem path, so `java.net.URL` cannot open it either.
+
+**Consequence.** `expo-asset` ~57.0.17 becomes a direct dependency. It was already present
+transitively under `node_modules/expo/` and its `AssetModule` was already autolinked into the APK, so
+no new native code is compiled in — but a top-level import needs it hoisted, so it is now declared
+explicitly. Against `TR-51`: `expo-asset` *can* fetch remote assets, and does so under Metro in
+development, but for an embedded asset in a release build it reads from the APK. Verified rather than
+assumed — with the device in airplane mode the release build loads the model and produces 1280-d
+embeddings (`TR-53`; Infinix X6823, 2026-09-13).
+
+**Note.** This is not a Phase 0 quirk. Every release build of this app hits it, so the resolution step
+belongs in `src/ml/` when Phase 1 replaces the spike — hence a requirement (`TR-29`) rather than a
+runbook footnote.
+
+---
+
+## ADR-012 — `node --test` for the domain layer; the Phase 0 golden replay stays local-only
+
+**Status:** Accepted · 2026-09-14 · Phase 1 decisions D-2 and D-3 (`PHASE_1_PLAN.md` §3)
+
+**Context.** `src/domain/` is where recognition correctness is proven (`TR-37`), so Phase 1 needs a
+test runner. The Phase 0 labeled dataset is the only real ground truth the project has, and the new
+matching policy should be held to it. It is 9.6 MB of JSON and gitignored.
+
+**Decision.**
+1. Run domain tests with **Node's built-in `node --test`** (Node 24 runs `.ts` files directly by
+   stripping types).
+2. The **golden replay** — the new `match.ts` over
+   `spike-dataset-20260913-233955.labeled.json` at τ 0.46 / δ 0.075, asserting 86/91 top-1, 68/91
+   accepts and 3/196 false accepts — reads the file from `spike/results/`. **When the file is
+   absent, the test fails with a message naming the file.** It does not skip.
+
+**Rejected.**
+- *`jest-expo`* (~57.0.5) — the Expo default and better documented. But it adds hundreds of
+  transitive packages, each of which `TR-51` says to audit. The domain layer is pure by rule and
+  needs none of the React Native test environment.
+- *Committing the dataset*, raw or packed to binary (~2.7 MB, estimate). Every clone would carry it
+  forever.
+- *Silently skipping when absent.* A skipped regression test reads as a passing one.
+
+**Consequence.**
+- Domain code is limited to syntax that type stripping can erase: no `enum`, no `namespace`, no
+  constructor parameter properties.
+- It imports siblings by relative path with the `.ts` extension, not through the `@/` alias.
+  `tsconfig.json` needs the matching flags (`allowImportingTsExtensions`, `erasableSyntaxOnly`);
+  confirm them in P1-1.
+- **A fresh clone's `npm test` fails until `spike/results/` is restored from backup.** That is
+  deliberate. It is also why backing up that folder is a Phase 1 prerequisite (`PHASE_1_PLAN.md`
+  §2). `TR-53` is unaffected: the test reads a local file and needs no network.

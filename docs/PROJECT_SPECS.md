@@ -1,7 +1,7 @@
 # BantayNiMama — Project Specification
 
-> **Status:** Approved · **Version:** 1.0 · **Last updated:** 2026-09-12
-> **Owner:** Jasper · **Phase:** 0 (Embedding Viability Spike)
+> **Status:** Approved · **Version:** 1.0 · **Last updated:** 2026-09-14
+> **Owner:** Jasper · **Phase:** 1 (Proof of concept — real data path; Phase 0 gate passed 2026-09-13)
 
 Offline-first, AI-assisted visual product scanner for Philippine sari-sari stores.
 Point the camera at a product; see its name and price. Teach it new products in seconds.
@@ -157,7 +157,7 @@ object proposal replacing the fixed reticle.
 
 | ID | Requirement |
 |---|---|
-| **TR-20** | Embedding model: **MediaPipe Image Embedder, MobileNetV3-Large**, `.tflite`, 1024-d output. |
+| **TR-20** | Embedding model: **MediaPipe Image Embedder, MobileNetV3-Large**, `.tflite`, **1280-d output** — measured on device 2026-09-13; the 1024-d figure this requirement previously carried was an unverified assumption. |
 | **TR-21** | Model input: 224×224 RGB, Float32, normalized to **`[0.0, 1.0]` per channel** (i.e. byte ÷ 255). Confirmed from the model file's own tensor description, not assumed — a `[-1, 1]` assumption degrades every score without throwing. |
 | **TR-22** | All embeddings **L2-normalized at write time** so cosine similarity is a plain dot product. |
 | **TR-23** | Every stored vector is stamped with the `model_id` that produced it. |
@@ -166,6 +166,7 @@ object proposal replacing the fixed reticle.
 | **TR-26** | Frame rate throttled to **4 fps** via `runAtTargetFps`, dropping adaptively under thermal load. |
 | **TR-27** | Frames below a Laplacian-variance sharpness floor are discarded before inference. |
 | **TR-28** | INT8 quantization evaluated in Phase 3, adopted only if the accuracy cost is measured and acceptable. |
+| **TR-29** | The `.tflite` model is loaded by resolving the bundled asset to a **`file://` path** (`expo-asset`) before it reaches the TFLite loader. A bare `require()` works only under Metro — in a release build React Native packages the asset as an Android resource and `Image.resolveAssetSource()` returns a name with no URL scheme, which `react-native-fast-tflite` cannot open. See ADR-011. |
 
 ### 7.4 Matching policy
 
@@ -237,6 +238,7 @@ These ship as documented limitations, not bugs. Do not open issues to "fix" them
 ## 10. Related Documents
 
 - [`ARCHITECTURE.md`](./ARCHITECTURE.md) — system design, data flow, schema
+- [`PHASE_1_PLAN.md`](./PHASE_1_PLAN.md) — Phase 1 work breakdown, gate and deferrals
 - [`PHASE_0_RUNBOOK.md`](./PHASE_0_RUNBOOK.md) — how to run the Phase 0 spike and what it needs from you
 - [`PROJECT_STATUS.md`](./PROJECT_STATUS.md) — current phase, gates, what's next
 - [`CHANGELOG.md`](./CHANGELOG.md) — what shipped, when
