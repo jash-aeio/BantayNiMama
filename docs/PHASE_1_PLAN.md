@@ -212,6 +212,11 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
   products. Phase 1 has neither, but schema v1 should not paint Phase 2 into a corner — either filter
   inside the `vec0` query (metadata column, if the bundled version supports it) or delete vectors on
   soft delete and re-embed from JPEGs on restore (`TR-24` makes that possible).
+- **Negative shots (ADR-013, `TR-39`).** Phase 2 will store frames the tindera marks "Not in my
+  list" in `vec_shots`, as shots that must never be named. Phase 1 builds none, but schema v1
+  should leave a way to tell a negative apart without re-embedding. For example, a `kind`
+  column on `products`, which the KNN already joins. A forward-only migration (`TR-44`) could also
+  add it later; decide which.
 - **Shot count vs calibration.** Phase 0 calibrated τ/δ on **6** shots per product; `TR-42` caps at
   **5**. Best-of-5 scores are slightly lower than best-of-6 — expect it, note it, retune in Phase 3.
 
@@ -227,6 +232,7 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
 | op-sqlite native build | Untested in this project | Day-one checkpoint (P1-2). |
 | Release-only failures | Already bit once (ADR-011) | Every checkpoint runs on the **release** APK. |
 | Un-enrolled items land in disambiguate (`NFR-03` 49.5%) | Known | Nothing — Phase 3. The gate's zero-wrong-lock rule still applies. |
+| **Small catalogs accept un-enrolled items** (ADR-013) | New — simulated **15.1%** of un-enrolled frames at 5 products | Nothing in the policy. The gate enrolls 20 and scans only enrolled items, so it cannot surface this. Leave room for negative shots in schema v1 (§7). |
 
 ---
 

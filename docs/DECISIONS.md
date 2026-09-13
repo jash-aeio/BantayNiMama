@@ -270,3 +270,51 @@ matching policy should be held to it. It is 9.6 MB of JSON and gitignored.
 - **A fresh clone's `npm test` fails until `spike/results/` is restored from backup.** That is
   deliberate. It is also why backing up that folder is a Phase 1 prerequisite (`PHASE_1_PLAN.md`
   §2). `TR-53` is unaffected: the test reads a local file and needs no network.
+
+---
+
+## ADR-013 — On a small catalog, ask instead of quoting; learn negatives from the store's shelf
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Adds `SR-13`, `SR-14`, `TR-38`, `TR-39`;
+amends `SR-44`
+
+**Context.** In Phase 0, δ did the un-enrolled rejection, not τ (`ARCHITECTURE.md` §6). δ can only
+reject an item when an enrolled product sits close to it. Every Phase 0 number came from a
+25-product catalog, but a new store starts with five (`SR-44`). `scripts/small-catalog.mjs`
+resamples the Phase 0 data into smaller catalogs. Per frame, at τ 0.46 / δ 0.075, un-enrolled frames
+auto-accepted as a wrong product are 7.9% at 1 product, **15.1% at 5**, 9.7% at 15, and 2.9% at 25.
+`NFR-02` allows ≤ 2%. At 5 products, 8.9% of those false accepts are same-brand siblings; the rest
+are unrelated items (Ajinomoto salt → Colgate sachet). This is a simulation on one counter's data,
+not a store measurement.
+
+**Decision.**
+1. **Confirm mode (`SR-13`).** Below `app_meta.confirm_below` enrolled products (`TR-38`), an ACCEPT
+   becomes *"Is this {name}? ₱{price} — Yes / No"*. A wrong price then cannot be quoted
+   confidently. The system does not have to reject correctly for that to hold, and the cost is one
+   tap per scan while the catalog is small.
+2. **Store-local negatives (`SR-14`, `TR-39`).** *No*, or rejecting a wrong result, saves the frame as a
+   hidden negative. The items most likely to be confused are the ones on that store's shelf, and
+   only the tindera can photograph them.
+3. **No change to `match.ts`, τ or δ in Phase 1.** The golden replay stays as it is.
+
+**Rejected.**
+- *A floor for a lone candidate* (accept only ≥ 0.60 when nothing else is enrolled). N=1 falls to
+  0.4%, but correct accepts fall to 65.9%, and N ≥ 2 is unchanged — the problem is sparsity, not
+  the missing top-2.
+- *τ scaled to catalog size.* Holding ≤ 2% takes τ 0.58–0.61 between 3 and 15 products, where
+  correct accepts fall to 59.7–71.0%. The problem becomes "nothing is recognised".
+- *An enrollment prompt for sibling SKUs* ("do you also sell other flavours?"). Considered and not
+  adopted: siblings are under 9% of false accepts at 5 products.
+
+**Deferred to Phase 3, not rejected — a bundled distractor bank.** Ship embeddings of common products
+that no store enrolls, as hidden items. Simulated with half the un-enrolled brand families as the
+bank: 15.1% → 4.7% at 5 products, correct accepts 88.8% → 79.1%. That number is flattered, because
+the bank and the test frames share a counter and lighting. A fair test needs a bank photographed
+elsewhere. Shipping one also means shipping its JPEGs, so it can be re-embedded on a model swap (`TR-24`).
+
+**Consequence.**
+- `confirm_below` needs a calibration Phase 0 cannot give. On Phase 0 data even 25 products leave
+  2.9% of un-enrolled frames accepted, so the value must come from store data in Phase 3.
+- Negatives change the schema: a shot must be distinguishable as a negative. Phase 1 builds none,
+  but schema v1 should not block one (`PHASE_1_PLAN.md` §7).
+- The 3-of-5 stability gate (`TR-36`) is not modelled. How much it removes is unmeasured.

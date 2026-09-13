@@ -60,6 +60,8 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-10** | Products flagged `is_ambiguous` bypass recognition and surface a pinned **quick-pick grid**. | MUST |
 | **SR-11** | Torch toggle for dim store interiors. | SHOULD |
 | **SR-12** | Recognition result must not flicker — a result locks only after temporal agreement. | MUST |
+| **SR-13** | **Confirm mode on a small catalog.** While fewer products are enrolled than `app_meta.confirm_below` (`TR-38`), an ACCEPT is shown as a one-tap question — *"Is this {name}? ₱{price}"* with **Yes / No** — never as a confident price. A small catalog cannot reject un-enrolled items (ADR-013). | MUST *(Phase 2; cutoff calibrated Phase 3)* |
+| **SR-14** | **"Not in my list."** From a *No* in SR-13, a wrong lock, or a wrong chip, one tap saves the current frame as a store-local **negative** (`TR-39`). A negative is never named, priced or offered. | MUST *(Phase 2)* |
 
 ### 4.2 Enrollment
 
@@ -91,7 +93,7 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-41** | **No network request may ever leave the device.** No telemetry, no analytics, no crash reporting upload. | MUST |
 | **SR-42** | UI language switchable between **English** and **Filipino** without restart. | MUST |
 | **SR-43** | Camera permission denial leads to a recovery screen with a route to system settings. | MUST |
-| **SR-44** | First run with an empty catalog presents a guided "add your first five items" flow. | MUST |
+| **SR-44** | First run with an empty catalog presents a guided "add your first five items" flow. Scans on a catalog this small are in confirm mode (`SR-13`): five products cannot reject un-enrolled items (ADR-013). | MUST |
 | **SR-45** | Export and import the full catalog as a single portable archive. | SHOULD *(Phase 4)* |
 
 ---
@@ -180,6 +182,8 @@ object proposal replacing the fixed reticle.
 | **TR-35** | τ and δ are stored in `app_meta` as configuration, calibrated empirically. **Never hard-coded.** |
 | **TR-36** | Temporal stability gate: lock a result only when **3 of the last 5** frame decisions agree. |
 | **TR-37** | The matching policy must be a **pure function** over `(candidates, τ, δ, buffer)` so it is unit-testable without a camera. |
+| **TR-38** | The `SR-13` cutoff is stored in `app_meta` as `confirm_below`, calibrated empirically and never hard-coded — the same rule as `TR-35`. **No value chosen yet:** on Phase 0 data even 25 products leave 2.9% of un-enrolled frames accepted, so it comes from store data in Phase 3 (ADR-013). |
+| **TR-39** | Negative shots (`SR-14`) are stored in `vec_shots` like any shot, stamped with `model_id` (`TR-23`), with their JPEG kept (`TR-24`). They rank alongside products. If a negative is top-1 → **UNKNOWN**. As top-2 it still counts toward δ. A negative is never named, priced or shown as a chip. |
 
 ### 7.5 Data
 

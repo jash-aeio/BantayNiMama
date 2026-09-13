@@ -150,8 +150,20 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every installed `@types` package by default. Adding `node` globally would leak Node's types
   (e.g. `setTimeout`'s return type) into React Native app code, so test files are excluded from
   the app typecheck and checked separately.
+- `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
+  enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
+  per size, per frame, at τ 0.46 / δ 0.075. Deterministic.
+  - Un-enrolled frames auto-accepted: 7.9% at 1, **15.1% at 5**, 9.7% at 15, 2.9% at 25
+    (`NFR-02` ≤ 2%). The 25-product row matches the golden replay's 3/105.
+  - At 5 products, 8.9% of false accepts are same-brand siblings.
+  - Also measures three candidate fixes: a lone-candidate floor, τ scaled to catalog size, and a
+    distractor bank. Results in ADR-013.
 
 ### Changed
+- **Small-catalog risk planned (ADR-013).** `PROJECT_SPECS.md` adds `SR-13` (confirm mode),
+  `SR-14` ("Not in my list"), `TR-38` (`confirm_below` in `app_meta`) and `TR-39` (negative shots),
+  and amends `SR-44`. `ARCHITECTURE.md` §6 corrects the framing: the risk is a sparse catalog, not a
+  lone candidate. No code or threshold changed.
 - `npm test` runs the domain tests instead of printing a placeholder:
   `node --test "src/domain/**/*.test.ts"`, with Node's `MODULE_TYPELESS_PACKAGE_JSON` warning
   silenced. Adding `"type": "module"` to `package.json` would break the CommonJS

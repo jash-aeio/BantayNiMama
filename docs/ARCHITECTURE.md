@@ -210,11 +210,12 @@ The pseudocode above is literal, with these edge cases pinned down by tests:
   anything non-finite or out of range with a `RangeError`. Non-finite similarities are dropped
   before ranking.
 - **A lone candidate** at or above τ is ACCEPTed with `margin: null`. **Consequence:** δ does the
-  un-enrolled rejection (see calibration below). In a catalog of one product there is no top-2
-  for δ to act on, and a catalog of a few gives it little to work with. So in the first days of
-  SR-44's "add your first five" flow, un-enrolled items that clear τ will be accepted. How often
-  is **unmeasured**: every Phase 0 number came from a 25-product catalog. Address with SR-44 and
-  the Phase 3 retune.
+  un-enrolled rejection (see calibration below), and δ only works when some enrolled product sits
+  close to the item. The problem is a *sparse* catalog, not only a catalog of one. With a few
+  products, top-2 exists but is far away, so the margin looks large and an un-enrolled item is
+  accepted. Simulated on Phase 0 data (*Small catalogs*, below), 15.1% of un-enrolled frames are
+  accepted at 5 products, which is SR-44's first-run size. The mitigation lives in the UI and the
+  catalog, not in this function (ADR-013, `SR-13`, `SR-14`).
 - **`LIMIT 10` is safe (TR-30).** The golden replay checks, for all 196 Phase 0 frames, that
   top-1 and top-2 from the 10 nearest shots equal the full brute-force ranking. That holds while
   a product has ≤ 6 shots; `TR-42` caps it at 5.
@@ -254,6 +255,37 @@ catalog. Tune toward **precision** — NFR-02 outranks NFR-01.
 - **Small samples at the edges.** 5 wrong matches, 105 negatives; the 95% CI on FP 3/196 is
   0.5–4.4%, which spans the `NFR-02` ceiling. Retune in Phase 3 on the full catalog.
 
+### Small catalogs — simulated (2026-09-14)
+
+`scripts/small-catalog.mjs` enrolls a random N of the 25 Phase 0 products and treats everything else
+as un-enrolled: the `unknown:` frames plus the frames of the products left out. It uses the same data
+and phone as above (Infinix X6823), τ 0.46 / δ 0.075, 500 random catalogs per size. Results are
+**per frame, before the 3-of-5 stability gate**. This is a **simulation on Phase 0 data**, not a
+store measurement.
+
+| Products enrolled | Un-enrolled frames auto-accepted (wrong price) | Correct accepts |
+|---|---|---|
+| 1 | 7.9% | 95.6% |
+| 2 | 12.0% | 92.7% |
+| 3 | 14.2% | 91.4% |
+| 5 | **15.1%** | 88.8% |
+| 10 | 12.6% | 83.1% |
+| 15 | 9.7% | 79.1% |
+| 25 | 2.9% — the 3/105 above | 74.7% |
+
+- **The risk is sparsity, not a missing top-2.** It peaks near SR-44's five products and is still
+  9.7% at 15. `NFR-02` allows ≤ 2%.
+- **Mostly unrelated items.** At 5 products, 8.9% of false accepts are same-brand siblings. The
+  most frequent pairs are Ajinomoto salt → Colgate sachet and Century Tuna → Nissin spicy seafood.
+- **Fixes in the policy were rejected** (ADR-013).
+  - A 0.60 floor for a lone candidate fixes only N=1, where correct accepts drop to 65.9%.
+  - Holding ≤ 2% with τ alone takes 0.58–0.61, where correct accepts drop to 59.7–71.0%.
+- **Deferred to Phase 3: a bundled distractor bank.** Using half the un-enrolled brand families as
+  hidden items gives 4.7% at 5 products, with 79.1% correct accepts. The number is flattered: the
+  bank and the test frames share one counter.
+- **Adopted instead:** confirm mode below `confirm_below` products, plus negatives the tindera
+  marks (`SR-13`, `SR-14`, `TR-38`, `TR-39`). Neither is built yet.
+
 ---
 
 ## 7. Directory Layout
@@ -276,7 +308,8 @@ BantayNiMama/
 │                              `npm run fetch-model` (scripts/fetch-model.mjs)
 ├── scripts/
 │   ├── fetch-model.mjs        ← dev-time model download (TR-20)
-│   └── analyze.mjs            ← Phase 0 offline accuracy + τ/δ sweep
+│   ├── analyze.mjs            ← Phase 0 offline accuracy + τ/δ sweep
+│   └── small-catalog.mjs      ← small-catalog false-accept simulation (ADR-013)
 ├── App.tsx                    ← PHASE 0 ONLY. Throwaway spike UI; replaced by app/
 │                              once the gate passes.
 ├── src/spike/                 ← PHASE 0 ONLY. Deleted at the start of Phase 1.
