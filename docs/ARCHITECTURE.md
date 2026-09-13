@@ -351,7 +351,6 @@ BantayNiMama/
 │                              once the gate passes.
 ├── src/spike/                 ← PHASE 0 ONLY. Deleted at the start of Phase 1.
 │   ├── config.ts              ← spike constants (τ/δ are NOT here — see TR-35)
-│   ├── embed.ts               ← in-worklet crop→resize→runSync→L2-normalize
 │   ├── vectors.ts             ← pure cosine ranking + τ/δ decision
 │   └── dataset.ts             ← capture, persist, share-sheet export
 ├── src/
@@ -364,8 +363,14 @@ BantayNiMama/
 │   │   ├── appMeta.ts         ← strict app_meta parsing (TR-35, TR-38)
 │   │   ├── migrations.ts      ← migration planning (TR-44)
 │   │   ├── photoPath.ts       ← relative photo paths only (TR-43)
+│   │   ├── pixels.ts          ← channel layout, model input, reticle rect — worklet-callable (TR-21)
+│   │   ├── stats.ts           ← nearest-rank median / p90 for device measurements
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
+│   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
+│   │   ├── loadModel.ts       ← expo-asset → file:// → TFLite, CPU or GPU; tensor shapes checked (TR-29)
+│   │   ├── frameEmbedder.ts   ← camera-thread worklet; per-stage timings (TR-25)
+│   │   └── stillEmbedder.ts   ← saved JPEG → vector on the JS thread (enrollment, TR-24)
 │   ├── db/                    ← schema, migrations, repositories
 │   │   ├── open.ts            ← openDatabase(): bantay.db in documentDirectory (TR-46)
 │   │   ├── schema.ts          ← migrations, forward-only (TR-44)
@@ -400,8 +405,10 @@ a `require()` that works throughout development fails on the first release build
 | Stage | Budget | Measured |
 |---|---|---|
 | Sharpness gate | ~1 ms | not isolated by the spike |
-| Crop + resize | 1–3 ms | not isolated — folded into the row below |
-| TFLite inference | 8–40 ms | not isolated — folded into the row below |
+| Crop + resize | 1–3 ms | **CPU run: median 36.9 ms, p90 38.0** (P1-3, n = 40). Includes frame → image conversion and packing into Float32. With the GPU delegate: **median 36.6, p90 37.7**. The delegate does not touch this stage. |
+| TFLite inference | 8–40 ms | **CPU: median 62.8 ms, p90 72.2** (P1-3, n = 40). **`android-gpu` delegate: median 43.2 ms, p90 45.1**, 31% less. Whether GPU vectors match CPU vectors is **not yet measured**, so the delegate is not adopted: τ/δ were calibrated on CPU. |
+| L2-normalize | <0.1 ms | **median 0.9 ms** (P1-3, n = 40). Also copies the vector out of the model's output buffer. |
+| **Per-frame worklet total, split measurement** | **9–43 ms** | **CPU: median 100.7 ms, p90 109.1 · GPU delegate: median 81.2 ms, p90 83.0** — Infinix X6823, release APK, 2026-09-14, n = 40 each. Neither meets `NFR-07`. Crop + resize alone is ~37 ms, so even a free model would leave this stage near the budget. Not directly comparable to the 145.5 ms below: that number also covered converting the vector to a JS array inside the worklet. |
 | **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **Release: median 145.5 ms, p90 160.1 ms, range 126.5–339.5 ms** (n = 226 test frames). Debug: 140–248 ms, median ~148 ms (7 spot readings). See note. |
 | sqlite-vec KNN | 0.5–3 ms | **Could not run** — sqlite-vec does not load on 32-bit ARM (§5). Measured as a substitute: **JS brute force, 100 shots median 9.2 ms; 2,500 shots median 234.0 ms** (inline loop over one `Float32Array`, n = 10), and 831.1 ms at 2,500 when calling `dot()` per shot. Infinix X6823, release APK, 2026-09-14. |
 | Read vectors from SQLite | — | **56.3 ms** for 2,500 × 1280-d BLOBs, bit-exact round trip. Same device and date. |

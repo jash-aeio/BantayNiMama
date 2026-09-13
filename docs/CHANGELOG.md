@@ -253,6 +253,55 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - A transaction that threw after its first `INSERT` left no row behind (`TR-45`).
   - **Found in passing:** the phone's font drew the `→` arrows in these debug lines as a wrong
     glyph, while τ and δ rendered correctly. Keep arrows out of user-facing copy (P1-7, `SR-42`).
+- **P1-3 — the ML module** (2026-09-14). `src/ml/` replaces `src/spike/embed.ts`, which is
+  deleted. Domain tests 74 → **88**; typecheck clean.
+  - `src/ml/model.ts` — the model id, input size (224), reticle fraction (0.55) and target frame
+    rate (4 fps), shared by scanning and enrollment so the two paths cannot crop differently.
+  - `src/ml/loadModel.ts` — `expo-asset` → `file://` → `loadTensorflowModel` (`TR-29`), on CPU or
+    the `android-gpu` delegate.
+    - It refuses a model URL that is not a local file. The loader would fetch `http(s)` (`TR-51`).
+    - It checks the model's own tensors: input float32 `[1,224,224,3]`, output float32. A
+      different model file then fails at load instead of scoring quietly wrong (`TR-21`).
+  - `src/ml/frameEmbedder.ts` — the camera-thread worklet (`TR-25`). It posts a `Float32Array`,
+    where the spike posted `number[]` (`ARCHITECTURE.md` §2).
+    - It times crop + resize, `runSync` and normalization separately, because Phase 0's 145 ms
+      was one undivided number.
+    - It throws instead of returning null, so the reason a frame failed reaches the screen.
+    - A comment in the spike was wrong: `new Float32Array(head)` is a view of the model's output
+      buffer, not a copy. The copy really comes from `l2Normalize`.
+  - `src/ml/stillEmbedder.ts` — embeds a saved square JPEG on the JS thread, for enrollment and
+    for `TR-24` re-embeds. It refuses non-square images, which would be stretched. **Not yet
+    exercised on device**; that is P1-4, once reference JPEGs exist.
+  - `src/domain/pixels.ts` — `channelLayout`, `toModelInput` (byte × 1/255, `TR-21`) and
+    `reticleRect`, all marked `'worklet'`, so both embedders run this same tested code. A pixel
+    buffer of the wrong size throws rather than being read with shifted rows. `l2Normalize` is
+    marked `'worklet'` too.
+  - `src/domain/stats.ts` — nearest-rank median / p90 / max, so every reported latency is a real
+    sample.
+  - The spike app now runs on `src/ml`, with a temporary CPU / GPU switch and a live per-stage
+    timing readout over the last 40 frames.
+  - **Verified on device** — Infinix X6823, release APK (`armeabi-v7a`, Gradle 47 s), 2026-09-14.
+    Live frames give 1280-d vectors at length 1.00000 (`TR-20`, `TR-22`). Per-stage timings,
+    median / p90 over n = 40 frames each:
+
+    | Stage | CPU | `android-gpu` delegate |
+    |---|---|---|
+    | Crop + resize (incl. frame conversion and Float32 packing) | 36.9 / 38.0 ms | 36.6 / 37.7 ms |
+    | `runSync` | 62.8 / 72.2 ms | **43.2 / 45.1 ms** |
+    | Normalize | 0.9 / 0.9 ms | 0.9 / 0.9 ms |
+    | **Total** | **100.7 / 109.1 ms** | **81.2 / 83.0 ms** |
+
+  - **Consequences:**
+    - `NFR-07` (≤ 60 ms) is not met on either path.
+    - The GPU delegate cuts inference by 31% but leaves crop + resize (~37 ms) untouched. That
+      stage is the next lever, not a model swap.
+    - The GPU delegate is **not adopted**: nobody has checked that its vectors match CPU's, and
+      τ/δ were calibrated on CPU.
+    - Phase 0's 145.5 ms is not directly comparable, because it also covered building a JS array
+      in the worklet.
+  - **Found in passing:** `adb` twice lost its shell channel mid-install. `adb shell` answered
+    `error: closed` while `adb devices` still listed the phone. Restarting the local adb server
+    fixed it; this was not an app fault.
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.

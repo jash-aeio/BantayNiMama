@@ -13,11 +13,11 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). P1-1 done: the golden replay reproduces the Phase 0 gate exactly. Domain tests now 74. **P1-2 done:** schema v1 migrates on the Infinix, and the enroll, reopen and search round trip passes. Vectors are stored as BLOBs and searched in JS (ADR-014). |
-| **Next action** | P1-3, the ML module. Move model loading and the frame embedder out of the spike into `src/ml/`; the worklet posts a `Float32Array`. Add the still-image embedder for enrollment. Time crop/resize separately from `runSync`, and try the GPU delegate (`TR-25`, `TR-29`). |
+| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). P1-1 done: the golden replay reproduces the Phase 0 gate exactly. Domain tests now 74. **P1-2 done:** schema v1 migrates on the Infinix, and the enroll, reopen and search round trip passes. Vectors are stored as BLOBs and searched in JS (ADR-014). **P1-3 done:** `src/ml/` runs on the Infinix; a frame takes 100.7 ms on CPU and 81.2 ms with the GPU delegate (budget 60). |
+| **Next action** | P1-4, the photo store. Save the reticle crop as a 512 px q80 JPEG under a relative path, run `stillEmbedder` on it, and measure frame-vs-JPEG vector agreement and bytes per shot (`TR-42`, `TR-43`, `NFR-08`). |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
-| **Watch out for** | Per-frame latency **median 145.5 ms, p90 160.1 ms** on the release APK (n = 226) vs a 25–40 ms budget — `NFR-07` is not met, and the release build did not fix it. See `ARCHITECTURE.md` §8. |
+| **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms). Split on the Infinix (P1-3): `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms either way. Totals: 100.7 ms CPU, 81.2 ms GPU. The GPU helps but is not enough, and crop + resize is the next lever. See `ARCHITECTURE.md` §8. |
 | **Known soft spot** | **Un-enrolled products.** At τ/δ, 50 of 105 un-enrolled frames land in *disambiguate* (two wrong chips), so only 49.5% return Unknown (`NFR-03` ≥ 85%, not met). `analyze.mjs`'s 97.1% counts "not auto-accepted". All 3 false accepts are Zonrox bottles → Datu Puti vinegar. |
 | **New risk — small catalogs** | δ rejects un-enrolled items only when an enrolled product is close. Simulated on Phase 0 data, **15.1%** of un-enrolled frames are auto-accepted at 5 products (SR-44's first five), and 9.7% still at 15. Plan (ADR-013): confirm mode + store-local negatives (`SR-13`, `SR-14`), built in Phase 2. **No Phase 1 change** — the gate scans only enrolled items. |
 | **Biggest risk** | Correct accepts are **74.7%** at τ/δ vs `NFR-01` ≥ 90%. Ranking is strong (top-3 100%) but margins are thin, so many correct matches fall to disambiguate. A Phase 3 problem — the Phase 0 gate measures ranking only. |
@@ -57,7 +57,11 @@ Detail and "done when" for each step: [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md) §5. 
   - [x] Pure inline KNN, BLOB codec, `app_meta` parsing and migration planning in `src/domain` — tests 40 → 74 *(2026-09-14)*
   - [x] Schema v1 (`product_shots.embedding` BLOB), forward-only migration, `app_meta` seed, `insertProductWithShots` (one transaction), `loadVectorIndex` *(2026-09-14)*
   - [x] **On the Infinix** *(2026-09-14)*: `bantay.db` migrated 0 → 1 with `app_meta` intact. Enroll, close, reopen and search found each shot's own vector top-1 at 1.000000, with the price back as 1250 centavos (3 shots reloaded in 0.6 ms). A failed transaction left no row.
-- [ ] P1-3 ML module — frame + still embedders; crop/resize vs `runSync` split timed; GPU delegate tried (`TR-25`, `TR-29`)
+- [x] P1-3 ML module — frame + still embedders; crop/resize vs `runSync` split timed; GPU delegate tried (`TR-25`, `TR-29`) *(2026-09-14)*
+  - [x] `src/ml/` (`loadModel`, `frameEmbedder`, `stillEmbedder`, shared `model.ts`) plus `src/domain/pixels.ts` and `stats.ts`; spike embedder deleted; tests 74 → 88 *(2026-09-14)*
+  - [x] **On the Infinix** *(2026-09-14)*: live frames give 1280-d vectors at length 1.00000. Per-frame total median **100.7 ms on CPU, 81.2 ms with `android-gpu`**; `runSync` 62.8 → 43.2 ms; crop+resize ~37 ms either way (n = 40 each; `ARCHITECTURE.md` §8)
+  - [ ] Before adopting the GPU delegate: check its vectors agree with CPU's (τ/δ were calibrated on CPU)
+  - [ ] `stillEmbedder` on device — needs reference JPEGs, so it happens in P1-4
 - [ ] P1-4 Photo store — relative paths; frame-vs-JPEG agreement and bytes/shot measured (`TR-42`, `TR-43`, `NFR-08`)
 - [ ] P1-5 Enrollment — one transaction, photos first (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`)
 - [ ] P1-6 Scanner — lock / chips / Unknown; KNN and policy latency timed (`SR-02`–`SR-04`, `SR-09`, `SR-12`)
@@ -134,6 +138,8 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Inference latency, iOS | 8–15 ms | — | — |
 | JS brute-force KNN, no sqlite-vec | must fit `NFR-07` / `NFR-09` | **100 shots: median 9.2 ms · 2,500 shots: median 234.0 ms** (inline loop, n = 10 each; 831.1 ms via `dot()` per shot) — Infinix X6823, release APK | 2026-09-14 |
 | Read 2,500 × 1280-d vector BLOBs | — | **56.3 ms**, bit-exact round trip — Infinix X6823, release APK | 2026-09-14 |
+| Per-frame worklet stages, CPU (P1-3) | ≤ 60 ms total (`NFR-07`) | crop+resize **36.9** · `runSync` **62.8** · normalize **0.9** · total **100.7** ms median (total p90 109.1), n = 40 — Infinix X6823, release APK. Not met. | 2026-09-14 |
+| Per-frame worklet stages, `android-gpu` delegate (P1-3) | ≤ 60 ms total (`NFR-07`) | crop+resize **36.6** · `runSync` **43.2** · normalize **0.9** · total **81.2** ms median (total p90 83.0), n = 40 — Infinix X6823, release APK. Not met. **Not adopted:** GPU-vs-CPU vector agreement unmeasured. | 2026-09-14 |
 
 ---
 

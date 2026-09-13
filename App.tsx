@@ -1,4 +1,3 @@
-import { Asset } from 'expo-asset';
 import { StatusBar } from 'expo-status-bar';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -19,14 +18,14 @@ import {
   useFrameOutput,
   usePreviewOutput,
 } from 'react-native-vision-camera';
-import {
-  loadTensorflowModel,
-  type TensorflowModel,
-} from 'react-native-fast-tflite';
 import { scheduleOnRN } from 'react-native-worklets';
 
-import { MODEL_ID, RETICLE_FRACTION, TARGET_FPS } from './src/spike/config';
-import { embedFrame, type EmbedResult } from './src/spike/embed';
+import { runStorageCheck } from './src/db/devCheck';
+import { summarize } from './src/domain/stats.ts';
+import { dot } from './src/domain/vector.ts';
+import { embedFrame, type FrameEmbedding, type StageTimings } from './src/ml/frameEmbedder';
+import { loadEmbeddingModel, type Accelerator, type LoadedModel } from './src/ml/loadModel';
+import { MODEL_ID, RETICLE_FRACTION, TARGET_FPS } from './src/ml/model';
 import {
   exportDataset,
   load,
@@ -36,45 +35,47 @@ import {
   type TestFrame,
 } from './src/spike/dataset';
 import { rankProducts, type Candidate, type Shot } from './src/spike/vectors';
-import { runStorageCheck } from './src/db/devCheck';
+
+// PHASE 0 SPIKE UI, now running on the Phase 1 modules (src/ml, src/db). Throwaway: replaced by
+// app/ in P1-7. The P1-3 additions — CPU/GPU switch and per-stage timings — are temporary too.
 
 type Mode = 'scan' | 'enroll' | 'collect';
 
 const DEVICE_NAME = `${Platform.OS} ${Platform.Version}`;
 
-const MODEL_ASSET = require('./assets/models/mobilenet_v3_large.tflite');
+/** How many recent frames the on-screen timing summary covers. */
+const TIMING_WINDOW = 40;
 
-type TfliteState =
-  | { state: 'loading' }
-  | { state: 'loaded'; model: TensorflowModel }
-  | { state: 'error'; error: Error };
+interface Live {
+  vector: number[];
+  elapsedMs: number;
+  dim: number;
+  norm: number;
+}
 
-// fast-tflite resolves a require()d model via Image.resolveAssetSource, which in a release
-// build returns a bare Android resource name ("assets_models_...") instead of a URL, and its
-// native loader passes that straight to java.net.URL — MalformedURLException. Routing through
-// expo-asset copies the model out of the APK and yields a real file:// path the loader can
-// read. The asset is embedded, so this is a local copy and not a download (TR-50).
-function useTfliteModel(): TfliteState {
-  const [state, setState] = useState<TfliteState>({ state: 'loading' });
+type ModelState =
+  | { state: 'loading'; accelerator: Accelerator }
+  | { state: 'loaded'; loaded: LoadedModel }
+  | { state: 'error'; accelerator: Accelerator; error: string };
+
+function useEmbeddingModel(accelerator: Accelerator): ModelState {
+  const [state, setState] = useState<ModelState>({ state: 'loading', accelerator });
 
   useEffect(() => {
     let cancelled = false;
-    void (async () => {
-      try {
-        const asset = await Asset.fromModule(MODEL_ASSET).downloadAsync();
-        const model = await loadTensorflowModel(
-          { url: asset.localUri ?? asset.uri },
-          [],
-        );
-        if (!cancelled) setState({ state: 'loaded', model });
-      } catch (e) {
-        if (!cancelled) setState({ state: 'error', error: e as Error });
-      }
-    })();
+    setState({ state: 'loading', accelerator });
+    loadEmbeddingModel(accelerator).then(
+      (loaded) => {
+        if (!cancelled) setState({ state: 'loaded', loaded });
+      },
+      (e: unknown) => {
+        if (!cancelled) setState({ state: 'error', accelerator, error: e instanceof Error ? e.message : String(e) });
+      },
+    );
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [accelerator]);
 
   return state;
 }
@@ -83,8 +84,9 @@ export default function App() {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
   const preview = usePreviewOutput();
-  const tflite = useTfliteModel();
-  const model = tflite.state === 'loaded' ? tflite.model : undefined;
+  const [accelerator, setAccelerator] = useState<Accelerator>('cpu');
+  const modelState = useEmbeddingModel(accelerator);
+  const model = modelState.state === 'loaded' ? modelState.loaded.model : undefined;
 
   // P1-2 storage check: run once, show on screen and in logcat (tag ReactNativeJS).
   const dbProbe = useMemo(() => {
@@ -96,23 +98,42 @@ export default function App() {
   const [mode, setMode] = useState<Mode>('enroll');
   const [label, setLabel] = useState('');
   const [dataset, setDataset] = useState<SpikeDataset>(() => load(DEVICE_NAME));
-  const [live, setLive] = useState<EmbedResult | null>(null);
+  const [live, setLive] = useState<Live | null>(null);
   const [ranked, setRanked] = useState<Candidate[]>([]);
+  const [frameError, setFrameError] = useState<string | null>(null);
 
   // The latest embedding, kept in a ref so the capture buttons can read it
   // without the whole panel re-rendering on every frame.
-  const latest = useRef<EmbedResult | null>(null);
+  const latest = useRef<Live | null>(null);
   const shotsRef = useRef<Shot[]>(dataset.shots);
   shotsRef.current = dataset.shots;
+  const timings = useRef<StageTimings[]>([]);
 
   useEffect(() => {
     if (!hasPermission) void requestPermission();
   }, [hasPermission, requestPermission]);
 
-  const onEmbedding = useCallback((result: EmbedResult) => {
-    latest.current = result;
-    setLive(result);
-    setRanked(rankProducts(result.vector, shotsRef.current).slice(0, 3));
+  // Timings from one accelerator must never be summarised together with another's.
+  useEffect(() => {
+    timings.current = [];
+    setLive(null);
+  }, [accelerator]);
+
+  const onEmbedding = useCallback((result: FrameEmbedding) => {
+    const vector = Array.from(result.vector);
+    latest.current = {
+      vector,
+      elapsedMs: result.timings.totalMs,
+      dim: result.vector.length,
+      norm: Math.sqrt(dot(result.vector, result.vector)),
+    };
+    timings.current = [...timings.current.slice(-(TIMING_WINDOW - 1)), result.timings];
+    setLive(latest.current);
+    setRanked(rankProducts(vector, shotsRef.current).slice(0, 3));
+  }, []);
+
+  const onFrameError = useCallback((message: string) => {
+    setFrameError((previous) => (previous === message ? previous : message));
   }, []);
 
   // TR-26: throttle inside the worklet. Holding the interval on the camera
@@ -131,8 +152,9 @@ export default function App() {
         if (now - lastRun.current < minIntervalMs) return;
         lastRun.current = now;
 
-        const result = embedFrame(frame, model);
-        if (result != null) scheduleOnRN(onEmbedding, result);
+        scheduleOnRN(onEmbedding, embedFrame(frame, model));
+      } catch (e) {
+        scheduleOnRN(onFrameError, e instanceof Error ? e.message : String(e));
       } finally {
         frame.dispose();
       }
@@ -250,11 +272,12 @@ export default function App() {
       </Centered>
     );
   }
-  if (tflite.state === 'error') {
+  if (modelState.state === 'error') {
     return (
       <Centered>
-        <Text style={styles.info}>Model failed to load:</Text>
-        <Text style={styles.dim}>{tflite.error.message}</Text>
+        <Text style={styles.info}>Model failed to load ({modelState.accelerator}):</Text>
+        <Text style={styles.dim}>{modelState.error}</Text>
+        {modelState.accelerator !== 'cpu' && <Button label="Use CPU instead" onPress={() => setAccelerator('cpu')} />}
       </Centered>
     );
   }
@@ -262,7 +285,9 @@ export default function App() {
     return (
       <Centered>
         <ActivityIndicator color="#ffffff" />
-        <Text style={styles.info}>Loading {MODEL_ID}…</Text>
+        <Text style={styles.info}>
+          Loading {MODEL_ID} ({accelerator})…
+        </Text>
       </Centered>
     );
   }
@@ -296,11 +321,25 @@ export default function App() {
           ))}
         </View>
 
+        <View style={styles.row}>
+          {(['cpu', 'android-gpu'] as const).map((a) => (
+            <Pressable
+              key={a}
+              onPress={() => setAccelerator(a)}
+              style={[styles.tab, accelerator === a && styles.tabActive]}
+            >
+              <Text style={[styles.tabText, accelerator === a && styles.tabTextActive]}>{a}</Text>
+            </Pressable>
+          ))}
+        </View>
+
         <Text style={styles.meta}>
-          dim {live?.dim ?? dataset.dim} · {live ? `${live.elapsedMs.toFixed(1)} ms` : 'waiting for frames'} ·{' '}
+          {accelerator} · dim {live?.dim ?? '—'} · |v| {live ? live.norm.toFixed(5) : '—'} ·{' '}
           {dataset.shots.length} shots / {Object.keys(shotCounts).length} products ·{' '}
           {dataset.frames.length} test frames
         </Text>
+        <Text style={styles.meta}>{describeTimings(timings.current)}</Text>
+        {frameError !== null && <Text style={styles.error}>frame error: {frameError}</Text>}
         <Text style={styles.meta}>{dbProbe}</Text>
 
         {mode !== 'scan' && (
@@ -371,6 +410,23 @@ export default function App() {
   );
 }
 
+/** P1-3 latency diagnostic: per-stage median / p90 over the last TIMING_WINDOW frames. */
+function describeTimings(samples: readonly StageTimings[]): string {
+  const stage = (name: string, pick: (t: StageTimings) => number) => {
+    const s = summarize(samples.map(pick));
+    return s === null ? `${name} —` : `${name} ${s.median.toFixed(1)}/${s.p90.toFixed(1)}`;
+  };
+  return (
+    `ms median/p90, n=${samples.length}: ` +
+    [
+      stage('crop+resize', (t) => t.cropResizeMs),
+      stage('runSync', (t) => t.inferenceMs),
+      stage('normalize', (t) => t.normalizeMs),
+      stage('total', (t) => t.totalMs),
+    ].join(' · ')
+  );
+}
+
 function countByLabel(labels: string[]): Record<string, number> {
   const out: Record<string, number> = {};
   for (const l of labels) out[l] = (out[l] ?? 0) + 1;
@@ -431,6 +487,7 @@ const styles = StyleSheet.create({
   tabText: { color: '#9aa5b1', fontWeight: '600' },
   tabTextActive: { color: '#0b0f14' },
   meta: { color: '#9aa5b1', fontSize: 12, fontVariant: ['tabular-nums'] },
+  error: { color: '#ff6b6b', fontSize: 12 },
   input: {
     backgroundColor: '#1b2430',
     color: '#ffffff',

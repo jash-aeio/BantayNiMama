@@ -26,6 +26,7 @@ export function dot(a: Vector, b: Vector): number {
  * vector would otherwise score "no match" against everything without anyone noticing.
  */
 export function l2Normalize(v: Vector): Float32Array {
+  'worklet'; // also runs on the camera thread (src/ml/frameEmbedder.ts)
   let sumSq = 0;
   for (let i = 0; i < v.length; i++) sumSq += v[i]! * v[i]!;
   const norm = Math.sqrt(sumSq);
