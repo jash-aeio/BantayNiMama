@@ -191,7 +191,7 @@ object proposal replacing the fixed reticle.
 |---|---|
 | **TR-40** | Single SQLite database file holding both product metadata and the shot vectors (`product_shots.embedding`, BLOB). *Amended 2026-09-14 from the `vec0` virtual table — ADR-014.* |
 | **TR-41** | **Money stored as integer centavos.** Floats are forbidden for currency anywhere in the codebase. |
-| **TR-42** | Reference photos: 512 px longest edge, JPEG q80, max 5 per product. |
+| **TR-42** | Reference photos: at most 512 px longest edge, **never upscaled**, JPEG q80, max 5 per product. *Clarified 2026-09-14 (P1-4): at 1280 × 720 the reticle crop is 396 px and is stored at that size, because upscaling adds bytes (`NFR-08`) but no detail.* |
 | **TR-43** | Photo paths stored **relative** to the document directory, never absolute. |
 | **TR-44** | Schema migrations keyed on `app_meta.schema_version`, forward-only. |
 | **TR-45** | Enrollment writes product + shots + vectors in **one transaction**. |

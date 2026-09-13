@@ -1,7 +1,9 @@
 # Phase 1 Plan — Proof of Concept, Real Data Path
 
 > **Status:** Approved 2026-09-14 — decisions D-1 to D-4 settled (§3) · **Written:** 2026-09-14 ·
-> **Implementation not started.**
+> **In progress:** P1-1 to P1-4 done 2026-09-14; P1-5 next. Progress lives in
+> [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Where a device result changed this plan, the step carries
+> an *Amended* note, and the original text is kept.
 >
 > Phase 0 answered *"can the model tell products apart?"* Phase 1 answers *"does a product survive
 > the trip camera → JPEG → SQLite → force-quit → relaunch → camera, and still come back as itself?"*
@@ -20,8 +22,8 @@
 | Gate reproducible, not a one-off | `/phase-gate` rebuilt it from the raw phone backup (SHA-256 `a9f9232c…`) | ✅ |
 | τ / δ calibrated | τ 0.46, δ 0.075 from the score histogram (`ARCHITECTURE.md` §6) | ✅ |
 | Release-build model loading solved | `TR-29` / ADR-011, verified in airplane mode | ✅ |
-| Storage dependency fits the device | `@op-engineering/op-sqlite` 18.2.1 ships `libsqlite_vec.so` for **`armeabi-v7a`** (checked in the package tarball, 2026-09-14) — the Infinix is covered | ✅ (build not yet run) |
-| `NFR-07` latency | Median 145.5 ms vs ≤ 60 ms — **not met** | ⚠ Carried, not blocking — see §8 |
+| Storage dependency fits the device | `@op-engineering/op-sqlite` 18.2.1 ships `libsqlite_vec.so` for **`armeabi-v7a`** (checked in the package tarball, 2026-09-14) — the Infinix is covered | ✅ (build not yet run) — ❌ **on device 2026-09-14**: the library loads, but its sqlite-vec does not (op-sqlite#456). Plain SQLite works → ADR-014 |
+| `NFR-07` latency | Median 145.5 ms vs ≤ 60 ms — **not met** *(P1-3 split: 100.7 ms CPU, 81.2 ms GPU)* | ⚠ Carried, not blocking — see §8 |
 | `NFR-01` / `NFR-03` at τ/δ | 74.7% accepts, 49.5% Unknown — **not met** | ⚠ Phase 3 by design — the Phase 1 gate does not test accuracy |
 
 ---
@@ -62,7 +64,9 @@ Agreed 2026-09-14 (D-1). Run on the **Infinix X6823, release APK, airplane mode*
    At least two same-brand variant pairs, so the scan step can actually fail.
 2. **Force-quit** (Settings → Apps → Force stop, not just swipe away) and relaunch.
 3. **Persistence check** — a debug readout, shown on screen:
-   - row counts of `products`, `product_shots`, `vec_shots` match what was enrolled;
+   - row counts of `products` and `product_shots` match what was enrolled. Each shot row carries
+     its vector as an `embedding` BLOB. *(Amended 2026-09-14: ADR-014 removed the separate
+     `vec_shots` table. The check is unchanged: every enrolled vector is still counted.)*
    - `app_meta` reports `schema_version 1`, `model_id`, `embedding_dim 1280`, τ, δ;
    - every `photo_path` resolves to an existing file under `documentDirectory` (`TR-43`).
 4. **Self-match check** — deterministic, no camera variance: re-embed every stored JPEG and query
@@ -140,8 +144,19 @@ device. Each step has a *done when*.
   Record both in `ARCHITECTURE.md` §8. No redesign in Phase 1.
 
 *Done when:* live frames produce 1280-d unit vectors on device; split timings recorded.
+**Done 2026-09-14** — CPU 100.7 ms, `android-gpu` 81.2 ms per frame (`ARCHITECTURE.md` §8). GPU not
+adopted until its vectors are checked against CPU's.
 
 ### P1-4 · Photo store
+
+> **Amended 2026-09-14 (measured).**
+> - **Size:** the frame is 1280 × 720, so the reticle crop is 396 px. `TR-42`'s 512 px is applied
+>   as a cap and never upscales.
+> - **Model instances:** JPEGs are embedded by a **second, CPU-only model instance**. The camera
+>   worklet already runs `runSync` on the first, and one interpreter must not run on two threads.
+> - **Result:** frame-vs-JPEG dot min 0.9803 / median 0.9843, at 17.5 KB per shot. After a
+>   force-stop, re-embeds match their saved vectors at 1.000000.
+> - **Still owed before P1-8:** whether JPEG-path enrollment changes real decisions.
 
 - Reticle crop → 512 px → JPEG q80 → `documentDirectory/photos/<shot_id>.jpg`; store the **relative**
   path (`TR-42`, `TR-43`, `TR-17`) via nitro-image `saveToFileAsync(path, 'jpg', 80)`.
@@ -218,8 +233,11 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
   products. Phase 1 has neither, but schema v1 should not paint Phase 2 into a corner — either filter
   inside the `vec0` query (metadata column, if the bundled version supports it) or delete vectors on
   soft delete and re-embed from JPEGs on restore (`TR-24` makes that possible).
-- **Negative shots (ADR-013, `TR-39`).** Phase 2 will store frames the tindera marks "Not in my
-  list" in `vec_shots`, as shots that must never be named. Phase 1 builds none, but schema v1
+- **Negative shots (ADR-013, `TR-39`).** *Settled by schema v1 (2026-09-14): it has no `kind`
+  column. A forward-only migration (`TR-44`) adds one when Phase 2 builds negatives. Nothing in v1
+  blocks it, because negatives are ordinary `product_shots` rows (`TR-39`).* Original note: Phase 2
+  will store frames the tindera marks "Not in my list" in `vec_shots`, as shots that must never be
+  named. Phase 1 builds none, but schema v1
   should leave a way to tell a negative apart without re-embedding. For example, a `kind`
   column on `products`, which the KNN already joins. A forward-only migration (`TR-44`) could also
   add it later; decide which.
@@ -232,10 +250,10 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
 
 | Risk | Status | Phase 1 action |
 |---|---|---|
-| **`NFR-07` latency, 145.5 ms median** | Not met. At 4 fps (250 ms interval) it fits, with no headroom; the worst frame (339.5 ms) overruns. | Split stages and try the GPU delegate (P1-3). Record. Do not redesign — the numbers decide that. |
+| **`NFR-07` latency, 145.5 ms median** | Not met. At 4 fps (250 ms interval) it fits, with no headroom; the worst frame (339.5 ms) overruns. **Split measured (P1-3):** crop + resize ~37 ms, `runSync` 62.8 ms CPU / 43.2 ms GPU; totals 100.7 / 81.2 ms. | Split stages and try the GPU delegate (P1-3) — **done**. Do not redesign — the numbers decide that. |
 | 32-bit test phone | The only device; `armeabi-v7a` gives up TFLite's arm64 kernels | Note every number as 32-bit. A 64-bit budget phone is the more representative target and remains unmeasured. |
-| **Enrollment domain gap** (frame vs JPEG) | New — Phase 0 never exercised the JPEG path | Measure in P1-4 before the gate. |
-| op-sqlite native build | Untested in this project | Day-one checkpoint (P1-2). |
+| **Enrollment domain gap** (frame vs JPEG) | **Measured (P1-4):** dot median 0.9843, min 0.9803 on one static scene. A score can move by up to 0.18; δ is 0.075. | Measure in P1-4 — **done**. Still owed: its effect on real decisions, before the P1-8 gate. |
+| op-sqlite native build | **Failed on device** — sqlite-vec cannot load on 32-bit ARM (op-sqlite#456); plain SQLite works | Day-one checkpoint (P1-2) — **did its job**. BLOB vectors + JS search (ADR-014); native search owed for `NFR-09`. |
 | Release-only failures | Already bit once (ADR-011) | Every checkpoint runs on the **release** APK. |
 | Un-enrolled items land in disambiguate (`NFR-03` 49.5%) | Known | Nothing — Phase 3. The gate's zero-wrong-lock rule still applies. |
 | **Small catalogs accept un-enrolled items** (ADR-013) | New — simulated **15.1%** of un-enrolled frames at 5 products | Nothing in the policy. The gate enrolls 20 and scans only enrolled items, so it cannot surface this. Leave room for negative shots in schema v1 (§7). |

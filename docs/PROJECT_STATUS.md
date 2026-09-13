@@ -13,7 +13,7 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). P1-1 done: the golden replay reproduces the Phase 0 gate exactly. Domain tests now 74. **P1-2 done:** schema v1 migrates on the Infinix, and the enroll, reopen and search round trip passes. Vectors are stored as BLOBs and searched in JS (ADR-014). **P1-3 done:** `src/ml/` runs on the Infinix; a frame takes 100.7 ms on CPU and 81.2 ms with the GPU delegate (budget 60). **P1-4 done:** reference JPEGs survive a force-stop and re-embed identically, at ~17.5 KB per shot. |
+| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). **P1-1 to P1-4 done**, all on the Infinix, release APK. The golden replay reproduces the Phase 0 gate exactly. Schema v1 migrates, and enroll → reopen → search passes, with vectors as BLOBs searched in JS (ADR-014). A frame takes 100.7 ms on CPU and 81.2 ms with the GPU delegate (budget 60). Reference JPEGs survive a force-stop and re-embed identically, at ~17.5 KB per shot. Domain tests **93**, typecheck clean. |
 | **Next action** | P1-5, enrollment. A name and price form, 3–5 captures, JPEGs saved first, then product + shots + vectors in one transaction. A duplicate check against the catalog, and the new product matchable on the next frame (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`). |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
@@ -61,7 +61,7 @@ Detail and "done when" for each step: [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md) §5. 
   - [x] `src/ml/` (`loadModel`, `frameEmbedder`, `stillEmbedder`, shared `model.ts`) plus `src/domain/pixels.ts` and `stats.ts`; spike embedder deleted; tests 74 → 88 *(2026-09-14)*
   - [x] **On the Infinix** *(2026-09-14)*: live frames give 1280-d vectors at length 1.00000. Per-frame total median **100.7 ms on CPU, 81.2 ms with `android-gpu`**; `runSync` 62.8 → 43.2 ms; crop+resize ~37 ms either way (n = 40 each; `ARCHITECTURE.md` §8)
   - [ ] Before adopting the GPU delegate: check its vectors agree with CPU's (τ/δ were calibrated on CPU)
-  - [ ] `stillEmbedder` on device — needs reference JPEGs, so it happens in P1-4
+  - [x] `stillEmbedder` on device *(2026-09-14, in P1-4)*: 10 saved JPEGs embedded on the JS thread, and each re-embed after a force-stop matched its saved vector at dot 1.000000
 - [x] P1-4 Photo store — relative paths; frame-vs-JPEG agreement and bytes/shot measured (`TR-42`, `TR-43`, `NFR-08`) *(2026-09-14)*
   - [x] `referencePhoto.ts` (path, size cap without upscaling), `db/photos.ts` (save / list / delete), `captureReference` (one crop, two uses), second CPU model instance for JPEGs; tests 88 → 93 *(2026-09-14)*
   - [x] **On the Infinix** *(2026-09-14, 10 captures, one static scene, CPU)*: frame-vs-JPEG dot min 0.9803 / median 0.9843; JPEG 17.5 KB median per shot (~88 KB per 5-shot product, `NFR-08` ≤ 200 KB); 396 px crop of a 1280×720 frame, not upscaled

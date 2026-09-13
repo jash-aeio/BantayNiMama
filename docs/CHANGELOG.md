@@ -362,6 +362,19 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     distractor bank. Results in ADR-013.
 
 ### Changed
+- **Docs brought up to date with P1-2 to P1-4** (2026-09-14). No code or threshold changed.
+  - **`TR-42` clarified:** 512 px is a cap and never upscales. The 396 px reticle crop is stored
+    at 396 px (P1-4, `NFR-08`).
+  - **`PHASE_1_PLAN.md`:**
+    - The gate's persistence check (§4 step 3) counts `products` and `product_shots`. The
+      `vec_shots` table left the schema in ADR-014; the check still counts every vector.
+    - Readiness (§1) and risks (§8) now record the sqlite-vec failure, the latency split and the
+      measured frame-vs-JPEG gap.
+    - P1-4 has an amendment note: the 396 px size and the second, CPU-only model instance.
+    - §7's negative-shot question is settled. Schema v1 has no `kind` column; a forward-only
+      migration adds one in Phase 2 (`TR-39`, `TR-44`).
+  - **`PROJECT_STATUS.md`:** `stillEmbedder` is ticked as verified on device, since P1-4's
+    re-embeds ran through it. The test count is corrected to 93.
 - **Small-catalog risk planned (ADR-013).** `PROJECT_SPECS.md` adds `SR-13` (confirm mode),
   `SR-14` ("Not in my list"), `TR-38` (`confirm_below` in `app_meta`) and `TR-39` (negative shots),
   and amends `SR-44`. `ARCHITECTURE.md` §6 corrects the framing: the risk is a sparse catalog, not a

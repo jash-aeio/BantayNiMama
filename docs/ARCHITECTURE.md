@@ -96,6 +96,7 @@ from `tsc` and from `node --test`, so it only shows on the device, as every fram
 ║ 11. Render overlay         Reanimated shared values          <16 ms    ║
 ╚════════════════════════════════════════════════════════════════════════╝
 
+Stage times above are budgets. Measured values are in §8 (Infinix: 100.7 ms per frame on CPU).
 Per processed frame:  30–50 ms budget Android · 15–25 ms iOS
 CPU duty cycle:       12–20% at 4 fps
 Perceived lock:       ~750 ms (3 agreeing frames at 4 fps)
