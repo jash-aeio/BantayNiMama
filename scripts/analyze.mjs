@@ -108,6 +108,23 @@ const scored = frames.filter((f) => !f.trueLabel.startsWith(AMBIGUOUS_PREFIX));
 const negatives = scored.filter((f) => f.trueLabel.startsWith(UNKNOWN_PREFIX));
 const positives = scored.filter((f) => !f.trueLabel.startsWith(UNKNOWN_PREFIX));
 
+// A frame label that matches no enrolled product can only score as a miss, so a
+// typo in collect mode silently lowers top-1. Surface them before any numbers.
+const enrolled = new Set(products);
+const orphans = new Map();
+for (const f of frames) {
+  if (f.trueLabel.startsWith(UNKNOWN_PREFIX)) continue;
+  const label = f.trueLabel.startsWith(AMBIGUOUS_PREFIX)
+    ? f.trueLabel.slice(AMBIGUOUS_PREFIX.length)
+    : f.trueLabel;
+  if (!enrolled.has(label)) orphans.set(f.trueLabel, (orphans.get(f.trueLabel) ?? 0) + 1);
+}
+if (orphans.size > 0) {
+  console.warn('WARNING: test-frame labels with no enrolled product (typo? deleted product?):');
+  for (const [label, n] of orphans) console.warn(`  ${String(n).padStart(3)}×  "${label}"`);
+  console.warn('Non-ambiguous frames among these score as misses. Fix the labels in the JSON and re-run.\n');
+}
+
 if (positives.length === 0) {
   console.error('No enrolled-product test frames to score — every frame is ambiguous: or unknown:.');
   process.exit(1);

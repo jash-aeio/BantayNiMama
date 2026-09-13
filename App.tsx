@@ -31,6 +31,7 @@ import {
   exportDataset,
   load,
   save,
+  saveDatasetToFolder,
   type SpikeDataset,
   type TestFrame,
 } from './src/spike/dataset';
@@ -215,6 +216,17 @@ export default function App() {
     exportDataset().catch((e: Error) => Alert.alert('Export failed', e.message));
   }, []);
 
+  const onSaveToFolder = useCallback(() => {
+    saveDatasetToFolder()
+      .then((path) =>
+        Alert.alert(
+          'Saved',
+          `${path}\n${dataset.shots.length} shots · ${dataset.frames.length} test frames`,
+        ),
+      )
+      .catch((e: Error) => Alert.alert('Save failed', e.message));
+  }, [dataset]);
+
   if (!hasPermission) {
     return (
       <Centered>
@@ -343,7 +355,8 @@ export default function App() {
           </>
         )}
 
-        <Button label="Export dataset JSON" onPress={onExport} />
+        <Button label="Save dataset to folder" onPress={onSaveToFolder} />
+        <Button label="Export dataset JSON" onPress={onExport} secondary />
       </ScrollView>
     </View>
   );
