@@ -4,6 +4,7 @@ import { describe, test } from 'node:test';
 import {
   captureStillMatches,
   correctionsToReplace,
+  likelyProducts,
   MAX_CORRECTION_SHOTS,
   MAX_PRODUCT_SHOTS,
   type ExistingShot,
@@ -94,5 +95,25 @@ describe('captureStillMatches (P2-3 guard, ADR-017)', () => {
   test('an Unknown or grid lock names nothing, so there is nothing to reject', () => {
     assert.equal(captureStillMatches('unknown', { kind: 'unknown', best: null }), false);
     assert.equal(captureStillMatches('quickPick', { kind: 'quickPick', productIds: ['bag'], score: 0.8 }), false);
+  });
+});
+
+describe('likelyProducts (SR-07, P2-4)', () => {
+  const s = (productId: string, score: number) => ({ productId, score });
+
+  test('keeps rank order and leaves out the rejected products and negatives', () => {
+    const top = [s('p', 0.8), s('n', 0.75), s('q', 0.7), s('r', 0.6)];
+    assert.deepEqual(likelyProducts(top, ['p'], new Set(['n'])), ['q', 'r']);
+  });
+
+  test('a rejected chip pair leaves only a third product, or nothing', () => {
+    assert.deepEqual(likelyProducts([s('p', 0.7), s('q', 0.69), s('r', 0.5)], ['p', 'q'], new Set()), ['r']);
+    assert.deepEqual(likelyProducts([s('p', 0.7), s('q', 0.69)], ['p', 'q'], new Set()), []);
+  });
+
+  test('never repeats a product, skips a non-finite score, and stops at the limit', () => {
+    const top = [s('a', NaN), s('b', 0.9), s('b', 0.9), s('c', 0.8), s('d', 0.7), s('e', 0.6)];
+    assert.deepEqual(likelyProducts(top, [], new Set()), ['b', 'c', 'd']);
+    assert.deepEqual(likelyProducts(top, [], new Set(), 1), ['b']);
   });
 });

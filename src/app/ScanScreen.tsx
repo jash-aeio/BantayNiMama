@@ -12,14 +12,15 @@ import {
 } from 'react-native-vision-camera';
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
-import { catalogCounts } from '../db/products';
-import { appendInteraction, type InteractionKind } from '../domain/interactionLog.ts';
+import { catalogCounts, listProducts } from '../db/products';
 import { EnrollmentPanel } from '../features/enrollment/EnrollmentPanel';
 import { useEnrollment } from '../features/enrollment/useEnrollment';
+import { PriceEditPanel } from '../features/scanner/PriceEditPanel';
 import { RejectPanel } from '../features/scanner/RejectPanel';
 import { ScanOverlay } from '../features/scanner/ScanOverlay';
 import { useRejection } from '../features/scanner/useRejection';
 import { useScanner } from '../features/scanner/useScanner';
+import { useUndoDelete } from '../features/scanner/useUndoDelete';
 import { captureReference, embedFrame, type FrameEmbedding, type ReferenceCapture } from '../ml/frameEmbedder';
 import { RETICLE_FRACTION, TARGET_FPS } from '../ml/model';
 import { useAppServices } from './services';
@@ -28,21 +29,31 @@ import { useAppServices } from './services';
 const WORKLET_TIMING_WINDOW = 40;
 
 /**
- * The Scan tab: one camera for scanning, enrollment and *Not in my list* (operator's choice, P1-7).
+ * The Scan tab: one camera for scanning, enrollment, the reject sheet and the price editor.
  *
- * Enrollment slides up under the live preview rather than opening a second screen. A second camera
- * with its own frame processor would need the scanner's stopped first, and SR-05 asks that Add
- * never blocks the preview. The camera is active only while this tab is focused, so the Products
- * tab costs no inference (NFR-06).
+ * Each of those opens in a panel under the live preview rather than on a second screen. A second
+ * camera with its own frame processor would need the scanner's stopped first, and SR-05 asks that
+ * Add never blocks the preview. The panel also keeps text fields above the keyboard. The camera is
+ * active only while this tab is focused, so the Products tab costs no inference (NFR-06).
  *
- * Voting pauses while enrollment or a rejection is open (P2-3). The card is then pinned to what the
- * tindera tapped, and a lock changing under her finger cannot redirect the tap to another product.
- * Resuming starts a fresh stability window.
+ * Voting pauses while a panel is open (P2-3, P2-4). The card is then pinned to what the tindera
+ * tapped, and a lock changing under her finger cannot redirect the tap to another product.
+ * Resuming starts a fresh stability window, and so does every catalog write.
  */
 export function ScanScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { catalog, indexRef, frameModel, stillModel, diagnostics, catalogVersion, bumpCatalogVersion } = useAppServices();
+  const {
+    catalog,
+    indexRef,
+    frameModel,
+    stillModel,
+    diagnostics,
+    catalogVersion,
+    bumpCatalogVersion,
+    rebuildIndex,
+    logInteraction: log,
+  } = useAppServices();
   const focused = useIsFocused();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
@@ -51,15 +62,11 @@ export function ScanScreen() {
   const jpegModel = stillModel.state === 'loaded' ? stillModel.loaded.model : undefined;
 
   const [enrolling, setEnrolling] = useState(false);
+  /** SR-06: the product whose price editor is open, bound when its price was tapped. */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing = editingId !== null;
   const [frameError, setFrameError] = useState<string | null>(null);
   const [torch, setTorch] = useState(false);
-
-  const log = useCallback(
-    (kind: InteractionKind, productIds: readonly string[]) => {
-      diagnostics.interactionLog.current = appendInteraction(diagnostics.interactionLog.current, { atMs: Date.now(), kind, productIds });
-    },
-    [diagnostics],
-  );
 
   // One capture channel, set from JS and read by the worklet on its next processed frame. Enrollment
   // and a rejection are never open together, so the owner says where the capture goes.
@@ -96,24 +103,29 @@ export function ScanScreen() {
   const rejection = useRejection({
     catalog,
     indexRef,
+    lastTop: scanner.lastTop,
     stillModel: jpegModel,
     requestFrameCapture: requestRejectCapture,
     classify: scanner.classify,
+    rebuildIndex,
     onCatalogChanged: bumpCatalogVersion,
     log,
   });
   const rejecting = rejection.state.stage !== 'idle';
 
+  const undoDelete = useUndoDelete({ catalog, rebuildIndex, onCatalogChanged: bumpCatalogVersion, log });
+
   const pausedRef = useRef(false);
-  pausedRef.current = enrolling || rejecting;
+  pausedRef.current = enrolling || rejecting || editing;
   const receivers = useRef({ enroll: enrollment.receiveCapture, reject: rejection.receiveCapture });
   receivers.current = { enroll: enrollment.receiveCapture, reject: rejection.receiveCapture };
 
-  // A fresh stability window whenever scanning pauses or resumes, so a lock never carries votes from
-  // before the pause, from before a product existed, or from an index without the negative just saved.
+  // A fresh stability window whenever scanning pauses or resumes, and after every catalog write
+  // (enrollment, price edit, delete, restore, negative, correction). A lock must never mix votes from
+  // before a pause, or from two different indexes (P2-4).
   useEffect(() => {
     resetScanner();
-  }, [enrolling, rejecting, focused, resetScanner]);
+  }, [enrolling, rejecting, editing, focused, catalogVersion, resetScanner]);
 
   // SR-11. Off whenever the tab loses focus: a torch left on in a pocket drains the battery (NFR-06).
   useEffect(() => {
@@ -121,6 +133,8 @@ export function ScanScreen() {
   }, [focused]);
 
   const liveProductCount = useMemo(() => catalogCounts(catalog.db).products, [catalog, catalogVersion]);
+  // The sheet's name search. Read only while the sheet is open.
+  const searchable = useMemo(() => (rejecting ? listProducts(catalog.db) : []), [catalog, catalogVersion, rejecting]);
 
   const onEmbedding = useCallback(
     (result: FrameEmbedding) => {
@@ -149,7 +163,26 @@ export function ScanScreen() {
     log(torch ? 'torchOff' : 'torchOn', []);
     setTorch(!torch);
   }, [log, torch]);
-  const nameOf = useCallback((id: string) => scanner.productOf(id)?.name ?? '—', [scanner.productOf]);
+
+  const openPriceEditor = useCallback(
+    (productId: string) => {
+      log('priceEditOpen', [productId]);
+      setEditingId(productId);
+    },
+    [log],
+  );
+  const closePriceEditor = useCallback(() => setEditingId(null), []);
+  const onPriceSaved = useCallback(() => {
+    bumpCatalogVersion();
+    setEditingId(null);
+  }, [bumpCatalogVersion]);
+  const deleteProduct = useCallback(
+    (productId: string) => {
+      undoDelete.remove(productId);
+      setEditingId(null);
+    },
+    [undoDelete.remove],
+  );
 
   useEffect(() => {
     if (!hasPermission) void requestPermission();
@@ -221,6 +254,8 @@ export function ScanScreen() {
     );
   }
 
+  const panelOpen = enrolling || rejecting || editing;
+
   return (
     <View style={styles.root}>
       <View style={styles.cameraWrap}>
@@ -239,7 +274,7 @@ export function ScanScreen() {
             <Text style={[styles.topButtonText, torch && styles.torchOnText]}>{t(torch ? 'scan.torchTurnOff' : 'scan.torchTurnOn')}</Text>
           </Pressable>
         )}
-        {!enrolling && !rejecting && (
+        {!panelOpen && (
           <>
             <Pressable onPress={openEnrollment} style={[styles.topButton, styles.addButton, { top: insets.top + 12 }]}>
               <Text style={styles.topButtonText}>{t('scan.addProduct')}</Text>
@@ -253,22 +288,56 @@ export function ScanScreen() {
               photoOf={scanner.photoOf}
               onAdd={openEnrollment}
               onReject={rejection.reject}
+              onEditPrice={openPriceEditor}
               onLog={log}
             />
           </>
         )}
-        {!enrolling && rejecting && <RejectPanel rejection={rejection} nameOf={nameOf} />}
+        {(undoDelete.pending !== null || undoDelete.rebuildError !== null) && (
+          <View style={[styles.undoBar, { top: insets.top + 64 }]}>
+            {undoDelete.rebuildError !== null ? (
+              <Pressable onPress={undoDelete.dismissError} style={styles.undoTextWrap}>
+                <Text style={styles.error}>{t('scan.undo.rebuildFailed', { message: undoDelete.rebuildError })}</Text>
+              </Pressable>
+            ) : (
+              <Text style={[styles.undoText, styles.undoTextWrap]} numberOfLines={2}>
+                {t('scan.undo.deleted', { name: undoDelete.pending?.name ?? '' })}
+              </Text>
+            )}
+            {undoDelete.pending !== null && (
+              <Pressable onPress={undoDelete.undo} style={styles.undoButton}>
+                <Text style={styles.undoButtonText}>{t('scan.undo.undo')}</Text>
+              </Pressable>
+            )}
+          </View>
+        )}
         {frameError !== null && (
-          <Text style={[styles.frameError, { top: insets.top + 64 }]}>{t('scan.frameError', { message: frameError })}</Text>
+          <Text style={[styles.frameError, { top: insets.top + 132 }]}>{t('scan.frameError', { message: frameError })}</Text>
         )}
       </View>
 
-      {enrolling && (
+      {panelOpen && (
         <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent} keyboardShouldPersistTaps="handled">
-          <Pressable onPress={closeEnrollment} style={styles.closeButton}>
-            <Text style={styles.closeText}>{t('enroll.close')}</Text>
-          </Pressable>
-          <EnrollmentPanel enrollment={enrollment} />
+          {enrolling && (
+            <>
+              <Pressable onPress={closeEnrollment} style={styles.closeButton}>
+                <Text style={styles.closeText}>{t('enroll.close')}</Text>
+              </Pressable>
+              <EnrollmentPanel enrollment={enrollment} />
+            </>
+          )}
+          {!enrolling && editingId !== null && (
+            <PriceEditPanel
+              key={editingId}
+              catalog={catalog}
+              productId={editingId}
+              onClose={closePriceEditor}
+              onSaved={onPriceSaved}
+              onDelete={deleteProduct}
+              log={log}
+            />
+          )}
+          {!enrolling && !editing && rejecting && <RejectPanel rejection={rejection} productOf={scanner.productOf} products={searchable} />}
         </ScrollView>
       )}
     </View>
@@ -305,6 +374,22 @@ const styles = StyleSheet.create({
   torchOn: { backgroundColor: '#ffd166' },
   topButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
   torchOnText: { color: '#0b0f14' },
+  undoBar: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    backgroundColor: 'rgba(11, 15, 20, 0.94)',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+  },
+  undoTextWrap: { flex: 1 },
+  undoText: { color: '#ffffff', fontSize: 16 },
+  undoButton: { backgroundColor: '#ffd166', borderRadius: 8, paddingVertical: 10, paddingHorizontal: 18 },
+  undoButtonText: { color: '#0b0f14', fontWeight: '800', fontSize: 18 },
   frameError: { position: 'absolute', left: 12, right: 12, color: '#ff6b6b', fontSize: 12 },
   panel: { maxHeight: '55%', backgroundColor: '#0b0f14' },
   panelContent: { padding: 14, gap: 10, paddingBottom: 32 },

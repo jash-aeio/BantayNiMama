@@ -10,14 +10,30 @@ export const INTERACTION_LOG_LIMIT = 2000;
 export type InteractionKind =
   | 'confirmYes'
   | 'confirmNo'
+  /** Wrong? on a quote. */
   | 'wrong'
-  | 'neither'
+  /** Wrong? on chips; logged as `neither` before ADR-022. */
+  | 'wrongChip'
   | 'chipPick'
   | 'notInListStart'
   | 'notInListSaved'
   | 'notInListMismatch'
   | 'notInListFailed'
   | 'rejectClosed'
+  /** P2-4, SR-07: a likely product or a search result picked on the reject sheet. */
+  | 'correctStart'
+  | 'correctSaved'
+  | 'correctMismatch'
+  | 'correctFailed'
+  /** P2-4, SR-06: the editor opened, a change saved, or a save that changed nothing. */
+  | 'priceEditOpen'
+  | 'priceSaved'
+  | 'priceUnchanged'
+  /** P2-4, SR-08, SR-32. undoLapsed: the 10 s passed without Undo. restore: from the trash. */
+  | 'delete'
+  | 'undo'
+  | 'undoLapsed'
+  | 'restore'
   | 'torchOn'
   | 'torchOff';
 

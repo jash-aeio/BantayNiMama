@@ -1,6 +1,7 @@
 // Corrections and the capture guard — SR-07, SR-14, TR-42; ADR-017, ADR-019. Pure.
 
 import { MAX_SHOTS } from './enrollment.ts';
+import type { ProductScore } from './match.ts';
 import type { FrameDecision } from './scanDisplay.ts';
 import { decisionKey } from './stability.ts';
 
@@ -61,6 +62,34 @@ export function correctionsToReplace(shots: readonly ExistingShot[]): string[] {
 export function captureStillMatches(lockedKey: string, captureDecision: FrameDecision): boolean {
   if (!lockedKey.startsWith('accept:') && !lockedKey.startsWith('disambiguate:')) return false;
   return decisionKey(captureDecision) === lockedKey;
+}
+
+/** How many likely products the reject sheet offers (P2-4). The scanner keeps a top 3. */
+export const LIKELY_LIMIT = 3;
+
+/**
+ * SR-07, P2-4: the products the reject sheet offers first, from the scanner's latest top 3 at tap
+ * time, best first. Left out:
+ * - negatives, which have no name and must never be offered (TR-39);
+ * - the products the tindera just rejected;
+ * - repeats and non-finite scores.
+ *
+ * Often one or two remain, sometimes none, and the sheet's search covers the rest. On a chip pair
+ * both are rejected, so only a third product can be offered.
+ */
+export function likelyProducts(
+  top: readonly ProductScore[],
+  rejectedIds: readonly string[],
+  negativeIds: ReadonlySet<string>,
+  limit: number = LIKELY_LIMIT,
+): string[] {
+  const likely: string[] = [];
+  for (const { productId, score } of top) {
+    if (likely.length >= limit) break;
+    if (!Number.isFinite(score) || negativeIds.has(productId) || rejectedIds.includes(productId) || likely.includes(productId)) continue;
+    likely.push(productId);
+  }
+  return likely;
 }
 
 /** Code-unit order, not localeCompare — the result must not depend on the phone's language. */

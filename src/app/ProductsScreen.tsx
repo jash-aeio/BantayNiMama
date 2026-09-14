@@ -6,6 +6,7 @@ import { FlatList, Pressable, StyleSheet, Text, View } from 'react-native';
 import { listProducts, type ProductListItem } from '../db/products';
 import { LANGUAGES, type Language } from '../domain/language.ts';
 import { formatCentavos } from '../domain/money.ts';
+import { TrashList } from '../features/directory/TrashList';
 import { GateCheckPanel } from '../features/gate/GateCheckPanel';
 import { useAppServices } from './services';
 
@@ -40,7 +41,12 @@ export function ProductsScreen() {
       }
       ListEmptyComponent={<Text style={styles.empty}>{t('products.empty')}</Text>}
       renderItem={({ item }) => <ProductRow product={item} />}
-      ListFooterComponent={<GateCheckPanel />}
+      ListFooterComponent={
+        <>
+          <TrashList />
+          <GateCheckPanel />
+        </>
+      }
     />
   );
 }

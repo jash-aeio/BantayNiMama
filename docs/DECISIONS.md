@@ -553,7 +553,7 @@ products to match, so it could lock as one of them and show a wrong price (`NFR-
 
 ## ADR-019 — Corrections teach up to three extra shots, in two taps
 
-**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Amends `SR-07`, `TR-42`
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Amends `SR-07`, `TR-42` · Amended by ADR-022 (chip pairs)
 
 **Context.** `SR-07` asks that a wrong match be corrected by reassigning the frame to the right
 product. `TR-42` capped a product at 5 shots, and enrollment normally uses all 5, so a correction
@@ -651,3 +651,49 @@ current prices live only in `products`. An edit that changes nothing writes no r
   step late.
 - **Changing this meaning later needs a migration that rewrites every existing row.** Switching
   semantics without one silently mixes the two meanings in one table and corrupts the audit.
+
+---
+
+## ADR-022 — A chip pair can be corrected to one of its own two products
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Amends ADR-019
+
+**Context.** Gate A3 (`PHASE_2_PLAN.md` §4) corrects a chip pair: Knorr Chicken/Pork or Datu Puti
+Soy Sauce/Vinegar. As first built in P2-4, that could not be done on the Infinix (2026-09-14,
+~19:50):
+
+- **The Knorr pair only ever showed chips**, never a single name, so there was no quote or question
+  to reject.
+- **A chip tap shows a price and teaches nothing** (ADR-019, point 3).
+- ***Neither* opened the sheet**, but the sheet left both chip products out of the likely list and the
+  search, and the reducer refused a correction to either.
+
+So the pairs `SR-07` most needs to teach apart were the ones it could not teach.
+
+**Decision** (operator's call):
+
+1. **The chip card's link is *Wrong?*, as on a quote.** Its sheet lists both chip products first,
+   then the likely products, search and *Not in my list*.
+2. **Picking one of the two saves a correction shot on it**, through the same capture guard: the next
+   frame must still show the same chip pair.
+3. **A question or a quote still refuses a correction to the product it named.** No on "Is this X?"
+   followed by X contradicts the tap.
+4. **A chip tap still teaches nothing.** Teaching stays a deliberate act on the sheet.
+
+**Rejected.**
+
+- ***Allow it only on pairs that are not size pairs.*** Safer for `L-02`, but no column marks a size
+  pair, so it needs a schema change or a name heuristic.
+- ***Keep chips unteachable and amend A3 to a wrong lock.*** Under the 4-of-5 quorum these variant
+  pairs chip rather than lock, so A3 could not be run on demand, and a store would have no way to
+  teach the pairs it confuses.
+
+**Consequences.**
+
+- **Risk on `L-02` size pairs.** A correction on Argentina 260g/100g adds a shot of a frame that is
+  nearly identical to the other size. It can turn future chips into a lock: an `NFR-02` exposure.
+  It is bounded. It is never automatic, a product holds at most 3 correction shots (ADR-019), and
+  the Phase 2 gate's zero-wrong-locks rule still judges it. The Phase 3 retune must include corrected
+  products.
+- **The interaction log kind `neither` is renamed `wrongChip`.** Earlier logs were never persisted.
+- *Not in my list* from chips is unchanged: it still saves a negative.

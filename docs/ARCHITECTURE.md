@@ -474,6 +474,40 @@ card     = displayFor(locked, liveProductCount, confirm_below)    after lock    
   torch, each with a time. Held in memory, shown in the gate panel, never persisted.
 - **`quickPick` is interim:** chips for the products the frame involved, until P2-5's grid.
 
+### Edit, correct, delete as built — `src/features/scanner/` (P2-4, 2026-09-14; gate A2–A4 passed on the Infinix)
+
+- **The price editor (`SR-06`)** opens from the price on a settled card: a quote, the card after
+  *Yes*, or after a chip or tile tap. It is **not** on the question card, where the product has not
+  been agreed yet.
+  - **The binding:** the product id is captured at tap time, and the panel never asks the scanner
+    again. Voting pauses while it is open, so moving the phone cannot move the edit (gate A2).
+  - **The write:** `planPriceEdit`, then `updatePrice`: the UPDATE and the `price_history` row in one
+    transaction (ADR-021). An untouched save writes nothing.
+- **The reject sheet (`SR-07`)** chooses what the capture frame is saved as:
+  - *Not in my list* → a negative (P2-3);
+  - a likely product or a search result → a correction shot on that product (D-3);
+  - **on chips, either product of the pair**, listed first → a correction shot on it (ADR-022). A
+    question or a quote still refuses the product it named, and a chip *tap* still teaches nothing.
+
+  | | |
+  |---|---|
+  | **Likely products** | The scanner's latest top 3 at tap time, minus negatives and the products the card showed (`likelyProducts`). Voting is paused, so that is the frame she tapped on. |
+  | **Guard** | The same capture guard for both. *Try again* keeps the choice. |
+  | **Correction write order** | JPEG → embed → `insertCorrectionShot` (the oldest correction removed in the same transaction) → the replaced JPEG deleted → index **rebuilt** if a row was replaced, **appended** otherwise |
+  | **Where** | In the panel under the camera, like enrollment, so the search field stays above the keyboard |
+
+- **Delete (`SR-08`, `SR-32`)** is on the price editor: soft delete → index rebuild (E-4) → a 10 s
+  *Undo* bar.
+  - **Undo inside the window** restores the product and rebuilds again. After the window, the
+    product stays in the trash, listed on the Products tab with *Restore* (pulled forward from P2-7).
+  - **If a rebuild fails,** the old index still holds the product's rows. The card reads products
+    through `getProduct`, which skips the trash, so it shows "scanning" rather than a price, and the
+    bar says to restart.
+- **Every catalog write bumps `catalogVersion`.** That empties `useScanner`'s product and photo
+  caches and resets the stability window, so a lock never mixes votes from two indexes.
+- **`rebuildIndex`** lives in `Root`: `loadVectorIndex` swapped into the shared ref between frames,
+  timed, and shown in the gate panel with the `price_history` rows.
+
 ### Threshold calibration
 
 `τ` and `δ` live in `app_meta`, **never hard-coded** (TR-35). They are read from the score
@@ -579,8 +613,10 @@ BantayNiMama/
 │   │   ├── gateCheck.ts       ← Phase 1 gate: persistence problems, self-match report (PHASE_1_PLAN §4)
 │   │   ├── lockLog.ts         ← every lock change with its voting frames; segments at Unknown
 │   │   ├── scanDisplay.ts     ← per frame: negative → Unknown, ambiguous → grid; after lock: quote or confirm (P2-1)
-│   │   ├── correction.ts      ← ≤ 3 correction shots, oldest replaced; the capture guard (SR-07, SR-14)
-│   │   ├── priceEdit.ts       ← typed prices → centavos, shared with enrollment; no-op edits write nothing (SR-06)
+│   │   ├── correction.ts      ← ≤ 3 correction shots, oldest replaced; the capture guard; likely products (SR-07, SR-14)
+│   │   ├── rejection.ts       ← the reject sheet as a reducer: negative or correction, guard, late events ignored (P2-3, P2-4)
+│   │   ├── priceEdit.ts       ← typed prices → centavos, shared with enrollment; no-op edits write nothing; editor text (SR-06)
+│   │   ├── productSearch.ts   ← name search, case and accents ignored (SR-07; SR-30 in P2-7)
 │   │   ├── trash.ts           ← 10 s undo, 30-day purge (SR-32)
 │   │   ├── firstRun.ts        ← welcome / "n of 5" banner / complete (SR-44)
 │   │   ├── timeToLock.ts      ← NFR-04 proxy episodes, median / p90, calibration bias
@@ -608,14 +644,16 @@ BantayNiMama/
 │   │   ├── scanner/           ← P1-6
 │   │   │   ├── useScanner.ts  ← knn → match → resolveFrame → stability; classify for the capture guard; renders only on lock change
 │   │   │   ├── ScanOverlay.tsx ← confirm / quote / chips / interim quick pick / Unknown (SR-02–SR-05, SR-09, SR-13)
-│   │   │   ├── useRejection.ts ← No / Wrong? / Neither → Not in my list: guard, JPEG, INSERT, index (SR-14)
-│   │   │   └── RejectPanel.tsx ← the reject sheet (P2-4 adds likely products and search)
+│   │   │   ├── useRejection.ts ← No / Wrong? / Neither → Not in my list or a correction: guard, JPEG, INSERT, index (SR-07, SR-14)
+│   │   │   ├── RejectPanel.tsx ← the reject sheet: likely products, search, Not in my list (P2-4)
+│   │   │   ├── PriceEditPanel.tsx ← price editor bound to the tapped id; Delete (SR-06, SR-08)
+│   │   │   └── useUndoDelete.ts ← soft delete, 10 s undo, index rebuilds (SR-32, E-4)
 │   │   ├── enrollment/        ← P1-5
 │   │   │   ├── draft.ts       ← capture → JPEG → vector; one-transaction commit; rollback deletes photos
 │   │   │   ├── useEnrollment.ts ← draft state; extends the index after COMMIT (SR-24)
 │   │   │   └── EnrollmentPanel.tsx ← form, thumbnails, duplicate warning (SR-20, SR-21, SR-23)
 │   │   ├── gate/              ← P1-7: runGateCheck (re-embed every JPEG, KNN), readout, panel
-│   │   └── directory/         ← Phase 2
+│   │   └── directory/         ← TrashList.tsx: deleted products + Restore (P2-4); the Directory in P2-7
 │   ├── i18n/                  ← i18next init, en.json, fil.json, typed keys (TR-16, SR-42)
 │   └── ui/                    ← shared components, theme (Phase 2)
 ```
@@ -643,6 +681,7 @@ a `require()` that works throughout development fails on the first release build
 | **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **Release: median 145.5 ms, p90 160.1 ms, range 126.5–339.5 ms** (n = 226 test frames). Debug: 140–248 ms, median ~148 ms (7 spot readings). See note. |
 | sqlite-vec KNN | 0.5–3 ms | **Could not run** — sqlite-vec does not load on 32-bit ARM (§5). Measured as a substitute: **JS brute force, 100 shots median 9.2 ms; 2,500 shots median 234.0 ms** (inline loop over one `Float32Array`, n = 10), and 831.1 ms at 2,500 when calling `dot()` per shot. Infinix X6823, release APK, 2026-09-14. |
 | Read vectors from SQLite | — | **56.3 ms** for 2,500 × 1280-d BLOBs, bit-exact round trip. Same device and date. |
+| Index rebuild after delete / undo / restore (E-4) | rare taps; no budget | **n = 3 (2 delete, 1 undo): median 9.2 ms, p90 17.0, max 17.0**; the last, an undo, took 6.2 ms and left 98 rows. `loadVectorIndex` over 93–98 rows (≤ 96 product shots + 2 negatives) — gate A4, Infinix X6823, release APK, 2026-09-14. Far below a tap's latency; at 2,500 rows the BLOB read alone measured 56.3 ms (above), so a rebuild there is still a rare-tap cost, not per-frame. **Restore, after a relaunch: 23.2 ms** to 103 rows (n = 1, 20:29:03). |
 | JS brute-force KNN, in the scanner | — | **15 shots: median 1.31 ms, p90 4.23** (P1-6). **100 shots: median 8.52 ms, p90 13.78** (P1-8 gate catalog). n = 200 live frames each, `useScanner`. The 100-shot figure agrees with P1-2's synthetic 9.2 ms. **102 rows (100 shots + 2 negatives): median 8.94 ms, p90 12.30**, n = 60 (P2-3). Infinix X6823, release APK, 2026-09-14. |
 | Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, 15 shots) · **0.08 / 0.10** (P1-8, 100 shots). n = 200 live frames each: `match` + `pushDecision` + `lockedDecision`. Same device and date. **With `resolveFrame` added (P2-3), 102 rows: median 0.09 ms, p90 0.12**, n = 60. |
 | **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms at 15 shots, ~135 ms at 100 shots — not met.** These are **sums of medians**, not one timed span: P1-6 worklet 124.7 + KNN 1.31 + policy 0.07; P1-8 worklet 126.9 + KNN 8.52 + policy 0.08. The JS side is 1–7% of it; the worklet is the problem. |

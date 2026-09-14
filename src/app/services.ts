@@ -2,7 +2,7 @@ import { createContext, useContext, type RefObject } from 'react';
 
 import type { Catalog } from '../db/catalog';
 import type { VectorIndex } from '../domain/knn.ts';
-import type { Interaction } from '../domain/interactionLog.ts';
+import type { Interaction, InteractionKind } from '../domain/interactionLog.ts';
 import type { Language } from '../domain/language.ts';
 import type { LockEvent } from '../domain/lockLog.ts';
 import type { ShotMeasurement } from '../features/enrollment/useEnrollment';
@@ -14,6 +14,19 @@ import type { ModelState } from '../ml/useEmbeddingModel';
 // two model instances for the life of the app: opening any of them per screen would duplicate
 // ~10 MB models and split the index that SR-24 depends on.
 
+/** Why the index was rebuilt from SQLite rather than appended to (E-4). */
+export type IndexRebuildReason = 'delete' | 'undo' | 'restore' | 'correction';
+
+/** One rebuild, timed: PHASE_2_PLAN.md §9 records its cost after delete and restore. */
+export interface IndexRebuild {
+  readonly atMs: number;
+  /** loadVectorIndex: the SELECTs, BLOB decoding and the matrix copy. */
+  readonly ms: number;
+  /** Rows in the new index, negatives included. */
+  readonly size: number;
+  readonly reason: IndexRebuildReason;
+}
+
 export interface Diagnostics {
   /** Recent worklet stage timings (ARCHITECTURE.md §8). */
   readonly workletTimings: RefObject<readonly StageTimings[]>;
@@ -23,8 +36,10 @@ export interface Diagnostics {
   readonly enrollmentMeasurements: RefObject<readonly ShotMeasurement[]>;
   /** Every scanner lock change since launch or the last clear (PHASE_1_PLAN §4 step 5). */
   readonly lockLog: RefObject<readonly LockEvent[]>;
-  /** Every Yes, No, Not-in-my-list and torch tap since launch (PHASE_2_PLAN §4). Never persisted. */
+  /** Every tap the Phase 2 gate is judged on, since launch (PHASE_2_PLAN §4). Never persisted. */
   readonly interactionLog: RefObject<readonly Interaction[]>;
+  /** Index rebuilds since launch (E-4). */
+  readonly indexRebuilds: RefObject<readonly IndexRebuild[]>;
 }
 
 export interface AppServices {
@@ -38,9 +53,17 @@ export interface AppServices {
   readonly language: Language;
   /** Switches the UI language now and saves it in app_meta (SR-42). */
   setLanguage(language: Language): void;
-  /** Goes up after each enrollment, so lists re-read SQLite. */
+  /** Goes up after every catalog write: enrollment, price edit, delete, restore, negative, correction. */
   readonly catalogVersion: number;
   bumpCatalogVersion(): void;
+  /**
+   * Replaces the live index with one read from SQLite, after a write that removed rows from the
+   * search: delete, undo, restore, a replaced correction (E-4). Throws if the read fails, leaving the
+   * old index in place.
+   */
+  rebuildIndex(reason: IndexRebuildReason): IndexRebuild;
+  /** Appends one tap to the interaction log, stamped now. */
+  logInteraction(kind: InteractionKind, productIds: readonly string[]): void;
   readonly diagnostics: Diagnostics;
 }
 

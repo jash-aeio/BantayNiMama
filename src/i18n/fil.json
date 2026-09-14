@@ -65,9 +65,23 @@
       "notSure": "Hindi tiyak"
     },
     "wrong": "Mali?",
-    "neither": "Hindi alinman",
     "torchTurnOn": "Ilaw",
     "torchTurnOff": "Patayin ilaw",
+    "editPrice": "I-edit",
+    "edit": {
+      "title": "Presyo ng {{name}}",
+      "hint": "Ang {{name}} lang ang mababago, saanman nakatutok ang camera ngayon.",
+      "save": "I-save ang presyo",
+      "cancel": "Kanselahin",
+      "saveFailed": "Hindi na-save ang presyo. ({{message}})",
+      "gone": "Ang panindang ito ay hindi na nasa listahan.",
+      "delete": "Burahin ang paninda"
+    },
+    "undo": {
+      "deleted": "Binura: {{name}}",
+      "undo": "Ibalik",
+      "rebuildFailed": "Hindi na-reload ng scanner ang listahan. I-restart ang app bago mag-scan. ({{message}})"
+    },
     "confirm": {
       "question": "Ito ba ay {{name}}?",
       "yes": "Oo",
@@ -80,6 +94,13 @@
     "reject": {
       "title": "Hindi ito?",
       "appSaid": "Ayon sa app: {{names}}",
+      "correctHint": "Panatilihin ang item sa loob ng kahon, pagkatapos pindutin ang tamang paninda. Natututo ang app mula sa litratong ito.",
+      "whichOfPair": "Ito ay isa sa mga ito:",
+      "likely": "Isa ba sa mga ito?",
+      "search": "O hanapin sa listahan",
+      "searchPlaceholder": "Ilagay ang pangalan ng paninda",
+      "noResults": "Walang paninda na may pangalang iyon.",
+      "correctSaved": "Na-save. Ito ay {{name}}:",
       "notInListHint": "Kung hindi nasa listahan ang item na ito, panatilihin ito sa loob ng kahon at pindutin sa ibaba. Hindi na ito pangangalanan ng app.",
       "notInList": "Hindi nasa listahan ko",
       "cancel": "Kanselahin",
@@ -95,7 +116,12 @@
   "products": {
     "title": "Mga paninda",
     "empty": "Walang paninda. Magdagdag mula sa I-scan.",
-    "shots": "{{n}} litrato"
+    "shots": "{{n}} litrato",
+    "trash": {
+      "title": "Mga binurang paninda ({{n}})",
+      "restore": "Ibalik",
+      "restoreFailed": "Naibalik, pero hindi na-reload ng scanner ang listahan. I-restart ang app bago mag-scan. ({{message}})"
+    }
   },
   "settings": {
     "language": "Wika",

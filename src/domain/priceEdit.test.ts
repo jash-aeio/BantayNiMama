@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { planPriceEdit } from './priceEdit.ts';
+import { planPriceEdit, priceFormOf } from './priceEdit.ts';
 
 const stored = { pricePiece: 1250, pricePack: 13500 };
 
@@ -49,5 +49,22 @@ describe('planPriceEdit (SR-06, TR-41)', () => {
       assert.deepEqual(planPriceEdit(stored, { pricePiece, pricePack: '' }), { kind: 'invalid', errors: ['piecePriceInvalid'] }, pricePiece);
     }
     assert.deepEqual(planPriceEdit(stored, { pricePiece: '12', pricePack: '0' }), { kind: 'invalid', errors: ['packPriceInvalid'] });
+  });
+});
+
+describe('priceFormOf (SR-06, P2-4)', () => {
+  test('plain digits with two decimals; a missing price is blank', () => {
+    assert.deepEqual(priceFormOf({ pricePiece: 1250, pricePack: 123456705 }), { pricePiece: '12.50', pricePack: '1234567.05' });
+    assert.deepEqual(priceFormOf({ pricePiece: 5, pricePack: null }), { pricePiece: '0.05', pricePack: '' });
+  });
+
+  test('opening the editor and saving untouched writes nothing', () => {
+    for (const prices of [stored, { pricePiece: 800, pricePack: null }, { pricePiece: 99_999_999, pricePack: 1 }]) {
+      assert.deepEqual(planPriceEdit(prices, priceFormOf(prices)), { kind: 'unchanged' });
+    }
+  });
+
+  test('refuses a stored value that is not whole centavos', () => {
+    assert.throws(() => priceFormOf({ pricePiece: 12.5, pricePack: null }), /TR-41/);
   });
 });

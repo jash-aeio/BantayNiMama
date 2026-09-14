@@ -69,6 +69,22 @@ export function planPriceEdit(current: StoredPrices, form: PriceForm): PriceEdit
   return { kind: 'change', pricePiece: prices.pricePiece, pricePack: prices.pricePack };
 }
 
+/**
+ * The editor's starting text: 1250 → "12.50", no price → "". Plain digits, with no ₱ sign or
+ * thousands commas to delete, and whole-number arithmetic only (TR-41). Whatever it returns,
+ * planPriceEdit reads back as `unchanged`.
+ */
+export function priceFormOf(prices: StoredPrices): PriceForm {
+  return { pricePiece: inputText(prices.pricePiece), pricePack: inputText(prices.pricePack) };
+}
+
+function inputText(centavos: number | null): string {
+  if (centavos === null) return '';
+  if (!Number.isSafeInteger(centavos) || centavos < 0) throw new RangeError(`Stored price is not whole centavos: ${centavos} (TR-41)`);
+  const cents = centavos % 100;
+  return `${(centavos - cents) / 100}.${String(cents).padStart(2, '0')}`;
+}
+
 function positiveCentavos(text: string): number | null {
   const centavos = parsePesos(text);
   return centavos !== null && centavos > 0 ? centavos : null;

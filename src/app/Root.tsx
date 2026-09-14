@@ -12,7 +12,8 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { openCatalog, type Catalog } from '../db/catalog';
 import { readMetaValue, writeMetaValue } from '../db/meta';
-import type { Interaction } from '../domain/interactionLog.ts';
+import { loadVectorIndex } from '../db/shots';
+import { appendInteraction, type Interaction, type InteractionKind } from '../domain/interactionLog.ts';
 import type { VectorIndex } from '../domain/knn.ts';
 import { resolveLanguage, UI_LANGUAGE_META_KEY, type Language } from '../domain/language.ts';
 import type { LockEvent } from '../domain/lockLog.ts';
@@ -22,9 +23,12 @@ import type { StageTimings } from '../ml/frameEmbedder';
 import { useEmbeddingModel } from '../ml/useEmbeddingModel';
 import { ProductsScreen } from './ProductsScreen';
 import { ScanScreen } from './ScanScreen';
-import { AppServicesContext, type AppServices } from './services';
+import { AppServicesContext, type AppServices, type IndexRebuild, type IndexRebuildReason } from './services';
 
 // App shell — TR-14 as amended by ADR-015: two bottom tabs on React Navigation, Scan and Products.
+
+/** Rebuilds kept for the gate panel. Deletes and restores are rare taps. */
+const INDEX_REBUILD_LOG = 50;
 
 type TabParams = { Scan: undefined; Products: undefined };
 
@@ -82,7 +86,30 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
   const enrollmentMeasurements = useRef<readonly ShotMeasurement[]>([]);
   const lockLog = useRef<readonly LockEvent[]>([]);
   const interactionLog = useRef<readonly Interaction[]>([]);
-  const diagnostics = useMemo(() => ({ workletTimings, scanTimings, enrollmentMeasurements, lockLog, interactionLog }), []);
+  const indexRebuilds = useRef<readonly IndexRebuild[]>([]);
+  const diagnostics = useMemo(
+    () => ({ workletTimings, scanTimings, enrollmentMeasurements, lockLog, interactionLog, indexRebuilds }),
+    [],
+  );
+
+  const logInteraction = useCallback((kind: InteractionKind, productIds: readonly string[]) => {
+    interactionLog.current = appendInteraction(interactionLog.current, { atMs: Date.now(), kind, productIds });
+  }, []);
+
+  // E-4: a rebuild is the whole index read again, so no splice code can leave a trashed product's
+  // rows searchable. It swaps the ref between two frames, because the JS thread runs one at a time.
+  const rebuildIndex = useCallback(
+    (reason: IndexRebuildReason) => {
+      const t0 = performance.now();
+      const { index } = loadVectorIndex(catalog.db, catalog.meta);
+      const ms = performance.now() - t0;
+      indexRef.current = index;
+      const record: IndexRebuild = { atMs: Date.now(), ms, size: index.size, reason };
+      indexRebuilds.current = [...indexRebuilds.current.slice(-(INDEX_REBUILD_LOG - 1)), record];
+      return record;
+    },
+    [catalog],
+  );
 
   const [language, setLanguageState] = useState(initialLanguage);
   const setLanguage = useCallback(
@@ -107,9 +134,11 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
       setLanguage,
       catalogVersion,
       bumpCatalogVersion,
+      rebuildIndex,
+      logInteraction,
       diagnostics,
     }),
-    [catalog, frameModel, stillModel, language, setLanguage, catalogVersion, bumpCatalogVersion, diagnostics],
+    [catalog, frameModel, stillModel, language, setLanguage, catalogVersion, bumpCatalogVersion, rebuildIndex, logInteraction, diagnostics],
   );
 
   return (

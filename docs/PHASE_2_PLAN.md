@@ -248,6 +248,23 @@ Scan tab's safety features land before the conveniences. Each step has a *done w
 
 *Done when:* gate steps A2–A4 pass on the Infinix, on the 20-product catalog.
 
+*Amended 2026-09-14 (P2-4 build):*
+- **A minimal trash list with *Restore* is pulled forward from P2-7** onto the Products tab, because
+  gate A4 restores from the trash. P2-7 still owns thumbnails and the 30-day purge at launch.
+- **The price is tappable only on a settled card:** a quote, the card after *Yes*, or after a chip or
+  tile tap. On the question card the tindera has not yet agreed which product it is, so an edit there
+  could land on the wrong one.
+- **Delete sits on the price editor**, not as a third control on the card, which the helper reads at
+  arm's length (§7).
+- **The reject sheet moved into the panel under the camera**, where enrollment already is, so the
+  search field is not hidden by the keyboard.
+- **The gate panel reads out `price_history`**, as A2's evidence, because release builds do not log.
+
+*Amended 2026-09-14 (gate A3 on device, operator's call, ADR-022):* the first build could not correct
+a chip pair. The Knorr pair only ever showed chips, and the sheet opened from *Neither* refused both
+chip products. The chip card's link is now *Wrong?*, and its sheet lists both chip products first.
+Picking one saves a correction shot on it, through the same capture guard.
+
 ### P2-5 · Quick-pick grid (`SR-10`, `L-01`)
 
 - **Marking a product ambiguous:** a toggle at enrollment, *"Looks like other items (repacked)"*,
@@ -371,6 +388,9 @@ start-time proxy, calibrated once against video.
   100 shots. The gate readout shows the negative count, and no cap is set until growth is measured.
 - **A chip tap stays price-only; it teaches nothing.** Learning from chip taps would fill the
   correction slots on `L-02` size pairs, where more shots cannot help.
+  *Amended 2026-09-14 (ADR-022, operator's call):* a chip **tap** still teaches nothing, but the
+  chip card's *Wrong?* sheet can now save a correction on either product of the pair. Without it,
+  gate A3 could not be run: the Knorr pair only ever chipped.
 - **The interaction log is not persisted.** It is a measurement aid for the gate, not user
   behaviour kept on the phone (`TR-52`'s spirit).
 

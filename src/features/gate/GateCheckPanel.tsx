@@ -3,11 +3,13 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAppServices } from '../../app/services';
-import { getProduct } from '../../db/products';
+import { priceHistorySummary, productNameIncludingTrash } from '../../db/products';
 import {
   describeEnrollmentMeasurements,
   describeGateCheck,
+  describeIndexRebuilds,
   describeInteractions,
+  describePriceHistory,
   describeLaunch,
   describeLockDetails,
   describeLockLog,
@@ -60,7 +62,8 @@ export function GateCheckPanel() {
     setLogVersion((n) => n + 1);
   };
 
-  const nameOf = (id: string) => getProduct(catalog.db, id)?.name ?? id;
+  // Trashed products keep their names here, so a delete and its undo read by name in the logs (gate A4).
+  const nameOf = (id: string) => productNameIncludingTrash(catalog.db, id) ?? id;
 
   return (
     <View style={styles.root}>
@@ -85,6 +88,12 @@ export function GateCheckPanel() {
           <Text style={styles.line}>{describeWorkletTimings(diagnostics.workletTimings.current)}</Text>
           <Text style={styles.line}>{describeScanTimings(diagnostics.scanTimings.current)}</Text>
           <Text style={styles.line}>{describeEnrollmentMeasurements(diagnostics.enrollmentMeasurements.current)}</Text>
+          <Text style={styles.line}>{describeIndexRebuilds(diagnostics.indexRebuilds.current)}</Text>
+          {describePriceHistory(priceHistorySummary(catalog.db)).map((line, i) => (
+            <Text key={`price-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
           {describeInteractions(diagnostics.interactionLog.current, nameOf).map((line, i) => (
             <Text key={`tap-${i}`} style={styles.line}>
               {line}

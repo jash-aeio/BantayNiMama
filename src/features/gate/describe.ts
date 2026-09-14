@@ -1,5 +1,8 @@
+import type { IndexRebuild } from '../../app/services';
 import type { Catalog } from '../../db/catalog';
+import type { PriceChange } from '../../db/products';
 import type { PersistenceProblem } from '../../domain/gateCheck.ts';
+import { formatCentavos } from '../../domain/money.ts';
 import { countInteractions, type Interaction } from '../../domain/interactionLog.ts';
 import { segmentLockLog, type LockEvent } from '../../domain/lockLog.ts';
 import { summarize } from '../../domain/stats.ts';
@@ -108,6 +111,29 @@ export function describeEnrollmentMeasurements(measurements: readonly ShotMeasur
   return (
     `enrollment shots this session n=${agreement.n}: frame-vs-JPEG dot min ${min.toFixed(4)} · ` +
     `median ${agreement.median.toFixed(4)} · JPEG median ${(bytes.median / 1024).toFixed(1)} KB, max ${(bytes.max / 1024).toFixed(1)} KB`
+  );
+}
+
+/** Gate A2's persistence evidence: price_history survives a force-stop, so this reads the same after a relaunch. */
+export function describePriceHistory(summary: { rows: number; recent: readonly PriceChange[] }): string[] {
+  const price = (centavos: number | null) => (centavos === null ? '—' : formatCentavos(centavos));
+  return [
+    `price_history rows ${summary.rows}${summary.rows > 0 ? ' (newest first; each row is the price BEFORE the change)' : ''}`,
+    ...summary.recent.map(
+      (c) => `${clock(c.changedAt)} ${c.name} · was ${price(c.pricePiece)}${c.pricePack === null ? '' : ` · pack ${price(c.pricePack)}`}`,
+    ),
+  ];
+}
+
+/** Index rebuilds since launch (E-4): PHASE_2_PLAN §9 records their cost after delete and restore. */
+export function describeIndexRebuilds(rebuilds: readonly IndexRebuild[]): string {
+  const ms = summarize(rebuilds.map((r) => r.ms));
+  const last = rebuilds[rebuilds.length - 1];
+  if (ms === null || last === undefined) return 'index rebuilds: none yet (delete, undo, restore; lost on relaunch)';
+  const reasons = [...new Set(rebuilds.map((r) => r.reason))].map((reason) => `${reason} ${rebuilds.filter((r) => r.reason === reason).length}`);
+  return (
+    `index rebuilds n=${ms.n} (${reasons.join(' · ')}): ms median ${ms.median.toFixed(1)} · p90 ${ms.p90.toFixed(1)} · max ${ms.max.toFixed(1)} · ` +
+    `last ${last.reason} ${last.ms.toFixed(1)} ms at ${clock(last.atMs)}, ${last.size} rows`
   );
 }
 

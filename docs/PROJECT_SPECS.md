@@ -54,7 +54,7 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-04** | On no confident match, display **"Unknown Item"** with a prominent **Add** action. | MUST |
 | **SR-05** | The Add form must be reachable in one tap and must not block the camera preview. | MUST |
 | **SR-06** | Allow editing the price directly from the scan overlay. | MUST |
-| **SR-07** | Allow correcting a wrong match in **two taps**, *Wrong?* then the correct product. The frame is reassigned to that product as a correction shot (`TR-42`). *Amended 2026-09-14 (ADR-019): was "in one tap". Literal one tap would put a second product name on every confident card.* | MUST |
+| **SR-07** | Allow correcting a wrong match in **two taps**, *Wrong?* then the correct product. The frame is reassigned to that product as a correction shot (`TR-42`). *Amended 2026-09-14 (ADR-019): was "in one tap". Literal one tap would put a second product name on every confident card.* *Amended 2026-09-14 (ADR-022): on a chip card, either product of the pair can be the correct product; a chip tap alone still teaches nothing.* | MUST |
 | **SR-08** | Allow deleting the matched product from the scan overlay. | SHOULD |
 | **SR-09** | When top-1 and top-2 are within δ, present a **two-choice disambiguation chip** rather than guessing. | MUST |
 | **SR-10** | Products flagged `is_ambiguous` are never named or priced by recognition. A frame that resolves to one opens a **quick-pick grid**, which is also pinned as a button on the Scan tab. *Amended 2026-09-14 (ADR-018): "bypass recognition" now means "bypass naming". Ambiguous products keep their shots, so a clear bag cannot lock as another product.* | MUST |

@@ -18,6 +18,8 @@ import {
   listPriceHistory,
   listProducts,
   listTrash,
+  priceHistorySummary,
+  productNameIncludingTrash,
   purgeProducts,
   restoreProduct,
   setAmbiguous,
@@ -179,6 +181,24 @@ describe('updatePrice (SR-06, TR-41)', () => {
     ]);
   });
 
+  test('priceHistorySummary counts every row and lists the newest first, trashed products included', () => {
+    const db = fresh();
+    const kape = enroll(db, 'Kape', ['k1', 'k2', 'k3']);
+    const gatas = enroll(db, 'Gatas', ['g1', 'g2', 'g3']);
+    updatePrice(db, kape, { pricePiece: 1300, pricePack: null }, 5_000);
+    updatePrice(db, gatas, { pricePiece: 2000, pricePack: 20000 }, 6_000);
+    updatePrice(db, kape, { pricePiece: 1400, pricePack: null }, 7_000);
+    softDeleteProduct(db, gatas);
+
+    const summary = priceHistorySummary(db, 2);
+    assert.equal(summary.rows, 3);
+    assert.deepEqual(summary.recent, [
+      { productId: kape, name: 'Kape', pricePiece: 1300, pricePack: null, changedAt: 7_000 },
+      { productId: gatas, name: 'Gatas', pricePiece: 1250, pricePack: null, changedAt: 6_000 },
+    ]);
+    assert.deepEqual(priceHistorySummary(fresh()), { rows: 0, recent: [] });
+  });
+
   test('an edit to the same prices writes nothing', () => {
     const db = fresh();
     const kape = enroll(db, 'Kape', ['k1', 'k2', 'k3']);
@@ -212,6 +232,29 @@ describe('trash (SR-08, SR-32) and the repacked flag (SR-10)', () => {
     assert.equal(restoreProduct(db, kape, 3_500), false);
     assert.equal(getProduct(db, kape)?.name, 'Kape');
     assert.deepEqual(listTrash(db), []);
+  });
+
+  test('delete, undo, delete again: the index rebuilt from SQLite follows each step (E-4)', () => {
+    const db = fresh();
+    const kape = enroll(db, 'Kape', ['k1', 'k2', 'k3']);
+    const gatas = enroll(db, 'Gatas', ['g1', 'g2', 'g3']);
+    const shotsOf = () => loadVectorIndex(db, meta).index.productIds;
+
+    softDeleteProduct(db, kape, 2_000);
+    assert.deepEqual(shotsOf(), [gatas, gatas, gatas]);
+    restoreProduct(db, kape, 2_005);
+    assert.deepEqual(new Set(shotsOf()), new Set([kape, gatas]));
+    softDeleteProduct(db, kape, 3_000);
+    assert.deepEqual(shotsOf(), [gatas, gatas, gatas]);
+  });
+
+  test('productNameIncludingTrash names a trashed product for the logs; getProduct does not', () => {
+    const db = fresh();
+    const kape = enroll(db, 'Kape', ['k1', 'k2', 'k3']);
+    softDeleteProduct(db, kape);
+    assert.equal(getProduct(db, kape), null);
+    assert.equal(productNameIncludingTrash(db, kape), 'Kape');
+    assert.equal(productNameIncludingTrash(db, 'missing'), null);
   });
 
   test('purge removes only products still in the trash, and returns their photos to delete', () => {

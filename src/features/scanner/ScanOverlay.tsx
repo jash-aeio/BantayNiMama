@@ -10,15 +10,20 @@ import type { InteractionKind } from '../../domain/interactionLog.ts';
 import type { Thresholds } from '../../domain/match.ts';
 import { formatCentavos } from '../../domain/money.ts';
 import { displayFor, type FrameDecision } from '../../domain/scanDisplay.ts';
+import { priceText } from './priceText';
 
 // The scan card (P2-3), one state per ScanCard (domain/scanDisplay.ts):
 // - confirm: photo + "Is this {name}? ₱price" + Yes / No (SR-13);
 // - quote: name, price, confidence (SR-02, SR-03) + Wrong?;
-// - chips: two choices (SR-09) + Neither;
+// - chips: two choices (SR-09) + Wrong?, whose sheet can teach either of the two (ADR-022);
 // - quickPick: an interim pick from the involved products, until P2-5's grid;
 // - unknown: "Unknown item" + Add (SR-04).
-// It renders only when the locked decision changes, never per frame (SR-12). No, Wrong? and Neither
+// It renders only when the locked decision changes, never per frame (SR-12). No and Wrong?
 // hand the card's own decision to onReject, which pins it (useRejection).
+//
+// The price opens the editor (SR-06, P2-4) only where the product is settled: a quote, after Yes, or
+// after a chip or tile tap. On the question card it is not tappable, because an edit there would
+// land on a product the tindera has not yet agreed it is.
 
 const CONFIDENCE_KEYS = {
   sure: 'scan.confidence.sure',
@@ -39,6 +44,8 @@ interface Props {
   readonly photoOf: (id: string) => string | null;
   readonly onAdd: () => void;
   readonly onReject: (locked: FrameDecision, source: NegativeSource) => void;
+  /** Opens the price editor bound to this id (SR-06, gate A2). */
+  readonly onEditPrice: (productId: string) => void;
   readonly onLog: (kind: InteractionKind, productIds: readonly string[]) => void;
 }
 
@@ -51,6 +58,7 @@ export const ScanOverlay = memo(function ScanOverlay({
   photoOf,
   onAdd,
   onReject,
+  onEditPrice,
   onLog,
 }: Props) {
   const { t } = useTranslation();
@@ -130,7 +138,7 @@ export const ScanOverlay = memo(function ScanOverlay({
 
       return (
         <View style={[styles.wrap, styles.card]}>
-          <PriceBlock product={product} />
+          <PriceBlock product={product} onEdit={onEditPrice} />
           <View style={styles.footer}>
             {level !== null && <ConfidenceBars level={level} />}
             <Pressable onPress={() => onReject(locked, 'wrong_lock')} style={styles.link}>
@@ -167,9 +175,9 @@ export const ScanOverlay = memo(function ScanOverlay({
               </Pressable>
             ))}
           </View>
-          {chosen !== null && <PriceBlock product={chosen} />}
+          {chosen !== null && <PriceBlock product={chosen} onEdit={onEditPrice} />}
           <Pressable onPress={() => onReject(locked, 'wrong_chip')} style={styles.link}>
-            <Text style={styles.linkText}>{t('scan.neither')}</Text>
+            <Text style={styles.linkText}>{t('scan.wrong')}</Text>
           </Pressable>
         </View>
       );
@@ -199,7 +207,7 @@ export const ScanOverlay = memo(function ScanOverlay({
               </Pressable>
             ))}
           </View>
-          {chosen !== null && <PriceBlock product={chosen} />}
+          {chosen !== null && <PriceBlock product={chosen} onEdit={onEditPrice} />}
         </View>
       );
     }
@@ -215,20 +223,18 @@ function Scanning() {
   );
 }
 
-function priceText(product: Product, t: ReturnType<typeof useTranslation>['t']): string {
-  const price = product.pricePiece === null ? null : formatCentavos(product.pricePiece);
-  if (price === null) return t('scan.noPrice');
-  return product.unitLabel === null ? price : t('scan.perUnit', { price, unit: product.unitLabel });
-}
-
-function PriceBlock({ product }: { product: Product }) {
+function PriceBlock({ product, onEdit }: { product: Product; onEdit: (productId: string) => void }) {
   const { t } = useTranslation();
   return (
     <>
       <Text style={styles.name} numberOfLines={2}>
         {product.name}
       </Text>
-      <Text style={styles.price}>{priceText(product, t)}</Text>
+      {/* The id is bound here, at tap time; the editor never asks the scanner again (gate A2). */}
+      <Pressable onPress={() => onEdit(product.id)} style={styles.priceRow} accessibilityRole="button">
+        <Text style={styles.price}>{priceText(product, t)}</Text>
+        <Text style={styles.editText}>{t('scan.editPrice')}</Text>
+      </Pressable>
       {product.pricePack !== null && (
         <Text style={styles.pack}>{t('scan.pack', { price: formatCentavos(product.pricePack) })}</Text>
       )}
@@ -264,6 +270,8 @@ const styles = StyleSheet.create({
   flex: { flex: 1, gap: 4 },
   name: { color: '#ffffff', fontSize: 22, fontWeight: '700' },
   price: { color: '#ffd166', fontSize: 36, fontWeight: '800', fontVariant: ['tabular-nums'] },
+  priceRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  editText: { color: '#9ec5fe', fontSize: 16, fontWeight: '700', paddingVertical: 8 },
   pack: { color: '#e6eaef', fontSize: 16, fontVariant: ['tabular-nums'] },
   question: { color: '#ffffff', fontSize: 22, fontWeight: '700' },
   confirmRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },

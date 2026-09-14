@@ -65,9 +65,23 @@
       "notSure": "Not sure"
     },
     "wrong": "Wrong?",
-    "neither": "Neither",
     "torchTurnOn": "Light",
     "torchTurnOff": "Light off",
+    "editPrice": "Edit",
+    "edit": {
+      "title": "Price of {{name}}",
+      "hint": "This changes {{name}} only, wherever the camera points now.",
+      "save": "Save price",
+      "cancel": "Cancel",
+      "saveFailed": "The price was not saved. ({{message}})",
+      "gone": "This product is no longer in your list.",
+      "delete": "Delete this product"
+    },
+    "undo": {
+      "deleted": "Deleted: {{name}}",
+      "undo": "Undo",
+      "rebuildFailed": "The scanner could not reload your list. Restart the app before scanning. ({{message}})"
+    },
     "confirm": {
       "question": "Is this {{name}}?",
       "yes": "Yes",
@@ -80,6 +94,13 @@
     "reject": {
       "title": "Not this one?",
       "appSaid": "The app said: {{names}}",
+      "correctHint": "Keep the item inside the box, then tap the right product. The app learns from this photo.",
+      "whichOfPair": "It is one of these:",
+      "likely": "Is it one of these?",
+      "search": "Or search your list",
+      "searchPlaceholder": "Type a product name",
+      "noResults": "No product with that name.",
+      "correctSaved": "Saved. This is {{name}}:",
       "notInListHint": "If this item is not in your list, keep it inside the box and tap below. The app will stop naming it.",
       "notInList": "Not in my list",
       "cancel": "Cancel",
@@ -95,7 +116,12 @@
   "products": {
     "title": "Products",
     "empty": "No products yet. Add one from the Scan tab.",
-    "shots": "{{n}} photos"
+    "shots": "{{n}} photos",
+    "trash": {
+      "title": "Deleted products ({{n}})",
+      "restore": "Restore",
+      "restoreFailed": "Restored, but the scanner could not reload your list. Restart the app before scanning. ({{message}})"
+    }
   },
   "settings": {
     "language": "Language",

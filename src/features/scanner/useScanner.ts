@@ -69,7 +69,7 @@ export function useScanner({
   lockLogRef,
 }: {
   catalog: Catalog;
-  /** Goes up whenever products change, so the repacked set is re-read. */
+  /** Goes up whenever products change, so the repacked set and the product and photo caches are re-read. */
   catalogVersion: number;
   indexRef: RefObject<VectorIndex>;
   /** Where to keep timing samples, so another screen (the gate check) can read them. */
@@ -85,8 +85,11 @@ export function useScanner({
   const lastTop = useRef<readonly ProductScore[]>([]);
   // The frames currently in the stability window, for diagnosing a lock (lockLog.ts).
   const votes = useRef<readonly FrameVote[]>([]);
-  const products = useRef(new Map<string, Product | null>());
-  const photos = useRef(new Map<string, string | null>());
+  // Product rows change under the scanner since P2-4: a price edit, a delete, a restore. Each write
+  // bumps catalogVersion, and a new version starts both caches empty, so a card never shows an old
+  // price or names a product that is now in the trash.
+  const products = useMemo(() => new Map<string, Product | null>(), [catalog, catalogVersion]);
+  const photos = useMemo(() => new Map<string, string | null>(), [catalog, catalogVersion]);
 
   // Read in the render, not in an effect, so no frame is ever resolved against a stale set. Held in a
   // ref so onVector keeps its identity: the camera worklet captures it, and a new function would
@@ -153,18 +156,18 @@ export function useScanner({
 
   const productOf = useCallback(
     (id: string) => {
-      if (!products.current.has(id)) products.current.set(id, getProduct(catalog.db, id));
-      return products.current.get(id) ?? null;
+      if (!products.has(id)) products.set(id, getProduct(catalog.db, id));
+      return products.get(id) ?? null;
     },
-    [catalog],
+    [catalog, products],
   );
 
   const photoOf = useCallback(
     (id: string) => {
-      if (!photos.current.has(id)) photos.current.set(id, firstEnrollPhotoPath(catalog.db, id));
-      return photos.current.get(id) ?? null;
+      if (!photos.has(id)) photos.set(id, firstEnrollPhotoPath(catalog.db, id));
+      return photos.get(id) ?? null;
     },
-    [catalog],
+    [catalog, photos],
   );
 
   return { locked, onVector, classify, reset, timings, lastTop, productOf, photoOf };

@@ -81,6 +81,16 @@ export function getProduct(db: DB, id: string): Product | null {
   return row === undefined ? null : rowToProduct(row);
 }
 
+/**
+ * A product's name whether or not it is in the trash, or null. For the gate panel's logs only, so a
+ * delete and its undo still read by name. Never for the scan card, which must not name a trashed
+ * product (getProduct).
+ */
+export function productNameIncludingTrash(db: DB, id: string): string | null {
+  const row = db.executeSync('SELECT name FROM products WHERE id = ?', [id]).rows[0];
+  return row === undefined ? null : String(row.name);
+}
+
 /** SR-10: live products flagged repacked, for resolveFrame's ambiguousIds. */
 export function ambiguousProductIds(db: DB): string[] {
   return db
@@ -173,6 +183,37 @@ export function listPriceHistory(db: DB, productId: string): PriceHistoryRow[] {
       pricePack: storedCentavos(row.price_pack),
       changedAt: Number(row.changed_at),
     }));
+}
+
+export interface PriceChange {
+  readonly productId: string;
+  readonly name: string;
+  /** The prices in force until changedAt (ADR-021). */
+  readonly pricePiece: number | null;
+  readonly pricePack: number | null;
+  readonly changedAt: number;
+}
+
+/**
+ * Every price_history row counted, and the newest few, whatever each product's state. For the gate
+ * panel only: gate A2 checks the change is recorded, and release builds do not log (P1-7).
+ */
+export function priceHistorySummary(db: DB, limit = 5): { rows: number; recent: PriceChange[] } {
+  const rows = Number(db.executeSync('SELECT count(*) AS n FROM price_history').rows[0]?.n ?? 0);
+  const recent = db
+    .executeSync(
+      'SELECT h.product_id, p.name, h.price_piece, h.price_pack, h.changed_at FROM price_history h ' +
+        'JOIN products p ON p.id = h.product_id ORDER BY h.changed_at DESC, h.id DESC LIMIT ?',
+      [limit],
+    )
+    .rows.map((row) => ({
+      productId: String(row.product_id),
+      name: String(row.name),
+      pricePiece: storedCentavos(row.price_piece),
+      pricePack: storedCentavos(row.price_pack),
+      changedAt: Number(row.changed_at),
+    }));
+  return { rows, recent };
 }
 
 /**

@@ -824,6 +824,87 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **KNN at 102 rows:** median 8.94 ms, p90 12.30 (n = 60).
   - **Policy + stability, now including `resolveFrame`:** 0.09 / 0.12 ms (n = 60).
   - **Crop + resize, four readings in one session** (n = 40 each): 35.8 up to 59.7 ms median.
+- **P2-4: edit, correct and delete from the scan card, with undo** (2026-09-14; `SR-06`, `SR-07`,
+  `SR-08`, `SR-32`, `TR-41`, `TR-42`, D-3, E-4, ADR-022). Tests went from 245 to **264**, and typecheck is
+  clean. **Gate A2–A4 passed on the Infinix X6823** (release APK, 20-product catalog, not in airplane mode), which is P2-4's done-when.
+  - **Domain (pure, tested):**
+    - `rejection.ts`: the sheet now chooses what the capture frame is saved as, a negative or a
+      correction shot on a picked product. *Try again* keeps that choice, so a retried correction can
+      never become a negative. A correction to a product the card itself showed is refused.
+    - `correction.ts` `likelyProducts`: the latest top 3 at tap time, without negatives or the
+      rejected products.
+    - `productSearch.ts`: every word in any order, ignoring case and accents. P2-7's `SR-30` reuses it.
+    - `priceEdit.ts` `priceFormOf`: stored centavos → editor text. Saving it untouched is `unchanged`.
+    - `interactionLog.ts`: correction, price edit, delete, undo, undo lapsed, restore.
+  - **Scan tab:**
+    - **Price editor (`SR-06`):** the price on a settled card opens it: a quote, the card after *Yes*,
+      or after a chip or tile tap. It is bound to that product id, and voting pauses. The question
+      card's price is not tappable. Saving is `updatePrice`, one transaction.
+    - ***Wrong?* sheet (`SR-07`):** likely products, a name search, and *Not in my list*. A pick runs
+      the capture guard and saves a correction shot. A replaced correction's JPEG is deleted after
+      COMMIT, and the index is rebuilt in that case, appended to otherwise. The saved state shows the
+      picked product's price. The sheet moved from an overlay into the panel under the camera, so the
+      search field stays above the keyboard.
+    - **Delete (`SR-08`, `SR-32`):** on the price editor. Soft delete → index rebuilt from SQLite (E-4)
+      → a 10 s *Undo* bar. If a rebuild fails, the bar says to restart. The card still cannot price a
+      trashed product, because it reads products through `getProduct`.
+    - Every catalog write empties `useScanner`'s product and photo caches and resets the stability
+      window.
+  - **Products tab:** deleted products with *Restore*, pulled forward from P2-7 so gate A4 can run.
+  - **Gate panel:** index rebuild timings (§9); `price_history` rows with the newest changes (A2's
+    evidence, since release builds do not log); logs name trashed products
+    (`productNameIncludingTrash`).
+  - **Shared services:** `rebuildIndex(reason)`, timed, and `logInteraction` now live in `Root`.
+  - Filipino copy is Claude's draft, for the operator's review before `/phase-gate`.
+  - **On device (Infinix X6823, release APK built 19:29 in 1m 53s, `adb install -r` over the
+    20-product catalog; not in airplane mode):**
+    - **Gate A2 passed.** Clover Chips 24g was repriced from the scan card twice (19:36:13, 19:42:16).
+      The second edit was the binding check: opened on Clover at 19:41:44, phone moved to another
+      product before Save (operator-reported; voting pauses while the editor is open, so the phone
+      records nothing about where it pointed). It landed on Clover, and no other product gained a
+      `price_history` row.
+    - **After `am force-stop`** (new pid 16551; launch `schema 2 -> 2`, orphan photos 0, index 102,
+      negatives 2): Clover showed the new price on Yes (operator-reported), and the gate panel still
+      read `price_history rows 2` — was ₱12.00, was ₱20.00.
+    - **Gate A3, first attempt (~19:50, same process): not passable as built.** The Knorr Broth Cube
+      Pork | Chicken pair only ever showed chips. *Neither* (19:50:44) opened the sheet, but it
+      refused both chip products, so the sheet was closed and nothing was saved. The tap log had no
+      `correctStart` or `correctSaved`; two chip taps showed prices only.
+    - **Fix (ADR-022, operator's call):** the chip card's link is now *Wrong?*. Its sheet lists both
+      chip products first, and picking one saves a correction shot through the same capture guard.
+      A question or a quote still refuses the product it named. The log kind `neither` became
+      `wrongChip`. Tests 263 → 264. Rebuilt (1m 14s) and installed over the catalog at 20:01.
+    - **Gate A3 passed (20:07–20:13).**
+      - *Wrong?* on CHIPS Knorr Broth Cube Chicken | Pork (20:07:09), then Chicken.
+      - **The capture guard refused** at 20:07:27 (`correctMismatch`, nothing saved), its first
+        refusal seen on device. The retry saved at 20:07:45 (`correctSaved`).
+      - The same pair then **locked Chicken**, confirmed with Yes at 20:08:04. That is the intended
+        effect, and the `L-02` risk ADR-022 records.
+      - The Products tab read Chicken 6 photos, Pork 5.
+      - **After `am force-stop`** (pid 21337; launch index 103, negatives 2): **gate check PASS** —
+        products 20, shots 101 (corrections 1), negatives 2, photo rows 103, **missing 0**,
+        self-match **103/103**, own min 1.000000, nearest other median 0.7512 / p90 0.8254 / max 0.8954
+        (unchanged from Phase 1 run 3), 13.9 s.
+    - **Gate A4, before force-stop (pid 21337, 20:16–20:17):**
+      - **Sponge Scouring Pad** deleted from the price editor at 20:16:58; the operator let the undo
+        lapse (20:17:08), so the lapse was exercised on the sponge. It is listed in *Deleted products (1)*.
+      - **Kopiko** was used for Undo: LOCK at 20:17:35 → delete → **Undo** at 20:17:46 (logged only
+        inside the 10 s window) → LOCK Kopiko at 20:17:47.
+      - **Index rebuilds:** n = 3 (2 delete, 1 undo), median 9.2 ms, p90 17.0, max 17.0; rows
+        103 → 98 → 93 → 98. The next 58 frames searched 98 shots (KNN 8.39 / 8.48 ms).
+      - The sponge never locked while deleted.
+      - **Possible wrong lock, unattributed:** at 20:17:04, 6 s after the sponge was deleted, the log
+        shows **LOCK Knorr Broth Cube Pork** (score 0.536, margin 0.088, four accept votes at
+        0.51–0.55), then CHIPS Knorr Pork | Clover until 20:17:17. The operator is not sure what was in
+        the box. If it was the sponge, deleting a product made it an un-enrolled item that fell through
+        to its nearest neighbour (`NFR-03`, ADR-013). Confirm mode showed a question, not a price.
+    - **Gate A4, after `am force-stop`** (pid 23604 at 20:25:10):
+      - The launch read `index 98 (negatives 2)`, so the deleted sponge stayed out of the index.
+      - Restored from *Deleted products* at 20:29:03; the rebuild took **23.2 ms** to 103 rows.
+      - **LOCK Sponge Scouring Pad** at 20:29:25, Yes at 20:29:27.
+      - The lock log since the relaunch held 1 LOCK (the sponge, after restore) and 0 CHIPS. That does
+        not settle the 20:17:04 lock: whether the sponge was held before the restore was not recorded.
+      - **Gate A4 passed.**
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2
