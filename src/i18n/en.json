@@ -23,6 +23,10 @@
     "unitLabel": "Unit (optional)",
     "unitPlaceholder": "sachet, bote, piraso",
     "category": "Category (optional)",
+    "repacked": {
+      "label": "Looks like other items (repacked)",
+      "hint": "For clear bags of sugar, salt or rice. The scanner will ask which one instead of naming it."
+    },
     "shotsProgress": "Photos: {{taken}} of {{max}} — take at least {{min}}",
     "captureHint": "Fit the product inside the box. Turn it a little between photos.",
     "capture": "Take photo",
@@ -31,6 +35,7 @@
     "save": "Save product",
     "discard": "Start over",
     "saved": "Saved: {{name}} — {{price}}",
+    "savedRepacked": "Saved as repacked: {{name}} — {{price}}",
     "errors": {
       "nameRequired": "Type the product name.",
       "piecePriceRequired": "Type the price per piece.",
@@ -46,7 +51,9 @@
       "title": "Already in your list?",
       "body": "These photos look like {{names}}. Save it as a new product anyway?",
       "saveAnyway": "Save anyway",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "markBoth": "Mark {{names}} as repacked too",
+      "markBothHint": "Only if they look the same in a clear bag. Not for two sizes of one product."
     }
   },
   "scan": {
@@ -89,7 +96,10 @@
       "photoLabel": "Saved photo of {{name}}"
     },
     "quickPick": {
-      "title": "Looks like a repacked item. Which one?"
+      "title": "Looks like a repacked item. Which one?",
+      "pinnedTitle": "Repacked items. Which one?",
+      "open": "Repacked",
+      "close": "Close"
     },
     "reject": {
       "title": "Not this one?",
@@ -117,6 +127,7 @@
     "title": "Products",
     "empty": "No products yet. Add one from the Scan tab.",
     "shots": "{{n}} photos",
+    "repacked": "repacked",
     "trash": {
       "title": "Deleted products ({{n}})",
       "restore": "Restore",

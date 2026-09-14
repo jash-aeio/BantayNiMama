@@ -3,21 +3,28 @@ import { useTranslation } from 'react-i18next';
 import { Image, Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { resolvePhotoPath } from '../../db/photos';
-import type { Product } from '../../db/products';
+import type { Product, QuickPickProduct } from '../../db/products';
 import { confidenceOf, type Confidence } from '../../domain/confidence.ts';
 import type { NegativeSource } from '../../domain/correction.ts';
 import type { InteractionKind } from '../../domain/interactionLog.ts';
 import type { Thresholds } from '../../domain/match.ts';
 import { formatCentavos } from '../../domain/money.ts';
+import { quickPickTiles } from '../../domain/quickPick.ts';
 import { displayFor, type FrameDecision } from '../../domain/scanDisplay.ts';
 import { priceText } from './priceText';
+import { QuickPickGrid } from './QuickPickGrid';
 
 // The scan card (P2-3), one state per ScanCard (domain/scanDisplay.ts):
 // - confirm: photo + "Is this {name}? ₱price" + Yes / No (SR-13);
 // - quote: name, price, confidence (SR-02, SR-03) + Wrong?;
 // - chips: two choices (SR-09) + Wrong?, whose sheet can teach either of the two (ADR-022);
-// - quickPick: an interim pick from the involved products, until P2-5's grid;
+// - quickPick: the grid of repacked products (SR-10, P2-5), named and priced only after a tile tap;
 // - unknown: "Unknown item" + Add (SR-04).
+// The pinned grid (gridOpen) shows the same tiles whatever is locked.
+//
+// The grid has no Wrong? and no *Not in my list*. Nothing on it is named until the tindera taps, so
+// there is nothing to correct. A negative saved from a clear bag would sit next to every repacked
+// product and silence them too, since a negative outranks ambiguity (resolveFrame).
 // It renders only when the locked decision changes, never per frame (SR-12). No and Wrong?
 // hand the card's own decision to onReject, which pins it (useRejection).
 //
@@ -42,6 +49,11 @@ interface Props {
   readonly thresholds: Thresholds;
   readonly productOf: (id: string) => Product | null;
   readonly photoOf: (id: string) => string | null;
+  /** Live repacked products, for the grid (SR-10). */
+  readonly repacked: readonly QuickPickProduct[];
+  /** The pinned grid is open: show every repacked product, whatever is locked. */
+  readonly gridOpen: boolean;
+  readonly onCloseGrid: () => void;
   readonly onAdd: () => void;
   readonly onReject: (locked: FrameDecision, source: NegativeSource) => void;
   /** Opens the price editor bound to this id (SR-06, gate A2). */
@@ -56,6 +68,9 @@ export const ScanOverlay = memo(function ScanOverlay({
   thresholds,
   productOf,
   photoOf,
+  repacked,
+  gridOpen,
+  onCloseGrid,
   onAdd,
   onReject,
   onEditPrice,
@@ -65,14 +80,33 @@ export const ScanOverlay = memo(function ScanOverlay({
   const [picked, setPicked] = useState<string | null>(null);
   const [confirmed, setConfirmed] = useState(false);
 
-  // A chip choice or a Yes belongs to the lock it was made on; any new lock clears it. So a Yes shows
-  // the price only while the same product stays locked, like a quote.
+  // A chip or tile choice, or a Yes, belongs to the lock it was made on; any new lock clears it. So a
+  // Yes shows the price only while the same product stays locked, like a quote. Every grid lock has
+  // one stability key, so a tile choice survives clear bags swapping places under the camera.
   useEffect(() => {
     setPicked(null);
     setConfirmed(false);
-  }, [locked]);
+  }, [locked, gridOpen]);
 
   const card = useMemo(() => displayFor(locked, liveProductCount, confirmBelow), [locked, liveProductCount, confirmBelow]);
+
+  const pickTile = (productId: string) => {
+    onLog('tilePick', [productId]);
+    setPicked(productId);
+  };
+
+  if (gridOpen) {
+    return (
+      <GridCard
+        title={t('scan.quickPick.pinnedTitle')}
+        tiles={quickPickTiles(repacked, [])}
+        pickedId={picked}
+        onPick={pickTile}
+        onEditPrice={onEditPrice}
+        onClose={onCloseGrid}
+      />
+    );
+  }
 
   if (locked === null) return <Scanning />;
 
@@ -184,35 +218,58 @@ export const ScanOverlay = memo(function ScanOverlay({
     }
 
     case 'quickPick': {
-      // Interim until P2-5's grid: the repacked products this frame involved, as choices. Nothing is
+      // Every repacked product, plus a non-repacked product the frame chipped with a bag. Nothing is
       // named as a match; a price appears only after a tap (SR-10, ADR-018).
-      const choices = card.productIds.map(productOf).filter((p): p is Product => p !== null);
-      const chosen = choices.find((p) => p.id === picked) ?? null;
+      const involved = card.productIds
+        .map(productOf)
+        .filter((p): p is Product => p !== null)
+        .map((p) => ({ ...p, photoPath: photoOf(p.id) }));
       return (
-        <View style={[styles.wrap, styles.card]}>
-          <Text style={styles.question}>{t('scan.quickPick.title')}</Text>
-          <View style={styles.chips}>
-            {choices.map((p) => (
-              <Pressable
-                key={p.id}
-                onPress={() => {
-                  onLog('chipPick', [p.id]);
-                  setPicked(p.id);
-                }}
-                style={[styles.chip, p.id === picked && styles.chipActive]}
-              >
-                <Text style={[styles.chipText, p.id === picked && styles.chipTextActive]} numberOfLines={2}>
-                  {p.name}
-                </Text>
-              </Pressable>
-            ))}
-          </View>
-          {chosen !== null && <PriceBlock product={chosen} onEdit={onEditPrice} />}
-        </View>
+        <GridCard
+          title={t('scan.quickPick.title')}
+          tiles={quickPickTiles(repacked, involved)}
+          pickedId={picked}
+          onPick={pickTile}
+          onEditPrice={onEditPrice}
+        />
       );
     }
   }
 });
+
+function GridCard({
+  title,
+  tiles,
+  pickedId,
+  onPick,
+  onEditPrice,
+  onClose,
+}: {
+  title: string;
+  tiles: readonly QuickPickProduct[];
+  pickedId: string | null;
+  onPick: (productId: string) => void;
+  onEditPrice: (productId: string) => void;
+  onClose?: () => void;
+}) {
+  const { t } = useTranslation();
+  // Only a tile on this grid counts, even for the one render before the effect clears the choice.
+  const chosen = tiles.find((p) => p.id === pickedId) ?? null;
+  return (
+    <View style={[styles.wrap, styles.card]}>
+      <View style={styles.footer}>
+        <Text style={[styles.question, styles.flex]}>{title}</Text>
+        {onClose !== undefined && (
+          <Pressable onPress={onClose} style={styles.link}>
+            <Text style={styles.linkText}>{t('scan.quickPick.close')}</Text>
+          </Pressable>
+        )}
+      </View>
+      <QuickPickGrid tiles={tiles} pickedId={pickedId} onPick={onPick} />
+      {chosen !== null && <PriceBlock product={chosen} onEdit={onEditPrice} />}
+    </View>
+  );
+}
 
 function Scanning() {
   const { t } = useTranslation();

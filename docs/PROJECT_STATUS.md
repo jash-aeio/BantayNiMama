@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-4 done** (2026-09-14; P2-4's gate A2–A4 passed on the Infinix). A settled card's price opens an editor bound to that product. *Wrong?* offers likely products, search and *Not in my list*, and a pick saves a correction shot through the capture guard. Delete is soft, with a 10 s undo and an index rebuild, and the Products tab lists deleted products with Restore. Tests **264**, typecheck clean. **The gate catalog now holds 2 negatives, 1 correction shot (Knorr Chicken) and 2 price edits (Clover)** (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
-| **Next action** | **P2-5** quick-pick grid (`SR-10`, `L-01`, ADR-018): the *repacked* toggle at enrollment, the grid on a `quickPick` lock and as a pinned Scan-tab button, tiles with photo, name and price, and the `SR-23` hint to mark both products ambiguous. **Done when** gate B5 passes, run early on a scratch catalog. **Careful:** a scratch catalog must not clear the 20-product gate catalog, which gate A5 still needs. P2-4 is committed and pushed. **Still owed, before `/phase-gate`:** the operator reviews P2-3's and P2-4's Filipino copy. |
+| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-4 done and pushed** (`5bacbd7`; P2-4's gate A2–A4 passed on the Infinix). **P2-5 is built but not yet run on a device.** A *repacked* toggle at enrollment, plus an offer to mark look-alikes when the duplicate warning shows. A grid lock and a pinned *Repacked* button open tiles with photo and name, in a fixed name order, with a price only after a tap. Tests **277**, typecheck clean. **The gate catalog now holds 2 negatives, 1 correction shot (Knorr Chicken) and 2 price edits (Clover)** (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
+| **Next action** | **Gate B5 on the Infinix** (P2-5's done-when). Build the release APK. Enroll 3 repacked clear-bag products with the toggle, then scan each. **Pass:** the grid opens and names nothing; a tile tap shows that product's price; the pinned *Repacked* button opens the same grid. Also exercise the look-alike offer. **Where (operator's call):** in the 20-product gate catalog, then delete the 3 bags, so A5 scans the same 20. Do not accept the look-alike offer for a gate product. Then **P2-6**. **Still owed before `/phase-gate`:** the operator reviews the Filipino copy for P2-3 to P2-5. |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
@@ -30,7 +30,7 @@
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
 | **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-4 done (schema v2, confirm mode, negatives, edit / correct / delete on device); P2-5 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
+| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-4 done (schema v2, confirm mode, negatives, edit / correct / delete on device); P2-5 built, gate B5 on device next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
@@ -68,6 +68,14 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
   - [x] **Gate A4, after force-stop** *(pid 23604, 20:25–20:29)*: launch `index 98 (negatives 2)`, so the sponge stayed out of the index; restored from the trash at 20:29:03 (rebuild **23.2 ms**, 103 rows); **LOCK Sponge Scouring Pad** at 20:29:25, Yes at 20:29:27. Lock log since the relaunch: 1 LOCK (the sponge, after restore), 0 CHIPS. **Gate A4 passed.**
   - [ ] Filipino copy for the editor, sheet, undo bar and trash: operator review before `/phase-gate`
 - [ ] P2-5 Quick-pick grid (`SR-10`)
+  - [x] Built *(2026-09-14)*:
+    - **Domain:** `quickPickTiles` gives a fixed name order; operator's call: tiles show photo and name, and a price only after a tap. `repackedPlan` decides what the toggle and the offer write.
+    - **Enrollment:** the *repacked* toggle; the look-alike offer on the duplicate warning, written in the enrollment transaction.
+    - **Scan tab:** the grid on a `quickPick` lock; the pinned *Repacked* button; no reject on the grid.
+    - **Products tab:** the repacked label.
+    - Tests 264 → 277.
+  - [ ] **Gate B5 on the Infinix, release APK:** not yet run
+  - [ ] Filipino copy for the toggle, offer and grid: operator review before `/phase-gate`
 - [ ] P2-6 First run, permission recovery, guided enrollment (`SR-44`, `SR-43`, `SR-20`, `SR-22`, `SR-25`)
 - [ ] P2-7 Directory (`SR-30`–`SR-35`) and the negatives list
 - [ ] P2-8 Time-to-lock measured and calibrated (`NFR-04`)

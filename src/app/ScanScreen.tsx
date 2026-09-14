@@ -12,7 +12,7 @@ import {
 } from 'react-native-vision-camera';
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
-import { catalogCounts, listProducts } from '../db/products';
+import { catalogCounts, listProducts, listQuickPickProducts } from '../db/products';
 import { EnrollmentPanel } from '../features/enrollment/EnrollmentPanel';
 import { useEnrollment } from '../features/enrollment/useEnrollment';
 import { PriceEditPanel } from '../features/scanner/PriceEditPanel';
@@ -36,9 +36,9 @@ const WORKLET_TIMING_WINDOW = 40;
  * Add never blocks the preview. The panel also keeps text fields above the keyboard. The camera is
  * active only while this tab is focused, so the Products tab costs no inference (NFR-06).
  *
- * Voting pauses while a panel is open (P2-3, P2-4). The card is then pinned to what the tindera
- * tapped, and a lock changing under her finger cannot redirect the tap to another product.
- * Resuming starts a fresh stability window, and so does every catalog write.
+ * Voting pauses while a panel or the pinned quick-pick grid is open (P2-3, P2-4, P2-5). The card is
+ * then pinned to what the tindera tapped, and a lock changing under her finger cannot redirect the
+ * tap to another product. Resuming starts a fresh stability window, and so does every catalog write.
  */
 export function ScanScreen() {
   const { t } = useTranslation();
@@ -67,6 +67,8 @@ export function ScanScreen() {
   const editing = editingId !== null;
   const [frameError, setFrameError] = useState<string | null>(null);
   const [torch, setTorch] = useState(false);
+  /** SR-10: the pinned quick-pick grid, opened from its button rather than by a lock. */
+  const [gridOpen, setGridOpen] = useState(false);
 
   // One capture channel, set from JS and read by the worklet on its next processed frame. Enrollment
   // and a rejection are never open together, so the owner says where the capture goes.
@@ -116,7 +118,7 @@ export function ScanScreen() {
   const undoDelete = useUndoDelete({ catalog, rebuildIndex, onCatalogChanged: bumpCatalogVersion, log });
 
   const pausedRef = useRef(false);
-  pausedRef.current = enrolling || rejecting || editing;
+  pausedRef.current = enrolling || rejecting || editing || gridOpen;
   const receivers = useRef({ enroll: enrollment.receiveCapture, reject: rejection.receiveCapture });
   receivers.current = { enroll: enrollment.receiveCapture, reject: rejection.receiveCapture };
 
@@ -125,7 +127,7 @@ export function ScanScreen() {
   // before a pause, or from two different indexes (P2-4).
   useEffect(() => {
     resetScanner();
-  }, [enrolling, rejecting, editing, focused, catalogVersion, resetScanner]);
+  }, [enrolling, rejecting, editing, gridOpen, focused, catalogVersion, resetScanner]);
 
   // SR-11. Off whenever the tab loses focus: a torch left on in a pocket drains the battery (NFR-06).
   useEffect(() => {
@@ -133,6 +135,12 @@ export function ScanScreen() {
   }, [focused]);
 
   const liveProductCount = useMemo(() => catalogCounts(catalog.db).products, [catalog, catalogVersion]);
+  // SR-10: the grid's tiles and whether its pinned button shows. Re-read after every catalog write,
+  // because enrollment, a price edit, delete and restore can each change them.
+  const repacked = useMemo(() => listQuickPickProducts(catalog.db), [catalog, catalogVersion]);
+  useEffect(() => {
+    if (repacked.length === 0) setGridOpen(false);
+  }, [repacked]);
   // The sheet's name search. Read only while the sheet is open.
   const searchable = useMemo(() => (rejecting ? listProducts(catalog.db) : []), [catalog, catalogVersion, rejecting]);
 
@@ -171,6 +179,15 @@ export function ScanScreen() {
     },
     [log],
   );
+  const openGrid = useCallback(() => {
+    log('gridOpen', []);
+    setGridOpen(true);
+  }, [log]);
+  const closeGrid = useCallback(() => {
+    log('gridClose', []);
+    setGridOpen(false);
+  }, [log]);
+
   const closePriceEditor = useCallback(() => setEditingId(null), []);
   const onPriceSaved = useCallback(() => {
     bumpCatalogVersion();
@@ -279,6 +296,11 @@ export function ScanScreen() {
             <Pressable onPress={openEnrollment} style={[styles.topButton, styles.addButton, { top: insets.top + 12 }]}>
               <Text style={styles.topButtonText}>{t('scan.addProduct')}</Text>
             </Pressable>
+            {!gridOpen && repacked.length > 0 && (
+              <Pressable onPress={openGrid} style={[styles.topButton, styles.gridButton, { top: insets.top + 64 }]}>
+                <Text style={styles.topButtonText}>{t('scan.quickPick.open')}</Text>
+              </Pressable>
+            )}
             <ScanOverlay
               locked={scanner.locked}
               liveProductCount={liveProductCount}
@@ -286,6 +308,9 @@ export function ScanScreen() {
               thresholds={catalog.meta.thresholds}
               productOf={scanner.productOf}
               photoOf={scanner.photoOf}
+              repacked={repacked}
+              gridOpen={gridOpen}
+              onCloseGrid={closeGrid}
               onAdd={openEnrollment}
               onReject={rejection.reject}
               onEditPrice={openPriceEditor}
@@ -294,7 +319,7 @@ export function ScanScreen() {
           </>
         )}
         {(undoDelete.pending !== null || undoDelete.rebuildError !== null) && (
-          <View style={[styles.undoBar, { top: insets.top + 64 }]}>
+          <View style={[styles.undoBar, { top: insets.top + 116 }]}>
             {undoDelete.rebuildError !== null ? (
               <Pressable onPress={undoDelete.dismissError} style={styles.undoTextWrap}>
                 <Text style={styles.error}>{t('scan.undo.rebuildFailed', { message: undoDelete.rebuildError })}</Text>
@@ -312,7 +337,7 @@ export function ScanScreen() {
           </View>
         )}
         {frameError !== null && (
-          <Text style={[styles.frameError, { top: insets.top + 132 }]}>{t('scan.frameError', { message: frameError })}</Text>
+          <Text style={[styles.frameError, { top: insets.top + 184 }]}>{t('scan.frameError', { message: frameError })}</Text>
         )}
       </View>
 
@@ -371,6 +396,7 @@ const styles = StyleSheet.create({
   topButton: { position: 'absolute', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10 },
   addButton: { right: 12, backgroundColor: 'rgba(43, 108, 176, 0.95)' },
   torchButton: { left: 12, backgroundColor: 'rgba(27, 36, 48, 0.9)' },
+  gridButton: { left: 12, backgroundColor: 'rgba(47, 133, 90, 0.95)' },
   torchOn: { backgroundColor: '#ffd166' },
   topButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
   torchOnText: { color: '#0b0f14' },

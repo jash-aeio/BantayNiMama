@@ -63,6 +63,7 @@ function ProductRow({ product }: { product: ProductListItem }) {
         <Text style={styles.meta}>
           {t('products.shots', { n: product.shots })}
           {product.category === null ? '' : ` · ${product.category}`}
+          {product.isAmbiguous ? ` · ${t('products.repacked')}` : ''}
         </Text>
       </View>
       <View style={styles.rowPrice}>

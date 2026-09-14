@@ -57,7 +57,7 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-07** | Allow correcting a wrong match in **two taps**, *Wrong?* then the correct product. The frame is reassigned to that product as a correction shot (`TR-42`). *Amended 2026-09-14 (ADR-019): was "in one tap". Literal one tap would put a second product name on every confident card.* *Amended 2026-09-14 (ADR-022): on a chip card, either product of the pair can be the correct product; a chip tap alone still teaches nothing.* | MUST |
 | **SR-08** | Allow deleting the matched product from the scan overlay. | SHOULD |
 | **SR-09** | When top-1 and top-2 are within δ, present a **two-choice disambiguation chip** rather than guessing. | MUST |
-| **SR-10** | Products flagged `is_ambiguous` are never named or priced by recognition. A frame that resolves to one opens a **quick-pick grid**, which is also pinned as a button on the Scan tab. *Amended 2026-09-14 (ADR-018): "bypass recognition" now means "bypass naming". Ambiguous products keep their shots, so a clear bag cannot lock as another product.* | MUST |
+| **SR-10** | Products flagged `is_ambiguous` are never named or priced by recognition. A frame that resolves to one opens a **quick-pick grid**, which is also pinned as a button on the Scan tab. *Amended 2026-09-14 (ADR-018): "bypass recognition" now means "bypass naming". Ambiguous products keep their shots, so a clear bag cannot lock as another product.* *Amended 2026-09-14 (P2-5, operator's call): a tile shows the photo and name, in a fixed order by name with nothing highlighted; the price appears only after a tap.* | MUST |
 | **SR-11** | Torch toggle for dim store interiors. | SHOULD |
 | **SR-12** | Recognition result must not flicker — a result locks only after temporal agreement. | MUST |
 | **SR-13** | **Confirm mode on a small catalog.** While fewer products are enrolled than `app_meta.confirm_below` (`TR-38`), an ACCEPT is shown as a one-tap question — *"Is this {name}? ₱{price}"* with **Yes / No** — never as a confident price. A small catalog cannot reject un-enrolled items (ADR-013). | MUST *(Phase 2; cutoff calibrated Phase 3)* |
@@ -70,7 +70,7 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-20** | Guided capture of **3–5 reference photos** at different angles and lighting. | MUST |
 | **SR-21** | Capture form collects: name, per-piece price, optional per-pack price, unit label, category. | MUST |
 | **SR-22** | Warn the user when a captured frame is blown out, too dark, or out of focus. | SHOULD |
-| **SR-23** | Before saving, check the new embedding against the catalog and warn on a likely duplicate. | MUST |
+| **SR-23** | Before saving, check the new embedding against the catalog and warn on a likely duplicate. *Amended 2026-09-14 (P2-5, ADR-018): the warning also offers, off by default, to mark the named products and the new one as repacked (`SR-10`), in the enrollment transaction. A suggestion only, since `L-02` size pairs trigger it too.* | MUST |
 | **SR-24** | The product must be recognizable on the next camera frame — no restart, no rebuild. | MUST |
 | **SR-25** | Complete enrollment of one product in **≤ 30 seconds**. | MUST |
 

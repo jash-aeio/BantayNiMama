@@ -905,6 +905,38 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       - The lock log since the relaunch held 1 LOCK (the sponge, after restore) and 0 CHIPS. That does
         not settle the 20:17:04 lock: whether the sponge was held before the restore was not recorded.
       - **Gate A4 passed.**
+- **P2-5: quick-pick grid — built, not yet run on a device** (2026-09-14; `SR-10`, `SR-23`, `L-01`,
+  `TR-45`, ADR-018). Tests went from 264 to **277**, and typecheck is clean. P2-5 is done when gate B5
+  passes on the Infinix, which has not been run.
+  - **Domain (pure, tested):**
+    - `quickPick.ts` `quickPickTiles`: every live repacked product, plus a non-repacked product that a
+      grid lock involved. Each appears once, ordered by name ignoring case, then by id. The order never
+      depends on which bag the frame ranked first.
+    - `enrollment.ts` `repackedPlan`: the *repacked* toggle and the `SR-23` offer. Marking the
+      look-alikes flags the new product too, because a pair is ambiguous both ways. With no duplicates
+      left, the offer is ignored.
+    - `interactionLog.ts`: `gridOpen`, `gridClose`, `tilePick`. The interim grid logged its taps as
+      `chipPick`.
+  - **Repositories:** `insertProductWithShots` writes `is_ambiguous` and flags live look-alikes in the
+    same transaction, before the shot rows, so a failed shot INSERT rolls the flags back (tested).
+    `listQuickPickProducts` returns live repacked products with their first enrollment photo.
+  - **Enrollment panel:** a *Looks like other items (repacked)* toggle. When the duplicate warning
+    shows, it also offers, off by default, to mark the named products as repacked. That locks the
+    toggle on and skips the *Save anyway?* alert. The hint says it is not for two sizes of one product
+    (`L-02`).
+  - **Scan tab:**
+    - **A grid lock shows tiles** with photo and name, in the fixed order, nothing highlighted and no
+      price until a tap (operator's call; P2-5 said "photo, name and price"). A tap shows the price
+      with Edit (`SR-06`).
+    - **A pinned *Repacked* button**, under *Light*, shows whenever a live repacked product exists.
+      It opens the same grid. Voting pauses while the grid is open, and *Close* resumes with a fresh
+      stability window.
+    - **The grid has no *Wrong?* and no *Not in my list*.** Nothing on it is named. A negative saved
+      from a clear bag would also silence every look-alike bag, because a negative outranks ambiguity
+      (E-5).
+    - The undo bar moved down to make room for the button.
+  - **Products tab:** repacked products read "· repacked".
+  - Filipino copy is Claude's draft, for the operator's review before `/phase-gate`.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

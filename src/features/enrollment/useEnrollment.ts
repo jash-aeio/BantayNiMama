@@ -24,8 +24,8 @@ export interface EnrollmentState {
   readonly shots: readonly DraftShot[];
   readonly capturing: boolean;
   readonly error: EnrollmentError | null;
-  /** SR-23: names of catalog products the draft's shots already clear τ against, best first. */
-  readonly duplicateNames: readonly string[];
+  /** SR-23: catalog products the draft's shots already clear τ against, best first. */
+  readonly duplicates: readonly { readonly id: string; readonly name: string }[];
   /** Every shot captured this session, including ones later removed or discarded. */
   readonly measurements: readonly ShotMeasurement[];
   /** Goes up by one per committed product. Lets readouts refresh their counts. */
@@ -35,7 +35,8 @@ export interface EnrollmentState {
   receiveCapture(capture: ReferenceCapture): void;
   removeShot(id: string): void;
   discard(): void;
-  save(product: NewProduct): SaveResult;
+  /** `markAmbiguous`: existing look-alikes flagged repacked in the same transaction (P2-5, repackedPlan). */
+  save(product: NewProduct, markAmbiguous?: readonly string[]): SaveResult;
 }
 
 interface Options {
@@ -127,10 +128,10 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
   }, [setShots]);
 
   const save = useCallback(
-    (product: NewProduct): SaveResult => {
+    (product: NewProduct, markAmbiguous: readonly string[] = []): SaveResult => {
       let committed: ReturnType<typeof commitEnrollment>;
       try {
-        committed = commitEnrollment(catalog.db, catalog.meta, product, shotsRef.current);
+        committed = commitEnrollment(catalog.db, catalog.meta, product, shotsRef.current, markAmbiguous);
       } catch (e) {
         // commitEnrollment already deleted the photos, so the draft is gone as well.
         setShots([]);
@@ -147,19 +148,23 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
   );
 
   // SR-23. Recomputed whenever a shot is added or removed; the catalog is searched once per shot.
-  const duplicateNames = useMemo(() => {
+  // The index holds no trashed product and flags negatives, so a negative is skipped rather than
+  // named by its id: it has no product row, and offering to mark it repacked would mean nothing.
+  const duplicates = useMemo(() => {
     if (shots.length === 0) return [];
-    const hitsPerShot = shots.map((shot) => nearestShots(indexRef.current, shot.vector));
-    return likelyDuplicates(hitsPerShot, catalog.meta.thresholds).map(
-      (p) => getProduct(catalog.db, p.productId)?.name ?? p.productId,
-    );
+    const index = indexRef.current;
+    const hitsPerShot = shots.map((shot) => nearestShots(index, shot.vector));
+    return likelyDuplicates(hitsPerShot, catalog.meta.thresholds).flatMap((p) => {
+      const product = index.negativeIds.has(p.productId) ? null : getProduct(catalog.db, p.productId);
+      return product === null ? [] : [{ id: product.id, name: product.name }];
+    });
   }, [shots, catalog, indexRef]);
 
   return {
     shots,
     capturing,
     error,
-    duplicateNames,
+    duplicates,
     measurements,
     savedCount,
     requestCapture,

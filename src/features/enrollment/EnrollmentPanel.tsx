@@ -1,12 +1,13 @@
 import { memo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Alert, Image, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Alert, Image, Pressable, StyleSheet, Switch, Text, TextInput, View } from 'react-native';
 
 import { resolvePhotoPath } from '../../db/photos';
 import {
   MAX_SHOTS,
   MIN_SHOTS,
   parseEnrollmentForm,
+  repackedPlan,
   type EnrollmentForm,
   type FormError,
   type NewProduct,
@@ -14,8 +15,8 @@ import {
 import { formatCentavos } from '../../domain/money.ts';
 import type { EnrollmentState } from './useEnrollment';
 
-// P1-5 enrollment form (SR-20, SR-21, SR-23). Deliberately plain: Phase 2 owns the guided flow,
-// the quality warnings and the 30-second target (SR-22, SR-25).
+// P1-5 enrollment form (SR-20, SR-21, SR-23), with P2-5's *repacked* toggle (SR-10). Deliberately
+// plain: P2-6 owns the guided flow, the quality warnings and the 30-second target (SR-22, SR-25).
 
 const EMPTY_FORM: EnrollmentForm = { name: '', pricePiece: '', pricePack: '', unitLabel: '', category: '' };
 
@@ -33,15 +34,29 @@ export const EnrollmentPanel = memo(function EnrollmentPanel({ enrollment }: { e
   const [form, setForm] = useState<EnrollmentForm>(EMPTY_FORM);
   const [errors, setErrors] = useState<readonly FormError[]>([]);
   const [notice, setNotice] = useState<Notice>(null);
+  const [repacked, setRepacked] = useState(false);
+  // SR-23's hint: off by default, because L-02 size pairs trip the same warning (PHASE_2_PLAN P2-5).
+  const [markDuplicates, setMarkDuplicates] = useState(false);
+
+  const { shots, capturing, error, duplicates } = enrollment;
+  const duplicateNames = duplicates.map((d) => d.name).join(', ');
+  const plan = repackedPlan(repacked, markDuplicates, duplicates.map((d) => d.id));
 
   const field = (key: keyof EnrollmentForm) => (text: string) => setForm((previous) => ({ ...previous, [key]: text }));
 
-  const commit = (product: NewProduct) => {
-    const result = enrollment.save(product);
+  const resetForm = () => {
+    setForm(EMPTY_FORM);
+    setErrors([]);
+    setRepacked(false);
+    setMarkDuplicates(false);
+  };
+
+  const commit = (product: NewProduct, markAmbiguous: readonly string[]) => {
+    const result = enrollment.save(product, markAmbiguous);
     if (result.ok) {
-      setForm(EMPTY_FORM);
-      setErrors([]);
-      setNotice({ tone: 'ok', text: t('enroll.saved', { name: product.name, price: formatCentavos(product.pricePiece) }) });
+      resetForm();
+      const price = formatCentavos(product.pricePiece);
+      setNotice({ tone: 'ok', text: t(product.isAmbiguous === true ? 'enroll.savedRepacked' : 'enroll.saved', { name: product.name, price }) });
     } else {
       setNotice({ tone: 'error', text: t('enroll.errors.saveFailed', { message: result.message }) });
     }
@@ -55,33 +70,29 @@ export const EnrollmentPanel = memo(function EnrollmentPanel({ enrollment }: { e
       return;
     }
     setErrors([]);
-    if (enrollment.shots.length < MIN_SHOTS) {
+    if (shots.length < MIN_SHOTS) {
       setNotice({ tone: 'error', text: t('enroll.errors.needShots', { min: MIN_SHOTS }) });
       return;
     }
-    if (enrollment.duplicateNames.length > 0) {
-      // SR-23 warns but never blocks: a size variant (L-02) is supposed to look like its sibling.
-      Alert.alert(
-        t('enroll.duplicate.title'),
-        t('enroll.duplicate.body', { names: enrollment.duplicateNames.join(', ') }),
-        [
-          { text: t('enroll.duplicate.cancel'), style: 'cancel' },
-          { text: t('enroll.duplicate.saveAnyway'), onPress: () => commit(parsed.product) },
-        ],
-      );
+    const product: NewProduct = { ...parsed.product, isAmbiguous: plan.isAmbiguous };
+    // SR-23 warns but never blocks: a size variant (L-02) is supposed to look like its sibling. Marking
+    // the look-alikes as repacked already answers "is it in your list?", so that skips the alert.
+    if (duplicates.length > 0 && plan.markAmbiguous.length === 0) {
+      Alert.alert(t('enroll.duplicate.title'), t('enroll.duplicate.body', { names: duplicateNames }), [
+        { text: t('enroll.duplicate.cancel'), style: 'cancel' },
+        { text: t('enroll.duplicate.saveAnyway'), onPress: () => commit(product, []) },
+      ]);
       return;
     }
-    commit(parsed.product);
+    commit(product, plan.markAmbiguous);
   };
 
   const onDiscard = () => {
     enrollment.discard();
-    setForm(EMPTY_FORM);
-    setErrors([]);
+    resetForm();
     setNotice(null);
   };
 
-  const { shots, capturing, error } = enrollment;
   const canCapture = !capturing && shots.length < MAX_SHOTS;
   // Saving or discarding while a capture is still being written would strand that shot.
   const idle = !capturing;
@@ -107,6 +118,14 @@ export const EnrollmentPanel = memo(function EnrollmentPanel({ enrollment }: { e
           <Field label={t('enroll.category')} value={form.category} onChangeText={field('category')} />
         </View>
       </View>
+      {/* Locked on while the look-alikes are being marked: a pair is repacked on both sides (repackedPlan). */}
+      <Toggle
+        label={t('enroll.repacked.label')}
+        hint={t('enroll.repacked.hint')}
+        value={plan.isAmbiguous}
+        onChange={setRepacked}
+        disabled={plan.markAmbiguous.length > 0}
+      />
       {errors.map((e) => (
         <Text key={e} style={styles.error}>
           {t(FORM_ERROR_KEYS[e])}
@@ -130,8 +149,16 @@ export const EnrollmentPanel = memo(function EnrollmentPanel({ enrollment }: { e
           ))}
         </View>
       )}
-      {enrollment.duplicateNames.length > 0 && (
-        <Text style={styles.warning}>{t('enroll.duplicate.live', { names: enrollment.duplicateNames.join(', ') })}</Text>
+      {duplicates.length > 0 && (
+        <>
+          <Text style={styles.warning}>{t('enroll.duplicate.live', { names: duplicateNames })}</Text>
+          <Toggle
+            label={t('enroll.duplicate.markBoth', { names: duplicateNames })}
+            hint={t('enroll.duplicate.markBothHint')}
+            value={markDuplicates}
+            onChange={setMarkDuplicates}
+          />
+        </>
       )}
       {error !== null && (
         <Text style={styles.error}>
@@ -182,6 +209,37 @@ function Field({
   );
 }
 
+function Toggle({
+  label,
+  hint,
+  value,
+  onChange,
+  disabled = false,
+}: {
+  label: string;
+  hint: string;
+  value: boolean;
+  onChange: (value: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <View style={styles.toggle}>
+      <View style={styles.flex}>
+        <Text style={styles.toggleLabel}>{label}</Text>
+        <Text style={styles.hint}>{hint}</Text>
+      </View>
+      <Switch
+        value={value}
+        onValueChange={onChange}
+        disabled={disabled}
+        accessibilityLabel={label}
+        trackColor={{ false: '#3a4655', true: '#2b6cb0' }}
+        thumbColor={value ? '#ffd166' : '#e6eaef'}
+      />
+    </View>
+  );
+}
+
 function Button({
   label,
   onPress,
@@ -213,6 +271,8 @@ const styles = StyleSheet.create({
   label: { color: '#e6eaef', fontSize: 12 },
   hint: { color: '#7b8794', fontSize: 12 },
   input: { backgroundColor: '#1b2430', color: '#ffffff', borderRadius: 6, paddingHorizontal: 10, paddingVertical: 8 },
+  toggle: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 4 },
+  toggleLabel: { color: '#ffffff', fontSize: 14, fontWeight: '600' },
   thumbs: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
   thumb: { width: 56, height: 56, borderRadius: 4, backgroundColor: '#1b2430' },
   thumbRemove: { position: 'absolute', top: 0, right: 4, color: '#ffffff', fontWeight: '700' },

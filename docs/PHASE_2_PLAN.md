@@ -277,6 +277,32 @@ Picking one saves a correction shot on it, through the same capture guard.
 
 *Done when:* gate step B5 passes, run early on a scratch catalog.
 
+*Amended 2026-09-14 (P2-5 build):*
+- **A tile shows the photo and name, not the price** (operator's call). Tiles are in a fixed order by
+  name, with nothing highlighted, and a price appears only after a tap, as ADR-018 says. A price on
+  every tile, or the bag the camera ranked first placed at the front, would hand the helper the
+  answer the scanner may not give.
+- **A grid lock also offers a non-repacked product the frame chipped with a bag**, in the same name
+  order. The frame was close to it too.
+- **The grid has no *Wrong?* and no *Not in my list*.** Nothing on it is named. A negative saved from
+  a clear bag would also silence every look-alike bag, because a negative outranks ambiguity (E-5).
+- **Marking the look-alikes runs inside the enrollment transaction** (`TR-45`), and it skips the
+  *Save anyway?* alert.
+- **Voting pauses while the pinned grid is open**, as for the other panels. A grid lock does not
+  pause voting, and a tile choice survives while the grid stays locked.
+
+*Amended 2026-09-14 (operator's call): B5's early run uses the gate catalog, not a scratch one.*
+- **The run:** enroll the 3 repacked bags into the 20-product catalog, run B5, then delete all 3.
+- **Why this is safe for gate A5:** deleted products leave the search index (E-4), so A5 still
+  scans the same 20.
+- **Why not a scratch catalog:** it would mean clearing app data, and then a backup and restore of
+  the only gate catalog.
+- **Costs:**
+  - The trashed bags' rows and photos stay until P2-7's purge, and the gate check's shot count
+    includes them.
+  - During B5, the look-alike offer must not be accepted for any of the 20 gate products.
+- Gate part B still runs B5 again on the fresh install.
+
 ### P2-6 · First run, permission recovery, guided enrollment (`SR-44`, `SR-43`, `SR-20`, `SR-22`, `SR-25`)
 
 - **The flow**, shown on an empty catalog:

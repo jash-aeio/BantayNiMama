@@ -34,6 +34,10 @@ export type InteractionKind =
   | 'undo'
   | 'undoLapsed'
   | 'restore'
+  /** P2-5, SR-10: the pinned grid opened or closed, and a tile tapped (on a grid lock or the pinned grid). */
+  | 'gridOpen'
+  | 'gridClose'
+  | 'tilePick'
   | 'torchOn'
   | 'torchOff';
 

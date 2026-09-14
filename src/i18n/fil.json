@@ -23,6 +23,10 @@
     "unitLabel": "Yunit (kung may)",
     "unitPlaceholder": "sachet, bote, piraso",
     "category": "Kategorya (kung may)",
+    "repacked": {
+      "label": "Kamukha ng ibang item (repack)",
+      "hint": "Para sa asukal, asin o bigas sa plastik. Magtatanong ang scanner kung alin, sa halip na pangalanan ito."
+    },
     "shotsProgress": "Litrato: {{taken}} ng {{max}} — kumuha ng hindi bababa sa {{min}}",
     "captureHint": "Ilagay ang paninda sa loob ng kahon. Ipihit nang kaunti sa bawat litrato.",
     "capture": "Kumuha ng litrato",
@@ -31,6 +35,7 @@
     "save": "I-save ang paninda",
     "discard": "Magsimula muli",
     "saved": "Na-save: {{name}} — {{price}}",
+    "savedRepacked": "Na-save bilang repack: {{name}} — {{price}}",
     "errors": {
       "nameRequired": "Ilagay ang pangalan ng paninda.",
       "piecePriceRequired": "Ilagay ang presyo ng tingi.",
@@ -46,7 +51,9 @@
       "title": "Nasa listahan na ba?",
       "body": "Ang mga litratong ito ay mukhang {{names}}. I-save pa bilang bagong paninda?",
       "saveAnyway": "I-save pa",
-      "cancel": "Kanselahin"
+      "cancel": "Kanselahin",
+      "markBoth": "Markahan din ang {{names}} bilang repack",
+      "markBothHint": "Kung magkamukha sa plastik. Hindi para sa dalawang laki ng parehong paninda."
     }
   },
   "scan": {
@@ -89,7 +96,10 @@
       "photoLabel": "Litrato ng {{name}}"
     },
     "quickPick": {
-      "title": "Mukhang repack. Alin ito?"
+      "title": "Mukhang repack. Alin ito?",
+      "pinnedTitle": "Mga repack. Alin ito?",
+      "open": "Repack",
+      "close": "Isara"
     },
     "reject": {
       "title": "Hindi ito?",
@@ -117,6 +127,7 @@
     "title": "Mga paninda",
     "empty": "Walang paninda. Magdagdag mula sa I-scan.",
     "shots": "{{n}} litrato",
+    "repacked": "repack",
     "trash": {
       "title": "Mga binurang paninda ({{n}})",
       "restore": "Ibalik",

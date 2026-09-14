@@ -15,6 +15,29 @@ export interface NewProduct {
   readonly pricePack: number | null;
   readonly unitLabel: string | null;
   readonly category: string | null;
+  /** SR-10: the *repacked* flag. Absent means not repacked. */
+  readonly isAmbiguous?: boolean;
+}
+
+/** What the *repacked* toggle and the SR-23 hint write, inside the enrollment transaction (TR-45). */
+export interface RepackedPlan {
+  /** The new product's `is_ambiguous`. */
+  readonly isAmbiguous: boolean;
+  /** Existing products to flag as repacked in the same transaction. */
+  readonly markAmbiguous: readonly string[];
+}
+
+/**
+ * P2-5, SR-10, SR-23. `repacked` is the enrollment toggle. `markDuplicates` is the duplicate warning's
+ * offer to flag the look-alikes too, and `duplicateIds` are the products that warning names now.
+ *
+ * Marking the look-alikes makes the new product repacked as well. A pair is ambiguous both ways, and
+ * leaving one side unflagged lets that side lock as the other (ADR-018). With no duplicates left, for
+ * example after the matching shot was removed, the offer means nothing and only the toggle counts.
+ */
+export function repackedPlan(repacked: boolean, markDuplicates: boolean, duplicateIds: readonly string[]): RepackedPlan {
+  if (markDuplicates && duplicateIds.length > 0) return { isAmbiguous: true, markAmbiguous: [...new Set(duplicateIds)] };
+  return { isAmbiguous: repacked, markAmbiguous: [] };
 }
 
 /** The form exactly as typed. Nothing is parsed until parseEnrollmentForm. */

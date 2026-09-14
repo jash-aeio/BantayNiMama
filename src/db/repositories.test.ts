@@ -17,6 +17,7 @@ import {
   insertProductWithShots,
   listPriceHistory,
   listProducts,
+  listQuickPickProducts,
   listTrash,
   priceHistorySummary,
   productNameIncludingTrash,
@@ -275,6 +276,47 @@ describe('trash (SR-08, SR-32) and the repacked flag (SR-10)', () => {
     assert.deepEqual(purgeProducts(db, []), []);
   });
 
+  test('enrollment writes the repacked flag, and marks live look-alikes in the same transaction (P2-5)', () => {
+    const db = fresh();
+    const asukal = enroll(db, 'Asukal', ['a1', 'a2', 'a3']);
+    const monggo = enroll(db, 'Monggo', ['m1', 'm2', 'm3']);
+    softDeleteProduct(db, monggo);
+
+    const asin = insertProductWithShots(
+      db,
+      { name: 'Asin', pricePiece: 1000, pricePack: null, unitLabel: null, category: null, isAmbiguous: true },
+      ['s1', 's2', 's3'].map((id, i) => shot(id, i)),
+      meta,
+      2_000,
+      [asukal, monggo],
+    ).productId;
+
+    assert.equal(getProduct(db, asin)?.isAmbiguous, true);
+    assert.equal(getProduct(db, asukal)?.isAmbiguous, true);
+    assert.deepEqual(ambiguousProductIds(db).sort(), [asin, asukal].sort());
+    restoreProduct(db, monggo);
+    assert.equal(getProduct(db, monggo)?.isAmbiguous, false, 'a trashed product is skipped');
+    assert.equal(getProduct(db, enroll(db, 'Kape', ['k1', 'k2', 'k3']))?.isAmbiguous, false, 'no flag means not repacked');
+  });
+
+  test('a failed enrollment leaves its look-alikes unmarked (TR-45)', () => {
+    const db = fresh();
+    const asukal = enroll(db, 'Asukal', ['a1', 'a2', 'a3']);
+    assert.throws(() =>
+      insertProductWithShots(
+        db,
+        { name: 'Asin', pricePiece: 1000, pricePack: null, unitLabel: null, category: null, isAmbiguous: true },
+        [shot('a1'), shot('s2'), shot('s3')],
+        meta,
+        2_000,
+        [asukal],
+      ),
+    );
+    assert.equal(getProduct(db, asukal)?.isAmbiguous, false);
+    assert.deepEqual(listProducts(db).map((p) => p.name), ['Asukal']);
+    assert.throws(() => insertProductWithShots(db, { name: 'Asin', pricePiece: 1000, pricePack: null, unitLabel: null, category: null }, [shot('x1'), shot('x2'), shot('x3')], meta, 2_000, ['']));
+  });
+
   test('setAmbiguous flags a live product only', () => {
     const db = fresh();
     const asukal = enroll(db, 'Asukal', ['a1', 'a2', 'a3']);
@@ -295,6 +337,26 @@ describe('scan card reads (SR-10, SR-13)', () => {
     setAmbiguous(db, monggo, true);
     softDeleteProduct(db, monggo);
     assert.deepEqual(ambiguousProductIds(db), [asukal]);
+  });
+
+  test('listQuickPickProducts lists live repacked products by name, each with its first enrollment photo', () => {
+    const db = fresh();
+    const monggo = enroll(db, 'Monggo', ['m1', 'm2', 'm3'], 1_000);
+    const asukal = enroll(db, 'asukal', ['a1', 'a2', 'a3'], 1_000);
+    const asin = enroll(db, 'Asin', ['s1', 's2', 's3'], 1_000);
+    enroll(db, 'Kape', ['k1', 'k2', 'k3']);
+    for (const id of [monggo, asukal, asin]) setAmbiguous(db, id, true);
+    insertCorrectionShot(db, asukal, shot('c1'), meta, 500);
+    softDeleteProduct(db, asin);
+
+    const tiles = listQuickPickProducts(db);
+    assert.deepEqual(
+      tiles.map((t) => [t.name, t.photoPath, t.isAmbiguous]),
+      [
+        ['asukal', 'photos/a1.jpg', true],
+        ['Monggo', 'photos/m1.jpg', true],
+      ],
+    );
   });
 
   test('firstEnrollPhotoPath is the first enrollment shot, never a correction', () => {

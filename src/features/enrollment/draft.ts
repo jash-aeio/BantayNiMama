@@ -64,12 +64,14 @@ export function discardShots(shots: readonly DraftShot[]): void {
  * Writes product + shots + vectors in one transaction (TR-45). If that throws, the draft's photos
  * are deleted too, so a failed enrollment leaves nothing behind. Returns the shots to add to the
  * search index. The caller adds them only after this returns, which is after COMMIT.
+ * `markAmbiguous` flags existing look-alikes as repacked inside that same transaction (P2-5).
  */
 export function commitEnrollment(
   db: DB,
   meta: Pick<AppMeta, 'modelId' | 'embeddingDim'>,
   product: NewProduct,
   shots: readonly DraftShot[],
+  markAmbiguous: readonly string[] = [],
 ): { productId: string; indexed: IndexedShot[] } {
   try {
     const written = insertProductWithShots(
@@ -77,6 +79,8 @@ export function commitEnrollment(
       product,
       shots.map(({ id, photoPath, vector }) => ({ id, photoPath, vector })),
       meta,
+      Date.now(),
+      markAmbiguous,
     );
     return { productId: written.productId, indexed: written.shots };
   } catch (e) {

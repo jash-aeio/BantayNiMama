@@ -165,6 +165,8 @@ the live one does not.
 - **Search index:** `appendToIndex` runs only after `insertProductWithShots` returns, and the
   scanner reads the new index on its next frame. That is all `SR-24` needs. With search in JS
   (ADR-014), nothing re-queries SQLite per frame.
+- **Repacked (`SR-10`, P2-5):** the *repacked* toggle and the duplicate warning's offer to mark the
+  look-alikes are both written inside the same transaction as the product (§6, quick-pick grid).
 - **`openCatalog()`** refuses a `bantay.db` whose `app_meta.model_id` differs from the bundled
   `MODEL_ID` (`TR-23`).
 
@@ -472,7 +474,7 @@ card     = displayFor(locked, liveProductCount, confirm_below)    after lock    
   off whenever the tab loses focus.
 - **The interaction log:** Yes, No, *Not in my list* saved, refused or failed, chip picks and the
   torch, each with a time. Held in memory, shown in the gate panel, never persisted.
-- **`quickPick` is interim:** chips for the products the frame involved, until P2-5's grid.
+- **`quickPick`** showed chips for the products the frame involved, until P2-5's grid (below).
 
 ### Edit, correct, delete as built — `src/features/scanner/` (P2-4, 2026-09-14; gate A2–A4 passed on the Infinix)
 
@@ -507,6 +509,33 @@ card     = displayFor(locked, liveProductCount, confirm_below)    after lock    
   caches and resets the stability window, so a lock never mixes votes from two indexes.
 - **`rebuildIndex`** lives in `Root`: `loadVectorIndex` swapped into the shared ref between frames,
   timed, and shown in the gate panel with the `price_history` rows.
+
+### Quick-pick grid as built — `src/features/scanner/` (P2-5, 2026-09-14; not yet verified on a device)
+
+- **Tiles** (`QuickPickGrid`, ordered by `quickPickTiles`): photo and name in one horizontal row,
+  ordered by name ignoring case, then by id.
+  - **Nothing is highlighted, and no price shows until a tap** (operator's call). The tap shows the
+    price with Edit (`SR-06`) and logs `tilePick`.
+  - **Why a fixed order:** clear bags look identical (`L-01`), so the camera's first-ranked bag is a
+    guess, and putting it at the front would hand the helper that guess as an answer.
+
+  | Opened by | Tiles | Voting |
+  |---|---|---|
+  | a `quickPick` lock | every live repacked product, plus a non-repacked product the lock involved | continues; every grid lock shares one key, so a tile choice survives bags swapping places |
+  | the pinned *Repacked* button, shown while a live repacked product exists | every live repacked product | paused; *Close* resets the stability window |
+
+- **No reject on the grid:** no *Wrong?* and no *Not in my list*.
+  - Nothing on the grid is named, so there is nothing to correct.
+  - A negative saved from a clear bag would sit next to every look-alike bag and silence them all,
+    because a negative outranks ambiguity (§6, display step).
+- **Flagging (`SR-10`, `SR-23`):**
+  - The enrollment toggle writes `is_ambiguous` in the product INSERT.
+  - The duplicate warning's offer flags the named products in the same transaction, before the shot
+    rows, so a failed enrollment leaves no look-alike flagged (`repackedPlan`, `TR-45`).
+  - A later change belongs to the Directory (P2-7), through `setAmbiguous`.
+- **The repacked set is re-read from SQLite on every `catalogVersion`** (`listQuickPickProducts` for
+  the tiles, `ambiguousProductIds` in `useScanner`), so a flag set at enrollment applies from the
+  next frame.
 
 ### Threshold calibration
 
@@ -613,6 +642,7 @@ BantayNiMama/
 │   │   ├── gateCheck.ts       ← Phase 1 gate: persistence problems, self-match report (PHASE_1_PLAN §4)
 │   │   ├── lockLog.ts         ← every lock change with its voting frames; segments at Unknown
 │   │   ├── scanDisplay.ts     ← per frame: negative → Unknown, ambiguous → grid; after lock: quote or confirm (P2-1)
+│   │   ├── quickPick.ts       ← grid tiles: repacked products by name, never by rank (SR-10, P2-5)
 │   │   ├── correction.ts      ← ≤ 3 correction shots, oldest replaced; the capture guard; likely products (SR-07, SR-14)
 │   │   ├── rejection.ts       ← the reject sheet as a reducer: negative or correction, guard, late events ignored (P2-3, P2-4)
 │   │   ├── priceEdit.ts       ← typed prices → centavos, shared with enrollment; no-op edits write nothing; editor text (SR-06)
@@ -643,7 +673,8 @@ BantayNiMama/
 │   ├── features/
 │   │   ├── scanner/           ← P1-6
 │   │   │   ├── useScanner.ts  ← knn → match → resolveFrame → stability; classify for the capture guard; renders only on lock change
-│   │   │   ├── ScanOverlay.tsx ← confirm / quote / chips / interim quick pick / Unknown (SR-02–SR-05, SR-09, SR-13)
+│   │   │   ├── ScanOverlay.tsx ← confirm / quote / chips / quick-pick grid / Unknown (SR-02–SR-05, SR-09, SR-10, SR-13)
+│   │   │   ├── QuickPickGrid.tsx ← tiles: photo + name, a price only after a tap (SR-10, P2-5)
 │   │   │   ├── useRejection.ts ← No / Wrong? / Neither → Not in my list or a correction: guard, JPEG, INSERT, index (SR-07, SR-14)
 │   │   │   ├── RejectPanel.tsx ← the reject sheet: likely products, search, Not in my list (P2-4)
 │   │   │   ├── PriceEditPanel.tsx ← price editor bound to the tapped id; Delete (SR-06, SR-08)

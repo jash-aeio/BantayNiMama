@@ -30,6 +30,11 @@ export interface Product {
  * Everything is validated before BEGIN, so bad input never opens a transaction. The caller must
  * add the returned shots to the search index only after this returns — that is, after COMMIT —
  * so a rolled-back enrollment can never be matched (ARCHITECTURE.md §5, invariant 6).
+ *
+ * `markAmbiguous` (P2-5, SR-23's hint) flags existing look-alikes as repacked in the same
+ * transaction. If it were a second write, a failed enrollment could leave the old product flagged
+ * with no twin, or a saved twin could leave the old product unflagged and able to lock as the new
+ * one (ADR-018). An id that is not a live product is skipped.
  */
 export function insertProductWithShots(
   db: DB,
@@ -37,10 +42,14 @@ export function insertProductWithShots(
   shots: readonly NewShot[],
   meta: Pick<AppMeta, 'modelId' | 'embeddingDim'>,
   now: number = Date.now(),
+  markAmbiguous: readonly string[] = [],
 ): { productId: string; shots: IndexedShot[] } {
   const name = product.name.trim();
   if (name === '') throw new Error('A product needs a name (SR-21)');
   assertPrices(product.pricePiece, product.pricePack);
+  for (const id of markAmbiguous) {
+    if (typeof id !== 'string' || id === '') throw new Error('A product to mark as repacked needs an id (SR-10)');
+  }
   if (shots.length < MIN_SHOTS || shots.length > MAX_SHOTS) {
     throw new RangeError(`A product needs ${MIN_SHOTS}–${MAX_SHOTS} shots, got ${shots.length} (SR-20, TR-42)`);
   }
@@ -56,10 +65,14 @@ export function insertProductWithShots(
 
   inTransaction(db, () => {
     db.executeSync(
-      'INSERT INTO products (id, name, price_piece, price_pack, unit_label, category, created_at, updated_at) ' +
-        'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-      [productId, name, product.pricePiece, product.pricePack, product.unitLabel, product.category, now, now],
+      'INSERT INTO products (id, name, price_piece, price_pack, unit_label, category, is_ambiguous, created_at, updated_at) ' +
+        'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [productId, name, product.pricePiece, product.pricePack, product.unitLabel, product.category, product.isAmbiguous === true ? 1 : 0, now, now],
     );
+    // Before the shots, so a failed shot INSERT rolls these back too (tested).
+    for (const id of markAmbiguous) {
+      db.executeSync('UPDATE products SET is_ambiguous = 1, updated_at = ? WHERE id = ? AND deleted_at IS NULL', [now, id]);
+    }
     for (const shot of shots) {
       db.executeSync(
         'INSERT INTO product_shots (id, product_id, photo_path, model_id, embedding, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
@@ -96,6 +109,22 @@ export function ambiguousProductIds(db: DB): string[] {
   return db
     .executeSync('SELECT id FROM products WHERE is_ambiguous = 1 AND deleted_at IS NULL ORDER BY id')
     .rows.map((row) => String(row.id));
+}
+
+export interface QuickPickProduct extends Product {
+  /** The first enrollment photo, for the tile; null if the product somehow has none. */
+  readonly photoPath: string | null;
+}
+
+/** SR-10, P2-5: live repacked products with a tile photo, by name. The grid's order is quickPickTiles'. */
+export function listQuickPickProducts(db: DB): QuickPickProduct[] {
+  return db
+    .executeSync(
+      'SELECT p.id, p.name, p.price_piece, p.price_pack, p.unit_label, p.category, p.is_ambiguous, p.created_at, p.updated_at, ' +
+        "(SELECT s.photo_path FROM product_shots s WHERE s.product_id = p.id AND s.source = 'enroll' ORDER BY s.created_at, s.id LIMIT 1) AS photo_path " +
+        'FROM products p WHERE p.is_ambiguous = 1 AND p.deleted_at IS NULL ORDER BY p.name COLLATE NOCASE, p.id',
+    )
+    .rows.map((row) => ({ ...rowToProduct(row), photoPath: textOrNull(row.photo_path) }));
 }
 
 /**
