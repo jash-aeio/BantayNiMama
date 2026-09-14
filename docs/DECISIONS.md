@@ -381,3 +381,48 @@ A second checkpoint build, with sqlite-vec switched off, measured on the same ph
   computed, not measured.
 - **ADR-004 stands.** There is still no approximate index; brute force is still the algorithm.
   Only where it runs changed.
+
+---
+
+## ADR-015 — React Navigation bottom tabs instead of `expo-router`
+
+**Status:** Accepted · 2026-09-14 · Amends `TR-14`
+
+**Context.** P1-7 builds the app shell: two tabs, Scan and Products. `TR-14` named `expo-router`.
+Before installing, P1-7 measured what each option would add (dry-run installs, and source read
+2026-09-14):
+
+| | `expo-router` 57.0.21 | `@react-navigation/bottom-tabs` 7.18 |
+|---|---|---|
+| Packages added | **73** | **23** |
+| Native modules added | 11: reanimated 4.6, gesture-handler 3.3, screens, safe-area, expo-font, expo-symbols, expo-glass-effect, `@expo/ui`, `@expo/dom-webview`, expo-linking, masked-view | 2: screens, safe-area |
+| Network code in its source (`TR-51`) | Present but inert unless enabled. Data-loader `fetch`, React Server Components `fetch`, and a dev-server ping in the onboarding tutorial. | None found, in JS or native |
+
+- **Worklets conflict.** `expo-router` requires `react-native-reanimated`, and reanimated 4.x ties
+  itself to a particular `react-native-worklets` version. That library carries the camera frame
+  processor, pinned at 0.10.1 for VisionCamera (`TR-25`). It is the most fragile native piece in
+  the app, and every native change costs a rebuild cycle on the 32-bit test phone.
+- **File-based routing is the only thing lost.** `expo-router` is a file-based layer over this same
+  React Navigation. The app has two tabs and no deep links (`TR-50`), so file-based routing buys
+  nothing yet.
+
+**Decision** (operator's call, 2026-09-14): use `@react-navigation/native` +
+`@react-navigation/bottom-tabs`, with `react-native-screens` and `react-native-safe-area-context`
+at Expo SDK 57's pinned versions. `TR-14` is amended to match.
+
+**Rejected.**
+
+- *`expo-router`, as specced.* It passes `TR-51` on the source read, but 73 packages to audit and
+  keep audited, and a possible worklets clash, for routing two screens.
+- *No library, a hand-rolled two-button switcher.* Zero dependencies, but no Android back-button
+  handling or screen lifecycle (`useIsFocused` is what pauses the camera on the Products tab).
+  Phase 2 would add a navigation library anyway.
+
+**Consequences.**
+
+- **Screens are plain components registered in `src/app/Root.tsx`**, not files under `app/`.
+  `ARCHITECTURE.md` §7 is updated.
+- **Moving to `expo-router` later stays cheap.** The screens are already React Navigation screens;
+  only the registration would change. Revisit if deep links or many routes ever arrive.
+- **Every new native module is still audited before install.** The 25 packages installed here
+  (the 23, plus `expo-localization` and its `rtl-detect`) had zero network-call hits.

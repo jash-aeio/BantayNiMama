@@ -45,11 +45,21 @@ export interface ScannerState {
  * than holding the last lock. Holding it would keep a confident price on screen while the camera
  * looks at something else, and NFR-02 outranks a moment of flicker.
  */
-export function useScanner({ catalog, indexRef }: { catalog: Catalog; indexRef: RefObject<VectorIndex> }): ScannerState {
+export function useScanner({
+  catalog,
+  indexRef,
+  timingsRef,
+}: {
+  catalog: Catalog;
+  indexRef: RefObject<VectorIndex>;
+  /** Where to keep timing samples, so another screen (the gate check) can read them. */
+  timingsRef?: RefObject<readonly ScanTiming[]>;
+}): ScannerState {
   const [locked, setLocked] = useState<Decision | null>(null);
   const lockedKey = useRef<string | null>(null);
   const buffer = useRef(emptyBuffer);
-  const timings = useRef<readonly ScanTiming[]>([]);
+  const ownTimings = useRef<readonly ScanTiming[]>([]);
+  const timings = timingsRef ?? ownTimings;
   const lastTop = useRef<readonly ProductScore[]>([]);
   const products = useRef(new Map<string, Product | null>());
 

@@ -149,7 +149,7 @@ object proposal replacing the fixed reticle.
 | **TR-11** | `react-native-nitro-image` | Native in-worklet crop, resize and raw-pixel access, via `HybridFrameConverter.convertFrameToImage()`. *Amended from `vision-camera-resize-plugin`, which targets VisionCamera v4 — see ADR-010.* Float32 conversion and channel-order mapping are done in application code. |
 | **TR-12** | `react-native-fast-tflite` | TFLite runtime. Runs synchronously inside worklets; GPU delegate on Android, CoreML on iOS. |
 | **TR-13** | `@op-engineering/op-sqlite`, plain SQLite. *Amended 2026-09-14: sqlite-vec is off because its 32-bit ARM build cannot load (op-sqlite#456) — ADR-014.* | Metadata + vector storage (vectors as BLOBs) in one SQLite file. |
-| **TR-14** | `expo-router` | File-based tab navigation. |
+| **TR-14** | `@react-navigation/native` + `@react-navigation/bottom-tabs` | Tab navigation: Scan and Products. *Amended 2026-09-14 (ADR-015): was `expo-router`. It added 73 packages and 11 native modules, reanimated among them, against 23 and 2 for this navigator, which is the one it wraps.* |
 | **TR-15** | `zustand` | UI/session state only. SQLite remains the source of truth. |
 | **TR-16** | `i18next`, `react-i18next`, `expo-localization` | `en` + `fil` from the first commit. |
 | **TR-17** | `expo-file-system` | Reference photo storage in the document directory. |

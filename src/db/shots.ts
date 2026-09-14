@@ -48,6 +48,25 @@ export function referencedPhotoPaths(db: DB): Set<string> {
   return new Set(db.executeSync('SELECT photo_path FROM product_shots').rows.map((row) => String(row.photo_path)));
 }
 
+export interface ShotRow {
+  readonly id: string;
+  readonly productId: string;
+  readonly photoPath: string;
+  readonly modelId: string;
+}
+
+/** Every shot row, whatever its model or product state — for the gate check (PHASE_1_PLAN.md §4). */
+export function listShotRows(db: DB): ShotRow[] {
+  return db.executeSync('SELECT id, product_id, photo_path, model_id FROM product_shots ORDER BY created_at, id').rows.map(
+    (row) => ({
+      id: String(row.id),
+      productId: String(row.product_id),
+      photoPath: String(row.photo_path),
+      modelId: String(row.model_id),
+    }),
+  );
+}
+
 function asBlob(value: unknown): ArrayBuffer | ArrayBufferView {
   if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return value;
   throw new Error(`product_shots.embedding is not a BLOB (got ${typeof value})`);

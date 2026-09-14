@@ -10,3 +10,22 @@ export function readAppMeta(db: DB): AppMeta {
   }
   return parseAppMeta(values);
 }
+
+/** One raw app_meta value, or null when the row is absent — for settings outside AppMeta, such as ui_language. */
+export function readMetaValue(db: DB, key: string): string | null {
+  const value = db.executeSync('SELECT value FROM app_meta WHERE key = ?', [key]).rows[0]?.value;
+  return value === undefined || value === null ? null : String(value);
+}
+
+/**
+ * Inserts or replaces one app_meta row.
+ *
+ * Only for UI settings. τ, δ and model_id are retuned deliberately, as data, never as a side
+ * effect of app code (TR-35, ADR-008).
+ */
+export function writeMetaValue(db: DB, key: string, value: string): void {
+  db.executeSync(
+    'INSERT INTO app_meta (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value',
+    [key, value],
+  );
+}

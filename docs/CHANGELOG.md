@@ -477,6 +477,68 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - **Worklet**, n = 40, while charging: crop+resize **60.4** / 61.5, `runSync` 63.5 / 76.3,
       total **124.7** / 142.9 ms median / p90. Crop+resize is up from P1-3's 36.9 ms, with the cause
       unconfirmed. `NFR-07` stays unmet, and the JS side is ~1% of the per-frame cost.
+- **P1-7 — app shell** (2026-09-14, **verified on device**). Domain tests 114 → **131**;
+  typecheck clean.
+  - **Navigation (`TR-14`, ADR-015):** `@react-navigation/native` ~7.3.18 +
+    `@react-navigation/bottom-tabs` ~7.18.18, with `react-native-screens` ~4.26.0 and
+    `react-native-safe-area-context` ~5.7.0 at SDK 57's pins. Two tabs:
+    - **Scan:** one camera, live only while the tab is focused (`NFR-06`). It holds the overlay, a
+      "+ Add product" button, and enrollment sliding up under the preview (`SR-05`).
+    - **Products:** a plain list from SQLite, with name, price, pack price and photo count.
+  - **Language (`TR-16`, `SR-42`):** `expo-localization` ~57.0.2.
+    - `src/domain/language.ts` picks the saved `app_meta.ui_language` first, then the phone's first
+      supported locale (`fil` or legacy `tl` → Filipino), then English.
+    - The switch on the Products tab applies immediately and is saved.
+  - **Network audit (`TR-51`):** 25 packages read before install, the SDK-pinned screens and
+    safe-area versions included. Zero hits for JS network calls (`fetch`, XHR, WebSocket,
+    `sendBeacon`) or native HTTP clients (`HttpURLConnection`, OkHttp, `URLSession`).
+    `expo-router` was also read: its network code is inert unless enabled (ADR-015).
+  - **Gate check (`PHASE_1_PLAN.md` §4 steps 3–4):**
+    - `src/domain/gateCheck.ts` is pure. `persistenceProblems` covers an empty catalog, `app_meta`
+      versus this build, index plus other-model shots versus shot rows, and missing photos.
+      `selfMatchReport` requires each re-embedded photo's nearest neighbour to be its own vector,
+      and reports own-score and nearest-other-shot distributions.
+    - `features/gate/runGateCheck` re-embeds every searchable JPEG and yields to the UI between
+      photos.
+    - The collapsed **Gate check** section on the Products tab shows the result and latency
+      readouts. The screen is the record: its `console.log` output never reached logcat in the
+      release build, and neither did the launch `[catalog]` line.
+  - **Services:** `src/app/services.ts` shares one catalog connection, the live index, both model
+    instances, the language and the diagnostics refs, all created once in `Root`.
+  - **New repositories:** `listProducts`, `listShotRows`, `photoExists`, `readMetaValue` /
+    `writeMetaValue` and `LATEST_SCHEMA_VERSION`.
+  - **New copy:** app, camera, tabs, products, settings and gate strings in `en` + `fil`. The gate
+    readout lines are developer diagnostics and stay English.
+  - **Fixed before it shipped: tab labels clipped by the navigation bar.**
+    - **Symptom:** on the first P1-7 APK (Infinix X6823), the bottom of "Scan" and "Products" was
+      hidden behind Android's navigation-bar scrim.
+    - **Not the inset:** the phone reports the navigation bar at y 1544–1640 (48 dp), and the tab
+      bar was 195 px tall, i.e. 49 dp of content plus that 48 dp inset.
+    - **Cause:** `tabBarIcon: () => null` left an empty icon slot above each label. That pushed the
+      16 sp label below the bar's content area.
+    - **Fix:** `tabBarIconStyle: { display: 'none' }` with `tabBarLabelPosition: 'beside-icon'`.
+      Re-checked on device: both labels are centred and fully visible.
+  - **Measured on device** — Infinix X6823, release APK, CPU, 2026-09-14:
+    - **Launch:** no crash. The Scan tab shows "+ Add product" and the overlay. The Products tab
+      lists products by name with prices and photo counts.
+    - **Enroll from the Scan tab:** the operator saved a 4th product, Clover Chips 24g
+      (₱12.00 / pack), through the new form.
+    - **Language:** after switching to Filipino, force-stopping and relaunching (new process id),
+      the app came back in Filipino: "Paninda", "I-scan", "5 litrato" (`SR-42`, `app_meta.ui_language`).
+    - **Gate check PASS**, on the 4 products / 20 shots:
+      - **Step 3:** index 20, other-model 0, schema 1, `mobilenet_v3_large_embedder_v1`, 1280-d,
+        τ 0.46, δ 0.075, 20 photo rows, **0 missing**.
+      - **Step 4:** self-match **20/20**, own score **min 1.000000**, median 1.000000. The nearest
+        other shot scored median 0.7186, p90 0.7815, **max 0.8679**.
+      - **Took 2.4 s** (about 120 ms per photo).
+    - **Worklet**, n = 40: crop+resize **59.6** / 60.8, `runSync` 64.8 / 71.3, total **125.6** /
+      134.4 ms median / p90. That is the fourth reading near 60 ms for crop+resize. Battery was at
+      100%; whether the charger was connected was not recorded.
+    - **Camera pausing on the Products tab:** operator-reported, not measured.
+  - **Readout restored after the device check:** the per-session frame-vs-JPEG agreement and JPEG
+    size line lived only in the deleted dev host. It moved to the gate check section
+    ("enrollment shots this session"), fed from `useEnrollment` through the shared diagnostics refs.
+    It is still owed before P1-8 on real products, and still lost on relaunch.
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.
@@ -578,6 +640,10 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `TR-51` are unaffected.
 
 ### Removed
+- **`App.tsx` and `src/spike/`** (`config.ts`, `dataset.ts`, `vectors.ts`), deleted in P1-7
+  (2026-09-14) as planned. The golden replay (P1-1) and `src/ml/` (P1-3) cover what they held.
+  `scripts/analyze.mjs` and `relabel.mjs` never imported them. `index.ts` now registers
+  `src/app/Root`. The GPU delegate toggle went with the dev host.
 - **The temporary P1-2 and P1-4 device checks** (`src/db/devCheck.ts`, `src/dev/referenceCheck.ts`)
   and their buttons (2026-09-14, P1-5). Real enrollment replaces them, as both files said it would.
   Their measurements stay recorded above. The P1-4 sidecar `p1-4-reference-check.json` is left

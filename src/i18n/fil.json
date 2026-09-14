@@ -1,6 +1,21 @@
 {
+  "app": {
+    "loading": "Naglo-load…",
+    "catalogError": "Hindi mabuksan ang listahan ng paninda.",
+    "modelError": "Hindi na-load ang model para sa pagkilala."
+  },
+  "camera": {
+    "permissionNeeded": "Kailangan ng BantayNiMama ang camera para kilalanin ang paninda.",
+    "grant": "Payagan ang camera",
+    "none": "Walang camera sa likod ng teleponong ito."
+  },
+  "tabs": {
+    "scan": "I-scan",
+    "products": "Paninda"
+  },
   "enroll": {
     "title": "Magdagdag ng paninda",
+    "close": "Bumalik sa pag-scan",
     "name": "Pangalan ng paninda",
     "namePlaceholder": "hal. Lucky Me Pancit Canton Kalamansi",
     "pricePiece": "Presyo ng tingi (₱)",
@@ -36,6 +51,8 @@
   },
   "scan": {
     "scanning": "Itapat ang kahon sa paninda",
+    "addProduct": "+ Magdagdag",
+    "frameError": "Hindi nabasa ng camera ang larawan. ({{message}})",
     "unknown": "Hindi kilalang paninda",
     "add": "Idagdag",
     "whichOne": "Alin ito?",
@@ -47,5 +64,21 @@
       "likely": "Malamang",
       "notSure": "Hindi tiyak"
     }
+  },
+  "products": {
+    "title": "Mga paninda",
+    "empty": "Walang paninda. Magdagdag mula sa I-scan.",
+    "shots": "{{n}} litrato"
+  },
+  "settings": {
+    "language": "Wika",
+    "english": "English",
+    "filipino": "Filipino"
+  },
+  "gate": {
+    "title": "Gate check (debug)",
+    "run": "Patakbuhin ang check",
+    "running": "Sinusuri ang litrato {{done}} ng {{total}}…",
+    "needsModel": "Naglo-load pa ang model para sa pagkilala."
   }
 }

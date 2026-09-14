@@ -421,13 +421,13 @@ BantayNiMama/
 │   ├── fetch-model.mjs        ← dev-time model download (TR-20)
 │   ├── analyze.mjs            ← Phase 0 offline accuracy + τ/δ sweep
 │   └── small-catalog.mjs      ← small-catalog false-accept simulation (ADR-013)
-├── App.tsx                    ← PHASE 0 ONLY. Throwaway spike UI; replaced by app/
-│                              once the gate passes.
-├── src/spike/                 ← PHASE 0 ONLY. Deleted at the start of Phase 1.
-│   ├── config.ts              ← spike constants (τ/δ are NOT here — see TR-35)
-│   ├── vectors.ts             ← pure cosine ranking + τ/δ decision
-│   └── dataset.ts             ← capture, persist, share-sheet export
+├── index.ts                   ← registers src/app/Root (App.tsx and src/spike/ were deleted in P1-7)
 ├── src/
+│   ├── app/                   ← app shell (TR-14, ADR-015): React Navigation, two tabs
+│   │   ├── Root.tsx           ← boot: catalog, language, both models once; tab navigator
+│   │   ├── services.ts        ← shared context: catalog, index, models, language, diagnostics
+│   │   ├── ScanScreen.tsx     ← one camera (live only while focused); overlay; enrollment slides up
+│   │   └── ProductsScreen.tsx ← plain list from SQLite; language switch; gate check
 │   ├── domain/                ← PURE TS. No I/O. Unit-tested.
 │   │   ├── match.ts           ← τ/δ policy
 │   │   ├── stability.ts       ← ring buffer
@@ -442,12 +442,15 @@ BantayNiMama/
 │   │   ├── referencePhoto.ts  ← photo path per shot; 512 px cap without upscaling (TR-42); orphan detection
 │   │   ├── enrollment.ts      ← form → centavos (SR-21); duplicates ≥ τ (SR-23); 3–5 shots
 │   │   ├── confidence.ts      ← Sure / Likely / Not sure from δ (SR-03)
+│   │   ├── language.ts        ← saved ui_language, else phone locale (fil / tl), else en (SR-42)
+│   │   ├── gateCheck.ts       ← Phase 1 gate: persistence problems, self-match report (PHASE_1_PLAN §4)
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
 │   │   ├── loadModel.ts       ← expo-asset → file:// → TFLite, CPU or GPU; tensor shapes checked (TR-29)
 │   │   ├── frameEmbedder.ts   ← camera-thread worklet; per-stage timings (TR-25)
-│   │   └── stillEmbedder.ts   ← saved JPEG → vector on the JS thread (enrollment, TR-24)
+│   │   ├── stillEmbedder.ts   ← saved JPEG → vector on the JS thread (enrollment, TR-24)
+│   │   └── useEmbeddingModel.ts ← one model instance per call, loaded once in Root
 │   ├── db/                    ← schema, migrations, repositories
 │   │   ├── open.ts            ← openDatabase(): bantay.db in documentDirectory (TR-46)
 │   │   ├── schema.ts          ← migrations, forward-only (TR-44)
@@ -466,17 +469,16 @@ BantayNiMama/
 │   │   │   ├── draft.ts       ← capture → JPEG → vector; one-transaction commit; rollback deletes photos
 │   │   │   ├── useEnrollment.ts ← draft state; extends the index after COMMIT (SR-24)
 │   │   │   └── EnrollmentPanel.tsx ← form, thumbnails, duplicate warning (SR-20, SR-21, SR-23)
-│   │   └── directory/
+│   │   ├── gate/              ← P1-7: runGateCheck (re-embed every JPEG, KNN), readout, panel
+│   │   └── directory/         ← Phase 2
 │   ├── i18n/                  ← i18next init, en.json, fil.json, typed keys (TR-16, SR-42)
-│   └── ui/                    ← shared components, theme
-└── app/                       ← expo-router routes
+│   └── ui/                    ← shared components, theme (Phase 2)
 ```
 
 **The `src/domain/` boundary matters.** Anything that can be a pure function goes there and gets
 unit tests. Everything hard to test (camera, native modules) stays thin and delegates to it.
 
-**Loading the model is not a plain `require()`.** `src/ml/` — and `App.tsx` while Phase 0 stands in
-for it — resolves the bundled `.tflite` through `expo-asset` to a real `file://` path before handing
+**Loading the model is not a plain `require()`.** `src/ml/loadModel.ts` resolves the bundled `.tflite` through `expo-asset` to a real `file://` path before handing
 it to `react-native-fast-tflite`. A bare `require()` resolves to an `http://` Metro URL in debug and
 to a schemeless Android resource name in release, and the library's loader understands only URLs. So
 a `require()` that works throughout development fails on the first release build (TR-29, ADR-011).

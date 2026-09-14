@@ -104,7 +104,25 @@ export function getProduct(db: DB, id: string): Product | null {
       'FROM products WHERE id = ? AND deleted_at IS NULL',
     [id],
   ).rows[0];
-  if (row === undefined) return null;
+  return row === undefined ? null : rowToProduct(row);
+}
+
+export interface ProductListItem extends Product {
+  readonly shots: number;
+}
+
+/** Live products with their shot counts, by name — the Products tab (P1-7). Not SR-30's search. */
+export function listProducts(db: DB): ProductListItem[] {
+  return db
+    .executeSync(
+      'SELECT p.id, p.name, p.price_piece, p.price_pack, p.unit_label, p.category, p.is_ambiguous, p.created_at, p.updated_at, ' +
+        '(SELECT count(*) FROM product_shots s WHERE s.product_id = p.id) AS shots ' +
+        'FROM products p WHERE p.deleted_at IS NULL ORDER BY p.name COLLATE NOCASE, p.id',
+    )
+    .rows.map((row) => ({ ...rowToProduct(row), shots: Number(row.shots) }));
+}
+
+function rowToProduct(row: Record<string, unknown>): Product {
   return {
     id: String(row.id),
     name: String(row.name),

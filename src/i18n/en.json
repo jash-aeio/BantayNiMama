@@ -1,6 +1,21 @@
 {
+  "app": {
+    "loading": "Loading…",
+    "catalogError": "Your product list could not be opened.",
+    "modelError": "The recognition model could not be loaded."
+  },
+  "camera": {
+    "permissionNeeded": "BantayNiMama needs the camera to recognise products.",
+    "grant": "Allow camera",
+    "none": "No back camera was found on this phone."
+  },
+  "tabs": {
+    "scan": "Scan",
+    "products": "Products"
+  },
   "enroll": {
     "title": "Add a product",
+    "close": "Back to scanning",
     "name": "Product name",
     "namePlaceholder": "e.g. Lucky Me Pancit Canton Kalamansi",
     "pricePiece": "Price per piece (₱)",
@@ -36,6 +51,8 @@
   },
   "scan": {
     "scanning": "Point the box at a product",
+    "addProduct": "+ Add product",
+    "frameError": "The camera could not read a frame. ({{message}})",
     "unknown": "Unknown item",
     "add": "Add",
     "whichOne": "Which one is it?",
@@ -47,5 +64,21 @@
       "likely": "Likely",
       "notSure": "Not sure"
     }
+  },
+  "products": {
+    "title": "Products",
+    "empty": "No products yet. Add one from the Scan tab.",
+    "shots": "{{n}} photos"
+  },
+  "settings": {
+    "language": "Language",
+    "english": "English",
+    "filipino": "Filipino"
+  },
+  "gate": {
+    "title": "Gate check (debug)",
+    "run": "Run check",
+    "running": "Checking photo {{done}} of {{total}}…",
+    "needsModel": "The recognition model is still loading."
   }
 }

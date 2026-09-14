@@ -58,6 +58,12 @@ export function listReferencePhotos(): StoredPhoto[] {
     .map((file) => ({ relativePath: `${PHOTOS_DIR}/${file.name}`, bytes: file.size ?? 0 }));
 }
 
+/** Whether a stored relative path still resolves to a file under the document directory (TR-43). */
+export function photoExists(relativePath: string): boolean {
+  if (!isRelativePhotoPath(relativePath)) return false;
+  return new File(Paths.document, relativePath).exists;
+}
+
 export function deleteReferencePhoto(relativePath: string): void {
   if (!isRelativePhotoPath(relativePath)) throw new Error(`Refusing to delete a non-relative path: "${relativePath}"`);
   const file = new File(Paths.document, relativePath);

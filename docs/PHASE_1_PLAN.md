@@ -1,7 +1,7 @@
 # Phase 1 Plan — Proof of Concept, Real Data Path
 
 > **Status:** Approved 2026-09-14 — decisions D-1 to D-4 settled (§3) · **Written:** 2026-09-14 ·
-> **In progress:** P1-1 to P1-6 done 2026-09-14; P1-7 next. Progress lives in
+> **In progress:** P1-1 to P1-7 done 2026-09-14; P1-8 (the gate run) next. Progress lives in
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Where a device result changed this plan, the step carries
 > an *Amended* note, and the original text is kept.
 >
@@ -224,6 +224,24 @@ Worklet vector → JS → `knn` (`TR-30`) → `match` → `stability` → `getPr
 
 ### P1-7 · App shell and cleanup
 
+> **Done 2026-09-14 on the Infinix, release APK.**
+> - **Tabs and enrollment:** both tabs work, and a 4th product was enrolled from the Scan tab.
+> - **Language:** Filipino survived a force-stop.
+> - **Gate check dry run PASS** on 4 products / 20 shots: 0 missing photos, self-match 20/20 at
+>   1.000000, in 2.4 s.
+> - **Record P1-8 from screenshots:** the readout never reached logcat in release.
+>
+> **Amended 2026-09-14.**
+> - **Navigation:** React Navigation bottom tabs, not `expo-router`. Operator's call, ADR-015:
+>   23 packages instead of 73, and no reanimated to clash with the frame processor's worklets.
+> - **Enrollment** lives inside the Scan tab, sharing its one camera. The camera is live only while
+>   the tab is focused.
+> - **The gate check** is a collapsed section at the bottom of the Products tab. It shows §4 steps
+>   3–4 and latency readouts on screen.
+> - **Language** follows the phone (`fil` / `tl` → Filipino). A manual choice is saved in
+>   `app_meta.ui_language` and applies without a restart (`SR-42`).
+> - **Removed:** the GPU toggle. The delegate is not adopted until its vectors are checked.
+
 - `expo-router` ~57.0.21 with two tabs: **Scan** and **Products** (a plain list read from SQLite —
   it is how you check the catalog, not `SR-30`'s search) (`TR-14`).
 - i18n: `i18next` + `react-i18next` + `expo-localization`, `en.json` + `fil.json`, every string through
@@ -314,4 +332,4 @@ All on the Infinix X6823, release APK, named in every row.
 - [x] `CLAUDE.md` — this plan added to the *Read first* table *(2026-09-14)*
 - [x] `PROJECT_SPECS.md` — header moved to Phase 1 *(2026-09-14)*
 - [x] `DECISIONS.md` — ADR-012 for D-2 / D-3 *(2026-09-14)*
-- [ ] `ARCHITECTURE.md` §7 — remove `src/spike/` and `App.tsx` from the layout **when P1-7 deletes them**, not before
+- [x] `ARCHITECTURE.md` §7 — remove `src/spike/` and `App.tsx` from the layout **when P1-7 deletes them**, not before *(2026-09-14)*

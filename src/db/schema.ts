@@ -59,3 +59,6 @@ export const MIGRATIONS: readonly Migration[] = [
     ],
   },
 ];
+
+/** The version migrate() brings every database to. */
+export const LATEST_SCHEMA_VERSION = MIGRATIONS[MIGRATIONS.length - 1]?.version ?? 0;
