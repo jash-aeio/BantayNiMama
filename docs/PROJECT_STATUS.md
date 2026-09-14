@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). **P1-1 to P1-5 done** on the Infinix, release APK. P1-5: 3 products enrolled, then relaunched, then scanned. Reno and Argentina 260g **locked correctly**. The size pair (260g / 100g, `L-02`) showed **chips**. **Zero wrong locks**; the duplicate warning fired. i18next was pulled forward from P1-7. Domain tests **107**, typecheck clean. |
-| **Next action** | P1-6, the scanner: lock / chips / Unknown overlay with name, price and confidence, and KNN + policy latency timed properly (`SR-02`–`SR-04`, `SR-09`, `SR-12`). Owed before P1-8: frame-vs-JPEG agreement on real products, and the operator's pass over `fil.json`. |
+| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). **P1-1 to P1-6 done** on the Infinix, release APK. P1-5: 3 products enrolled, then relaunched, then scanned. Reno and Argentina 260g **locked correctly**. The size pair (260g / 100g, `L-02`) showed **chips**. **Zero wrong locks**; the duplicate warning fired. i18next was pulled forward from P1-7. Domain tests **107**, typecheck clean. |
+| **Next action** | P1-7, the app shell: `expo-router` with Scan and Products tabs, `expo-localization`, the gate's debug readout, and deleting `App.tsx` and `src/spike/` (`TR-14`, `TR-16`, `SR-42`). **P1-6 done on device:** 3 locks, all correct; chips with tap-to-price; un-enrolled item → Unknown; zero wrong locks. Owed before P1-8: frame-vs-JPEG agreement on real products, the operator's pass over `fil.json`, and an unplugged re-measure of crop+resize. |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms). Split on the Infinix (P1-3): `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms either way. Totals: 100.7 ms CPU, 81.2 ms GPU. The GPU helps but is not enough, and crop + resize is the next lever. See `ARCHITECTURE.md` §8. |
@@ -74,7 +74,15 @@ Detail and "done when" for each step: [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md) §5. 
   - [x] **On the Infinix, release APK** *(2026-09-14)*: enrolled Reno Liver Spread, Argentina Corned Beef 260g and 100g (5 shots each). The duplicate warning fired on the second Argentina (`SR-23`). After a relaunch: 3 products / 15 shots, index 15, sweep 0. Scan (19 screenshots, 5 s apart): **LOCK Reno** ₱20.00 at 0.750 / 0.746 (margin 0.237 / 0.254); **LOCK 260g** ₱35.00 at 0.881 (margin 0.160); the 260g/100g pair gave **CHIPS** (margins 0.012–0.042) and 100g never locked; empty and in-between frames were UNKNOWN. **Zero wrong locks.** Frames were matched to products by scan order (operator-reported).
   - [ ] Owed before P1-8: frame-vs-JPEG agreement on real products. The session readout was lost to the relaunch, and P1-4 measured only one static scene
   - [ ] Owed before P1-8: the operator corrects `fil.json` (D-4)
-- [ ] P1-6 Scanner — lock / chips / Unknown; KNN and policy latency timed (`SR-02`–`SR-04`, `SR-09`, `SR-12`)
+- [x] P1-6 Scanner — lock / chips / Unknown; KNN and policy latency timed (`SR-02`–`SR-04`, `SR-09`, `SR-12`) *(2026-09-14)*
+  - [x] `domain/confidence.ts` (Sure / Likely / Not sure from δ — operator's choice), `features/scanner/` (`useScanner`: renders only on lock change, clears on lost quorum, times KNN and policy separately; `ScanOverlay`: LOCK / CHIPS / Unknown + Add), `scan` strings in `en` + `fil`; tests 107 → 114 *(2026-09-14)*
+  - [x] **On the Infinix, release APK** *(2026-09-14, 18 screenshots 5 s apart, each checked against the product actually in the reticle)*:
+    - **Locks:** 100g ₱25.00 and 260g ₱35.00 ×2, all **correct**, all read *Likely*. **Zero wrong locks.**
+    - **Chips:** 260g | 100g on the size pair; tapping 100g showed ₱25.00. Reno held sideways gave chips 100g | Reno, and tapping Reno showed ₱20.00.
+    - **Unknown:** the un-enrolled ascorbic acid blister pack, motion blur and empty frames all read **Unknown**.
+  - [x] Timed on the Infinix *(2026-09-14, n = 200 frames, 15 shots)*: KNN **1.31 / 4.23 ms**, policy + stability **0.07 / 0.11 ms** median/p90 → `ARCHITECTURE.md` §8
+  - [ ] Not exercised: tapping **Add** on Unknown → enroll mode
+  - [ ] **Near miss to carry into Phase 3:** with Reno held sideways, **Argentina 100g ranked top-1** and only the δ margin turned it into chips instead of a wrong lock. In P1-5, Reno held upright locked at 0.750.
 - [ ] P1-7 App shell — two tabs, `en` + `fil` (Claude drafts, operator corrects); spike code deleted (`TR-14`, `TR-16`, `SR-42`)
 - [ ] P1-8 **Gate run** — 20 products, force stop, airplane mode, then `/phase-gate`
 
@@ -152,7 +160,9 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Per-frame worklet stages, `android-gpu` delegate (P1-3) | ≤ 60 ms total (`NFR-07`) | crop+resize **36.6** · `runSync` **43.2** · normalize **0.9** · total **81.2** ms median (total p90 83.0), n = 40 — Infinix X6823, release APK. Not met. **Not adopted:** GPU-vs-CPU vector agreement unmeasured. | 2026-09-14 |
 | Frame-vs-JPEG vector agreement (P1-4) | no target yet; must not move decisions | dot **min 0.9803 · median 0.9843**, n = 10 captures of **one static scene** — Infinix X6823, release APK, CPU | 2026-09-14 |
 | Enroll → relaunch → scan (P1-5) | lock or chip, zero wrong locks | 3 products: Reno **LOCK** 0.750, Argentina 260g **LOCK** 0.881, 260g/100g size pair **CHIPS** (margins 0.012–0.042); **0 wrong locks** in 19 screenshots — Infinix X6823, release APK, CPU, JPEG-path vectors | 2026-09-14 |
-| KNN + policy + stability per frame, JS (spot) | part of `NFR-07` | **1.4–4.3 ms** at 15 shots, read off 11 on-screen readouts (not a timed run; P1-6 times it properly) — Infinix X6823, release APK | 2026-09-14 |
+| Scan overlay on device (P1-6) | lock or chip, zero wrong locks | 18 screenshots, each checked against the product in the reticle: **3 correct locks** (100g, 260g ×2, all *Likely*), chips on the size pair and on Reno held sideways (100g ranked top-1 there — a near miss), un-enrolled blister pack → **Unknown**; **0 wrong locks** — Infinix X6823, release APK, CPU | 2026-09-14 |
+| JS KNN / policy + stability per frame (P1-6) | part of `NFR-07` | KNN **1.31 / 4.23 ms** · policy + stability **0.07 / 0.11 ms** median/p90, n = 200 live frames, 15 shots — Infinix X6823, release APK | 2026-09-14 |
+| Worklet stages, CPU, while charging (P1-6) | ≤ 60 ms total (`NFR-07`) | crop+resize **60.4** / 61.5 · `runSync` 63.5 / 76.3 · normalize 0.9 · total **124.7** / 142.9 ms, n = 40. **crop+resize is up from P1-3's 36.9, cause unconfirmed** (heat while charging, or the P1-4 refactor); re-measure unplugged — Infinix X6823, release APK | 2026-09-14 |
 | Reference photo size (`NFR-08`) | ≤ 200 KB per 5-shot product | **17.5 KB median, 17.6 KB max per shot** → ~88 KB per product (one scene); 396 px crop of a 1280×720 frame, JPEG q80 | 2026-09-14 |
 
 ---

@@ -33,5 +33,19 @@
       "saveAnyway": "I-save pa",
       "cancel": "Kanselahin"
     }
+  },
+  "scan": {
+    "scanning": "Itapat ang kahon sa paninda",
+    "unknown": "Hindi kilalang paninda",
+    "add": "Idagdag",
+    "whichOne": "Alin ito?",
+    "noPrice": "Walang presyo",
+    "perUnit": "{{price}} / {{unit}}",
+    "pack": "Buo: {{price}}",
+    "confidence": {
+      "sure": "Tiyak",
+      "likely": "Malamang",
+      "notSure": "Hindi tiyak"
+    }
   }
 }

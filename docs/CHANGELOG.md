@@ -423,6 +423,60 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       from the screen, not a timed run; P1-6 times it.
     - **Not recorded:** frame-vs-JPEG agreement on real products. The readout lasts one session
       and was lost to the relaunch; it is owed before P1-8.
+- **P1-6 — scanner** (2026-09-14, **verified on device**). Domain tests 107 → **114**;
+  typecheck clean.
+  - `src/domain/confidence.ts` — the `SR-03` indicator is three bands built from the policy's
+    own δ (the operator chose this over a score bar or a percentage):
+    - ACCEPT with margin ≥ 2δ → **Sure**.
+    - ACCEPT with a smaller margin → **Likely**.
+    - ACCEPT with no second product in the running → **Likely**, never Sure, because a lone
+      candidate proves nothing (ADR-013).
+    - DISAMBIGUATE → **Not sure**.
+    - δ comes from `app_meta` (`TR-35`). Only the 2× multiple is a constant
+      (`SURE_MARGIN_IN_DELTAS`), a placeholder that Phase 3 retunes. No number or percentage is
+      shown, because a similarity is not a probability.
+  - `src/features/scanner/useScanner.ts` — the JS-thread path: `nearestShots` → `match` →
+    `pushDecision` → `lockedDecision` (`TR-30`–`TR-36`).
+    - React state changes **only when the lock's key changes**, never per frame (`SR-12`).
+    - When quorum is lost, the overlay **clears to "scanning" instead of holding the last lock**.
+      Holding it could leave a confident price on screen while the camera sees something else
+      (`NFR-02` outranks flicker).
+    - KNN and policy + stability are timed separately each frame. The last 200 frames are kept in
+      a ref, for `ARCHITECTURE.md` §8.
+  - `src/features/scanner/ScanOverlay.tsx` — plain RN views over the camera, every string
+    translated:
+    - **LOCK:** name, price in large type (with "/ unit" when set), the whole-pack price when set,
+      and confidence bars (`SR-02`, `SR-03`).
+    - **UNKNOWN:** "Unknown item" and **Add**, which opens enrollment in one tap with the camera
+      still live (`SR-04`, `SR-05`).
+    - **CHIPS:** "Which one is it?" and two product chips. A tap shows that product's price, and
+      any new lock clears the choice (`SR-09`).
+    - A locked id with no product row shows no price at all.
+  - `en.json` / `fil.json` gain the `scan` strings. `fil` is Claude's draft (D-4).
+  - `App.tsx` dev host:
+    - It opens in scan mode, and the panel shrinks to 26% there.
+    - Diagnostics (worklet stages, JS KNN and policy median/p90, last top 3) refresh once a second
+      from refs.
+    - The `→` in the catalog line is now "to", because the phone's font did not render it.
+  - **Measured on device** — Infinix X6823, release APK, CPU, 3 products / 15 shots, 2026-09-14.
+    18 screenshots were taken 5 s apart. Each one was checked against the product actually inside
+    the reticle, not assumed from the scan order.
+    - **Locks: 3, all correct.** Argentina 100g ₱25.00 once, Argentina 260g ₱35.00 twice. All
+      three read *Likely*: no margin reached 2δ this run.
+    - **Wrong locks: 0.**
+    - **Chips:**
+      - The size pair gave 260g | 100g. Tapping 100g showed ₱25.00 (`SR-09`).
+      - Reno held sideways gave 100g | Reno. Tapping Reno showed ₱20.00.
+      - **Near miss:** on those Reno frames Argentina 100g ranked top-1, and only the δ margin kept
+        it from a wrong lock. In P1-5, Reno held upright locked at 0.750. This goes to the Phase 3
+        retune (`NFR-01`, `NFR-02`).
+    - **Unknown:** an un-enrolled ascorbic acid blister pack, motion-blurred frames and empty
+      frames all read **Unknown item** + Add (`SR-04`). Tapping Add was not exercised.
+    - **JS thread**, n = 200 frames: KNN **median 1.31 ms, p90 4.23**; policy + stability
+      **median 0.07, p90 0.11** (`ARCHITECTURE.md` §8).
+    - **Worklet**, n = 40, while charging: crop+resize **60.4** / 61.5, `runSync` 63.5 / 76.3,
+      total **124.7** / 142.9 ms median / p90. Crop+resize is up from P1-3's 36.9 ms, with the cause
+      unconfirmed. `NFR-07` stays unmet, and the JS side is ~1% of the per-frame cost.
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.

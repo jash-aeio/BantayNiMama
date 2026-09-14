@@ -1,7 +1,7 @@
 # Phase 1 Plan — Proof of Concept, Real Data Path
 
 > **Status:** Approved 2026-09-14 — decisions D-1 to D-4 settled (§3) · **Written:** 2026-09-14 ·
-> **In progress:** P1-1 to P1-5 done 2026-09-14; P1-6 next. Progress lives in
+> **In progress:** P1-1 to P1-6 done 2026-09-14; P1-7 next. Progress lives in
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Where a device result changed this plan, the step carries
 > an *Amended* note, and the original text is kept.
 >
@@ -197,6 +197,22 @@ adopted until its vectors are checked against CPU's.
 *Done when:* enroll → immediately scan → locks, on device.
 
 ### P1-6 · Scanner, minimal
+
+> **Done 2026-09-14 on the Infinix, release APK.**
+> - **Scan:** 3 locks, all correct, and zero wrong locks. Chips showed the price on tap, and an
+>   un-enrolled item read Unknown.
+> - **Timings:** KNN 1.31 ms and policy + stability 0.07 ms median (§8).
+> - **Near miss:** Reno held sideways ranked Argentina 100g top-1, and δ turned it into chips.
+> - **Not exercised:** tapping Add.
+>
+> **Amended 2026-09-14.**
+> - **Confidence (`SR-03`)** is three bands built from δ, chosen by the operator: Sure (margin
+>   ≥ 2δ), Likely, and Not sure (chips). A lone candidate is never Sure (ADR-013). No number is
+>   shown, because a similarity is not a probability.
+> - **Losing quorum clears the overlay** to "scanning" instead of holding the last lock. Holding it
+>   could show a confident, stale price (`NFR-02` over flicker).
+> - **Tapping a chip** shows that product's price until the next lock. Learning from the tap is
+>   `SR-07`, in Phase 2.
 
 Worklet vector → JS → `knn` (`TR-30`) → `match` → `stability` → `getProduct` → overlay.
 

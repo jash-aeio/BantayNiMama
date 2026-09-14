@@ -33,5 +33,19 @@
       "saveAnyway": "Save anyway",
       "cancel": "Cancel"
     }
+  },
+  "scan": {
+    "scanning": "Point the box at a product",
+    "unknown": "Unknown item",
+    "add": "Add",
+    "whichOne": "Which one is it?",
+    "noPrice": "No price yet",
+    "perUnit": "{{price}} / {{unit}}",
+    "pack": "Whole pack: {{price}}",
+    "confidence": {
+      "sure": "Sure",
+      "likely": "Likely",
+      "notSure": "Not sure"
+    }
   }
 }

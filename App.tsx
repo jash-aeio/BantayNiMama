@@ -14,14 +14,13 @@ import {
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
 import { openCatalog, type Catalog } from './src/db/catalog';
-import { catalogCounts, getProduct, type Product } from './src/db/products';
-import { nearestShots, type VectorIndex } from './src/domain/knn.ts';
-import { match, rankProducts, type Decision, type ProductScore } from './src/domain/match.ts';
-import { formatCentavos } from './src/domain/money.ts';
-import { emptyBuffer, lockedDecision, pushDecision } from './src/domain/stability.ts';
+import { catalogCounts } from './src/db/products';
+import type { VectorIndex } from './src/domain/knn.ts';
 import { summarize } from './src/domain/stats.ts';
 import { EnrollmentPanel } from './src/features/enrollment/EnrollmentPanel';
 import { useEnrollment } from './src/features/enrollment/useEnrollment';
+import { ScanOverlay } from './src/features/scanner/ScanOverlay';
+import { useScanner, type ScanTiming } from './src/features/scanner/useScanner';
 import { LANGUAGES, type Language } from './src/i18n';
 import {
   captureReference,
@@ -33,14 +32,13 @@ import {
 import { loadEmbeddingModel, type Accelerator, type LoadedModel } from './src/ml/loadModel';
 import { MODEL_ID, RETICLE_FRACTION, TARGET_FPS } from './src/ml/model';
 
-// TEMPORARY DEV HOST, replaced by app/ in P1-7. It hosts the real enrollment feature
-// (src/features/enrollment, fully translated) next to a scan readout, so P1-5's "enroll → scan →
-// locks" can be checked on device before P1-6 builds the scanner. The readouts below are
-// developer diagnostics, not user copy, which is why they are not translated.
+// TEMPORARY DEV HOST, replaced by app/ in P1-7. It hosts the real features — enrollment
+// (src/features/enrollment) and the scan overlay (src/features/scanner), both translated — next to
+// developer diagnostics. The diagnostics are not user copy, which is why they are not translated.
 
 type Mode = 'enroll' | 'scan';
 
-/** How many recent frames the on-screen timing summary covers. */
+/** How many recent frames the worklet timing summary covers. */
 const TIMING_WINDOW = 40;
 
 type ModelState =
@@ -49,13 +47,6 @@ type ModelState =
   | { state: 'error'; accelerator: Accelerator; error: string };
 
 type CatalogState = { ok: true; catalog: Catalog } | { ok: false; error: string };
-
-interface ScanView {
-  readonly locked: Decision | null;
-  readonly top: readonly ProductScore[];
-  /** KNN + policy + stability for this frame, JS thread. */
-  readonly searchMs: number;
-}
 
 function useEmbeddingModel(accelerator: Accelerator): ModelState {
   const [state, setState] = useState<ModelState>({ state: 'loading', accelerator });
@@ -118,17 +109,15 @@ function DevHost({ catalog }: { catalog: Catalog }) {
   const stillModelState = useEmbeddingModel('cpu');
   const stillModel = stillModelState.state === 'loaded' ? stillModelState.loaded.model : undefined;
 
-  const [mode, setMode] = useState<Mode>('enroll');
+  const [mode, setMode] = useState<Mode>('scan');
   const modeRef = useRef<Mode>(mode);
   modeRef.current = mode;
   const [language, setLanguage] = useState<Language>('en');
 
-  // The live search index (ADR-014). Enrollment replaces it after each commit, and the scan
-  // callback reads it on the next frame — that is the whole of SR-24.
+  // The live search index (ADR-014). Enrollment replaces it after each commit, and the scanner
+  // reads it on the next frame — that is the whole of SR-24.
   const indexRef = useRef<VectorIndex>(catalog.index);
-  const stability = useRef(emptyBuffer);
   const timings = useRef<StageTimings[]>([]);
-  const [scan, setScan] = useState<ScanView | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
 
   // Set from JS, read by the worklet on its next processed frame.
@@ -139,15 +128,8 @@ function DevHost({ catalog }: { catalog: Catalog }) {
   const receiveCapture = useRef(enrollment.receiveCapture);
   receiveCapture.current = enrollment.receiveCapture;
 
-  // Products never change in Phase 1 (no edit, no delete), so a looked-up row can be kept.
-  const products = useRef(new Map<string, Product | null>());
-  const productOf = useCallback(
-    (id: string) => {
-      if (!products.current.has(id)) products.current.set(id, getProduct(catalog.db, id));
-      return products.current.get(id) ?? null;
-    },
-    [catalog],
-  );
+  const scanner = useScanner({ catalog, indexRef });
+  const { onVector, reset: resetScanner } = scanner;
 
   useEffect(() => {
     if (!hasPermission) void requestPermission();
@@ -156,29 +138,29 @@ function DevHost({ catalog }: { catalog: Catalog }) {
   // Timings from one accelerator must never be summarised together with another's.
   useEffect(() => {
     timings.current = [];
-  }, [accelerator]);
+    resetScanner();
+  }, [accelerator, resetScanner]);
 
   // Entering scan mode starts a fresh stability window, so a lock never carries votes from frames
-  // taken before the product existed.
+  // taken before a product existed.
   useEffect(() => {
-    stability.current = emptyBuffer;
-    setScan(null);
+    resetScanner();
+  }, [mode, resetScanner]);
+
+  // The dev readout reads refs, and re-renders once a second in scan mode — never per frame.
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (mode !== 'scan') return;
+    const id = setInterval(() => setTick((n) => n + 1), 1000);
+    return () => clearInterval(id);
   }, [mode]);
 
   const onEmbedding = useCallback(
     (result: FrameEmbedding) => {
       timings.current = [...timings.current.slice(-(TIMING_WINDOW - 1)), result.timings];
-      // No state change outside scan mode, so typing in the form never competes with 4 fps renders.
-      if (modeRef.current !== 'scan') return;
-
-      const t0 = performance.now();
-      const hits = nearestShots(indexRef.current, result.vector);
-      stability.current = pushDecision(stability.current, match(hits, catalog.meta.thresholds));
-      const locked = lockedDecision(stability.current);
-      const searchMs = performance.now() - t0;
-      setScan({ locked, top: rankProducts(hits).slice(0, 3), searchMs });
+      if (modeRef.current === 'scan') onVector(result.vector);
     },
-    [catalog],
+    [onVector],
   );
 
   const onReference = useCallback(
@@ -192,6 +174,9 @@ function DevHost({ catalog }: { catalog: Catalog }) {
   const onFrameError = useCallback((message: string) => {
     setFrameError((previous) => (previous === message ? previous : message));
   }, []);
+
+  // SR-04 / SR-05: "Add" from an Unknown result opens enrollment in one tap, with the camera still live.
+  const onAdd = useCallback(() => setMode('enroll'), []);
 
   // TR-26: throttle inside the worklet. Holding the interval on the camera
   // thread is what makes the dropped frames actually free — bouncing to JS to
@@ -276,11 +261,23 @@ function DevHost({ catalog }: { catalog: Catalog }) {
         <View pointerEvents="none" style={styles.reticleLayer}>
           <View style={styles.reticle} />
         </View>
+        {mode === 'scan' && (
+          <ScanOverlay
+            locked={scanner.locked}
+            thresholds={catalog.meta.thresholds}
+            productOf={scanner.productOf}
+            onAdd={onAdd}
+          />
+        )}
       </View>
 
-      <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent} keyboardShouldPersistTaps="handled">
+      <ScrollView
+        style={[styles.panel, mode === 'scan' ? styles.panelScan : styles.panelEnroll]}
+        contentContainerStyle={styles.panelContent}
+        keyboardShouldPersistTaps="handled"
+      >
         <View style={styles.row}>
-          {(['enroll', 'scan'] as const).map((m) => (
+          {(['scan', 'enroll'] as const).map((m) => (
             <Tab key={m} label={m} active={mode === m} onPress={() => setMode(m)} />
           ))}
           {LANGUAGES.map((l) => (
@@ -306,16 +303,12 @@ function DevHost({ catalog }: { catalog: Catalog }) {
               ))}
             </View>
             <Text style={styles.meta}>{describeTimings(timings.current)}</Text>
-            <Text style={styles.lock}>{describeLock(scan?.locked ?? null, productOf)}</Text>
-            {scan?.top.map((p, i) => (
-              <View key={p.productId} style={styles.scoreRow}>
-                <Text style={styles.scoreLabel} numberOfLines={1}>
-                  {i + 1}. {productOf(p.productId)?.name ?? p.productId}
-                </Text>
-                <Text style={styles.scoreValue}>{p.score.toFixed(4)}</Text>
-              </View>
-            ))}
-            {scan !== null && <Text style={styles.dim}>knn + policy + stability {scan.searchMs.toFixed(1)} ms</Text>}
+            <Text style={styles.meta}>{describeScanTimings(scanner.timings.current)}</Text>
+            <Text style={styles.meta}>
+              {scanner.lastTop.current
+                .map((p, i) => `${i + 1}. ${scanner.productOf(p.productId)?.name ?? p.productId} ${p.score.toFixed(3)}`)
+                .join(' · ') || 'top 3: —'}
+            </Text>
           </>
         )}
       </ScrollView>
@@ -326,27 +319,10 @@ function DevHost({ catalog }: { catalog: Catalog }) {
 function describeCatalog(catalog: Catalog, counts: { products: number; shots: number }, indexSize = catalog.index.size): string {
   const { meta } = catalog;
   return (
-    `bantay.db schema ${catalog.migratedFrom}→${meta.schemaVersion} · ${meta.embeddingDim}-d · ` +
+    `bantay.db schema ${catalog.migratedFrom} to ${meta.schemaVersion} · ${meta.embeddingDim}-d · ` +
     `τ ${meta.thresholds.tau} δ ${meta.thresholds.delta} · ${counts.products} products / ${counts.shots} shots · ` +
     `index ${indexSize} · orphan photos removed ${catalog.orphanPhotosRemoved} · other-model shots ${catalog.otherModelShots}`
   );
-}
-
-function describeLock(locked: Decision | null, productOf: (id: string) => Product | null): string {
-  const name = (id: string) => productOf(id)?.name ?? id;
-  if (locked === null) return 'settling…';
-  switch (locked.kind) {
-    case 'accept': {
-      const product = productOf(locked.product.productId);
-      const price = product?.pricePiece != null ? formatCentavos(product.pricePiece) : '—';
-      const margin = locked.margin === null ? '—' : locked.margin.toFixed(3);
-      return `LOCK ${name(locked.product.productId)} ${price} · score ${locked.product.score.toFixed(3)} · margin ${margin}`;
-    }
-    case 'disambiguate':
-      return `CHIPS ${name(locked.first.productId)} | ${name(locked.second.productId)} · margin ${locked.margin.toFixed(3)}`;
-    case 'unknown':
-      return `UNKNOWN${locked.best === null ? '' : ` · best ${name(locked.best.productId)} ${locked.best.score.toFixed(3)}`}`;
-  }
 }
 
 /** Frame-vs-JPEG agreement and bytes per shot over this session's real enrollments (ARCHITECTURE.md §4, NFR-08). */
@@ -361,20 +337,32 @@ function describeMeasurements(measurements: readonly { agreement: number; bytes:
   );
 }
 
-/** P1-3 latency diagnostic: per-stage median / p90 over the last TIMING_WINDOW frames. */
+/** P1-3 latency diagnostic: worklet per-stage median / p90 over the last TIMING_WINDOW frames. */
 function describeTimings(samples: readonly StageTimings[]): string {
   const stage = (name: string, pick: (t: StageTimings) => number) => {
     const s = summarize(samples.map(pick));
     return s === null ? `${name} —` : `${name} ${s.median.toFixed(1)}/${s.p90.toFixed(1)}`;
   };
   return (
-    `ms median/p90, n=${samples.length}: ` +
+    `worklet ms median/p90, n=${samples.length}: ` +
     [
       stage('crop+resize', (t) => t.cropResizeMs),
       stage('runSync', (t) => t.inferenceMs),
       stage('normalize', (t) => t.normalizeMs),
       stage('total', (t) => t.totalMs),
     ].join(' · ')
+  );
+}
+
+/** P1-6 latency diagnostic: JS-thread KNN and policy + stability, median / p90 (ARCHITECTURE.md §8). */
+function describeScanTimings(samples: readonly ScanTiming[]): string {
+  const knn = summarize(samples.map((s) => s.knnMs));
+  const policy = summarize(samples.map((s) => s.policyMs));
+  const last = samples[samples.length - 1];
+  if (knn === null || policy === null || last === undefined) return 'js ms: —';
+  return (
+    `js ms median/p90, n=${knn.n}, ${last.shots} shots: knn ${knn.median.toFixed(2)}/${knn.p90.toFixed(2)} · ` +
+    `policy+stability ${policy.median.toFixed(2)}/${policy.p90.toFixed(2)}`
   );
 }
 
@@ -414,7 +402,9 @@ const styles = StyleSheet.create({
     borderColor: '#ffd166',
     borderRadius: 8,
   },
-  panel: { maxHeight: '55%', backgroundColor: '#0b0f14' },
+  panel: { backgroundColor: '#0b0f14' },
+  panelScan: { maxHeight: '26%' },
+  panelEnroll: { maxHeight: '55%' },
   panelContent: { padding: 14, gap: 10, paddingBottom: 32 },
   row: { flexDirection: 'row', gap: 8 },
   tab: {
@@ -429,11 +419,7 @@ const styles = StyleSheet.create({
   tabText: { color: '#9aa5b1', fontWeight: '600' },
   tabTextActive: { color: '#0b0f14' },
   meta: { color: '#9aa5b1', fontSize: 12, fontVariant: ['tabular-nums'] },
-  lock: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
   error: { color: '#ff6b6b', fontSize: 12 },
   dim: { color: '#7b8794', fontSize: 12 },
   info: { color: '#ffffff', textAlign: 'center' },
-  scoreRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },
-  scoreLabel: { color: '#e6eaef', flexShrink: 1 },
-  scoreValue: { color: '#ffd166', fontVariant: ['tabular-nums'] },
 });

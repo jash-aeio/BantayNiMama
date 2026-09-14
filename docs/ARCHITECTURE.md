@@ -319,6 +319,29 @@ The pseudocode above is literal, with these edge cases pinned down by tests:
   un-enrolled frames it must give 3 / 50 / 52, with all 3 false accepts → Datu Puti vinegar
   (ADR-012).
 
+### As rendered — `src/features/scanner/` (P1-6, verified on the Infinix 2026-09-14)
+
+- **The overlay shows exactly `lockedDecision`.** When no result has quorum, it shows a neutral
+  "point the box at a product", never the previous lock. Holding a lock through lost quorum would
+  cut flicker. It would also leave a confident price on screen while the camera sees something else,
+  and `NFR-02` outranks flicker.
+- **React renders on lock changes only.** `useScanner` compares `decisionKey`s. Per-frame state
+  (votes, timings, the dev top 3) lives in refs.
+- **Confidence (`SR-03`, `src/domain/confidence.ts`)** comes in three bands, never a number:
+
+  | Decision | Condition | Shown |
+  |---|---|---|
+  | ACCEPT | margin ≥ 2δ | Sure (3 bars) |
+  | ACCEPT | margin < 2δ, or no second product (`margin: null`) | Likely (2 bars) |
+  | DISAMBIGUATE | — | Not sure (1 bar) + two chips |
+  | UNKNOWN | — | "Unknown item" + Add |
+
+  δ is read from `app_meta` (`TR-35`). Only the multiple `SURE_MARGIN_IN_DELTAS = 2` is a constant:
+  an operator-chosen placeholder, retuned in Phase 3. On the P1-5 scans, Reno's margins
+  (0.237 / 0.254) would read Sure, Argentina 260g's (0.160) Sure, and the size pair Not sure.
+- **Chips.** A tap shows that product's price until the next lock. Nothing is learned from the tap
+  yet (`SR-07`, Phase 2).
+
 ### Threshold calibration
 
 `τ` and `δ` live in `app_meta`, **never hard-coded** (TR-35). They are read from the score
@@ -418,6 +441,7 @@ BantayNiMama/
 │   │   ├── stats.ts           ← nearest-rank median / p90 for device measurements
 │   │   ├── referencePhoto.ts  ← photo path per shot; 512 px cap without upscaling (TR-42); orphan detection
 │   │   ├── enrollment.ts      ← form → centavos (SR-21); duplicates ≥ τ (SR-23); 3–5 shots
+│   │   ├── confidence.ts      ← Sure / Likely / Not sure from δ (SR-03)
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
@@ -435,7 +459,9 @@ BantayNiMama/
 │   │   ├── photos.ts          ← reference JPEG store in documentDirectory/photos/ (TR-42, TR-43)
 │   │   └── meta.ts · ids.ts   ← read app_meta · UUID v4
 │   ├── features/
-│   │   ├── scanner/
+│   │   ├── scanner/           ← P1-6
+│   │   │   ├── useScanner.ts  ← knn → match → stability; renders only on lock change; timings in refs
+│   │   │   └── ScanOverlay.tsx ← LOCK / CHIPS / Unknown + Add (SR-02–SR-05, SR-09)
 │   │   ├── enrollment/        ← P1-5
 │   │   │   ├── draft.ts       ← capture → JPEG → vector; one-transaction commit; rollback deletes photos
 │   │   │   ├── useEnrollment.ts ← draft state; extends the index after COMMIT (SR-24)
@@ -462,15 +488,16 @@ a `require()` that works throughout development fails on the first release build
 | Stage | Budget | Measured |
 |---|---|---|
 | Sharpness gate | ~1 ms | not isolated by the spike |
-| Crop + resize | 1–3 ms | **CPU run: median 36.9 ms, p90 38.0** (P1-3, n = 40). Includes frame → image conversion and packing into Float32. With the GPU delegate: **median 36.6, p90 37.7**. The delegate does not touch this stage. |
+| Crop + resize | 1–3 ms | **CPU run: median 36.9 ms, p90 38.0** (P1-3, n = 40). Includes frame → image conversion and packing into Float32. With the GPU delegate: **median 36.6, p90 37.7**. The delegate does not touch this stage. **Later readings are ~60 ms:** P1-6 gave **median 60.4, p90 61.5** (n = 40, CPU, 2026-09-14), and two earlier spot readings agree. All were taken while charging. The cause is unconfirmed: heat, or P1-4's `embedCrop` refactor of this path. Re-measure unplugged and cool before acting on it. |
 | TFLite inference | 8–40 ms | **CPU: median 62.8 ms, p90 72.2** (P1-3, n = 40). **`android-gpu` delegate: median 43.2 ms, p90 45.1**, 31% less. Whether GPU vectors match CPU vectors is **not yet measured**, so the delegate is not adopted: τ/δ were calibrated on CPU. |
 | L2-normalize | <0.1 ms | **median 0.9 ms** (P1-3, n = 40). Also copies the vector out of the model's output buffer. |
 | **Per-frame worklet total, split measurement** | **9–43 ms** | **CPU: median 100.7 ms, p90 109.1 · GPU delegate: median 81.2 ms, p90 83.0** — Infinix X6823, release APK, 2026-09-14, n = 40 each. Neither meets `NFR-07`. Crop + resize alone is ~37 ms, so even a free model would leave this stage near the budget. Not directly comparable to the 145.5 ms below: that number also covered converting the vector to a JS array inside the worklet. |
 | **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **Release: median 145.5 ms, p90 160.1 ms, range 126.5–339.5 ms** (n = 226 test frames). Debug: 140–248 ms, median ~148 ms (7 spot readings). See note. |
 | sqlite-vec KNN | 0.5–3 ms | **Could not run** — sqlite-vec does not load on 32-bit ARM (§5). Measured as a substitute: **JS brute force, 100 shots median 9.2 ms; 2,500 shots median 234.0 ms** (inline loop over one `Float32Array`, n = 10), and 831.1 ms at 2,500 when calling `dot()` per shot. Infinix X6823, release APK, 2026-09-14. |
 | Read vectors from SQLite | — | **56.3 ms** for 2,500 × 1280-d BLOBs, bit-exact round trip. Same device and date. |
-| Policy + stability | <2 ms | _pending Phase 1_ |
-| **Total per frame** | **≤ 60 ms** (NFR-07) | _pending — but already exceeded by the row above_ |
+| JS brute-force KNN, in the scanner (P1-6) | — | **15 shots: median 1.31 ms, p90 4.23** (n = 200 live frames, `useScanner`). Infinix X6823, release APK, 2026-09-14. |
+| Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, n = 200 live frames: `match` + `pushDecision` + `lockedDecision`). Same device and date. |
+| **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms, not met.** This is a **sum of medians**, not one timed span: P1-6 worklet total 124.7 + KNN 1.31 + policy 0.07. The JS side is ~1% of it; the worklet is the whole problem. |
 
 **Measurement, 2026-09-13.** 7 samples read off the spike's on-screen counter (`elapsedMs`, timed
 inside the worklet around crop → resize → `runSync` → L2-normalize): 140.5, 142.4, 147.5, 148.2,
