@@ -1,0 +1,37 @@
+{
+  "enroll": {
+    "title": "Magdagdag ng paninda",
+    "name": "Pangalan ng paninda",
+    "namePlaceholder": "hal. Lucky Me Pancit Canton Kalamansi",
+    "pricePiece": "Presyo ng tingi (₱)",
+    "pricePack": "Presyo ng buo (₱, kung may)",
+    "unitLabel": "Yunit (kung may)",
+    "unitPlaceholder": "sachet, bote, piraso",
+    "category": "Kategorya (kung may)",
+    "shotsProgress": "Litrato: {{taken}} ng {{max}} — kumuha ng hindi bababa sa {{min}}",
+    "captureHint": "Ilagay ang paninda sa loob ng kahon. Ipihit nang kaunti sa bawat litrato.",
+    "capture": "Kumuha ng litrato",
+    "capturing": "Kumukuha ng litrato…",
+    "removeShot": "Alisin ang litrato {{number}}",
+    "save": "I-save ang paninda",
+    "discard": "Magsimula muli",
+    "saved": "Na-save: {{name}} — {{price}}",
+    "errors": {
+      "nameRequired": "Ilagay ang pangalan ng paninda.",
+      "piecePriceRequired": "Ilagay ang presyo ng tingi.",
+      "piecePriceInvalid": "Ang presyo ng tingi ay dapat gaya ng 12.50.",
+      "packPriceInvalid": "Ang presyo ng buo ay dapat gaya ng 120.00.",
+      "needShots": "Kumuha ng hindi bababa sa {{min}} litrato.",
+      "modelNotReady": "Naglo-load pa ang camera model. Subukan muli sandali.",
+      "captureFailed": "Hindi na-save ang litrato. ({{message}})",
+      "saveFailed": "Hindi na-save ang paninda, at inalis ang mga litrato nito. Kumuha muli ng mga litrato. ({{message}})"
+    },
+    "duplicate": {
+      "live": "Mukhang nasa listahan na: {{names}}",
+      "title": "Nasa listahan na ba?",
+      "body": "Ang mga litratong ito ay mukhang {{names}}. I-save pa bilang bagong paninda?",
+      "saveAnyway": "I-save pa",
+      "cancel": "Kanselahin"
+    }
+  }
+}

@@ -352,6 +352,57 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       typecheck nor the Node tests could see it.
     - **Fix:** helpers now sit above the worklets that call them, and the rule is recorded in
       `ARCHITECTURE.md` §2 and `CLAUDE.md`.
+- **P1-5 — enrollment** (2026-09-14, **code only; not yet verified on device**). Domain tests
+  93 → **107**; typecheck clean.
+  - `src/domain/enrollment.ts`:
+    - `parseEnrollmentForm` covers `SR-21`. Name and per-piece price are required, and every
+      error is returned at once. Prices go through `parsePesos`, never a float (`TR-41`). A zero
+      price is refused as a typo (`NFR-02`).
+    - `likelyDuplicates` covers `SR-23`. It merges each new shot's KNN hits, ranks products by best
+      shot and keeps those at or above τ from `app_meta` (`TR-35`). It warns and never blocks,
+      because size variants are supposed to look alike (`L-02`).
+    - `MIN_SHOTS` / `MAX_SHOTS` moved here from `db/products.ts`.
+  - `src/features/enrollment/` covers `SR-20`, `SR-24` and `TR-45`, writing files first and rows
+    last:
+    - `captureShot` saves the JPEG when the photo is taken, then embeds **that JPEG** with the
+      CPU still model. The stored vector is therefore the production path's, and also what a
+      re-embed after a model swap gives (`TR-24`). The live-frame vector is kept only to measure
+      agreement.
+    - `commitEnrollment` writes product + shots in one transaction, and deletes the draft's JPEGs
+      if it throws.
+    - `useEnrollment` extends the in-memory index only after COMMIT, so the next frame can match
+      the product (`SR-24`).
+    - `EnrollmentPanel` has the form, 3–5 thumbnails (tap to remove), a live duplicate warning
+      and a "Save anyway" confirmation.
+  - `insertProductWithShots` takes each shot's id from the caller, because the photo is already
+    saved under it. It refuses a `photoPath` other than `photos/<id>.jpg`, so a row can never point
+    at another shot's photo (`TR-24`, `TR-43`).
+  - `src/db/catalog.ts` — `openCatalog()` runs once at launch. It migrates, reads `app_meta`, and
+    **refuses a database whose `model_id` is not the bundled model** (`TR-23`). It then removes
+    orphan photos and builds the index.
+  - **Orphan-photo sweep.** A kill between saving JPEGs and COMMIT leaves photos with no row. At
+    launch, `unreferencedPhotos` names files in `photos/` that no `product_shots` row references,
+    soft-deleted products included. Those are deleted. Nothing is deleted if the query fails. The
+    sweep runs only at launch, because a draft's photos have no row yet. **On device:** the first
+    launch of the P1-5 release APK on the Infinix X6823 reported 10 removed, which is the P1-4 check
+    photos, with schema 1, τ/δ read from `app_meta` and 0 products (2026-09-14).
+  - **i18n pulled forward from P1-7** (`TR-16`, `SR-42`). The operator decided enrollment copy
+    should not be hardcoded, even for one step.
+    - Added `i18next` ~26.4.2 and `react-i18next` ~17.0.14. Audited against `TR-51`: neither
+      package, nor `html-parse-stringify`, `void-elements` or `use-sync-external-store`, contains
+      `fetch`, `XMLHttpRequest`, `WebSocket` or `sendBeacon`. Their only URLs are in comments.
+      No backend plugin is installed.
+    - `src/i18n/en.json` and `fil.json` hold the enrollment copy. `fil.json` is Claude's draft,
+      for the operator to correct (D-4).
+    - Keys are typed, so an unknown key fails typecheck. Checked with a probe.
+    - Each file must have every key of the other, which is also enforced at compile time.
+    - Device-locale detection (`expo-localization`) stays in P1-7.
+  - `App.tsx` (still the temporary dev host) now has two modes:
+    - **Enroll** — the real panel, plus a frame-vs-JPEG agreement and bytes readout over this
+      session's shots.
+    - **Scan** — a lock readout (`knn` → `match` → `stability`) with top 3 and per-frame search
+      time. It lets P1-5's "enroll → scan → locks" be checked before P1-6.
+    - An `en` / `fil` switch.
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.
@@ -453,7 +504,13 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `TR-51` are unaffected.
 
 ### Removed
-- _nothing yet_
+- **The temporary P1-2 and P1-4 device checks** (`src/db/devCheck.ts`, `src/dev/referenceCheck.ts`)
+  and their buttons (2026-09-14, P1-5). Real enrollment replaces them, as both files said it would.
+  Their measurements stay recorded above. The P1-4 sidecar `p1-4-reference-check.json` is left
+  unread in the document directory.
+- **The spike's enroll / collect modes in `App.tsx`** (2026-09-14, P1-5). The app no longer writes
+  the spike JSON dataset. `src/spike/` stays until P1-7 deletes it. The labeled Phase 0 data is on
+  the laptop and its backup, not on the phone.
 
 ---
 

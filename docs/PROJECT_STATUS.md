@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). **P1-1 to P1-4 done**, all on the Infinix, release APK. The golden replay reproduces the Phase 0 gate exactly. Schema v1 migrates, and enroll → reopen → search passes, with vectors as BLOBs searched in JS (ADR-014). A frame takes 100.7 ms on CPU and 81.2 ms with the GPU delegate (budget 60). Reference JPEGs survive a force-stop and re-embed identically, at ~17.5 KB per shot. Domain tests **93**, typecheck clean. |
-| **Next action** | P1-5, enrollment. A name and price form, 3–5 captures, JPEGs saved first, then product + shots + vectors in one transaction. A duplicate check against the catalog, and the new product matchable on the next frame (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`). |
+| **Working on** | **Phase 1 — real data path**, branch `feat/phase-1-data-path` ([`PHASE_1_PLAN.md`](PHASE_1_PLAN.md)). **P1-1 to P1-4 done** on the Infinix, release APK. **P1-5 enrollment: code done, device check pending.** It has the form, 3–5 JPEG shots, a duplicate warning at τ, one transaction, and the index extended after COMMIT. i18next was pulled forward from P1-7. Domain tests **107**, typecheck clean. |
+| **Next action** | P1-5 on the Infinix, release APK: enroll 2–3 real products (one same-brand pair) → switch to scan → each locks. Also check: the duplicate warning fires on the sibling; the counts survive a force-stop; `orphan photos removed` shows 10 on first launch (the P1-4 photos) and 0 after. Record frame-vs-JPEG agreement on real products. |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms). Split on the Infinix (P1-3): `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms either way. Totals: 100.7 ms CPU, 81.2 ms GPU. The GPU helps but is not enough, and crop + resize is the next lever. See `ARCHITECTURE.md` §8. |
@@ -68,6 +68,11 @@ Detail and "done when" for each step: [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md) §5. 
   - [x] Photos survive a force-stop *(2026-09-14)*: after `am force-stop` and relaunch, all 10 photos were on disk (175.5 KB), and each re-embedded to dot 1.000000 with its saved vector (`TR-24`)
   - [ ] Owed before the P1-8 gate: effect of JPEG-path enrollment on real decisions. Phase 0's τ/δ came from live-frame vectors; a 0.984 dot can move a score by up to 0.18 (δ = 0.075)
 - [ ] P1-5 Enrollment — one transaction, photos first (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`)
+  - [x] `domain/enrollment.ts` (form → centavos, duplicates ≥ τ), `features/enrollment/` (JPEG-path vectors, rollback deletes photos, index extended after COMMIT), `db/catalog.ts` (model_id check, launch orphan sweep); tests 93 → 107 *(2026-09-14)*
+  - [x] i18next + react-i18next pulled forward from P1-7, network-audited (`TR-51`); enrollment copy in `en` + `fil` (fil is a draft for the operator); keys typed *(2026-09-14)*
+  - [x] Release APK installed and launched on the Infinix *(2026-09-14, 4m 23s build)*: `bantay.db` schema 1 → 1, τ 0.46 / δ 0.075 read from `app_meta`, 0 products, **orphan sweep removed 10** (the P1-4 check photos), other-model shots 0; English form renders
+  - [ ] **On the Infinix, release APK:** enroll → scan → locks; duplicate warning on a sibling; counts after force-stop; sweep reads 0 on relaunch
+  - [ ] Frame-vs-JPEG agreement on real products (P1-4 measured one static scene only)
 - [ ] P1-6 Scanner — lock / chips / Unknown; KNN and policy latency timed (`SR-02`–`SR-04`, `SR-09`, `SR-12`)
 - [ ] P1-7 App shell — two tabs, `en` + `fil` (Claude drafts, operator corrects); spike code deleted (`TR-14`, `TR-16`, `SR-42`)
 - [ ] P1-8 **Gate run** — 20 products, force stop, airplane mode, then `/phase-gate`

@@ -143,6 +143,24 @@ the live one does not.
   than upscaled to 512: 17.5 KB median per shot, ~88 KB per 5-shot product against `NFR-08`'s
   200 KB.
 
+**As implemented — `src/features/enrollment/` (P1-5, 2026-09-14; not yet verified on device).**
+
+- **Shot ids are chosen at capture.** The JPEG is written as `photos/<shot id>.jpg` straight away.
+  `insertProductWithShots` stores that same id and refuses any other path, so a row can never point
+  at another shot's photo.
+- **The stored vector is the JPEG's** (CPU still model), never the live frame's. The frame vector
+  is kept only for the agreement readout.
+- **Duplicate check (`SR-23`):** each draft shot runs KNN against the index. `likelyDuplicates`
+  keeps products whose best score over all shots is **≥ τ**, the bar at which the scanner would
+  start naming them. It warns; "Save anyway" proceeds.
+- **Failure:** if the transaction throws, the draft's JPEGs are deleted. If the app is killed
+  before COMMIT, the photos are orphans, and the next launch's sweep removes them (§5, invariant 7).
+- **Search index:** `appendToIndex` runs only after `insertProductWithShots` returns, and the
+  scanner reads the new index on its next frame. That is all `SR-24` needs. With search in JS
+  (ADR-014), nothing re-queries SQLite per frame.
+- **`openCatalog()`** refuses a `bantay.db` whose `app_meta.model_id` differs from the bundled
+  `MODEL_ID` (`TR-23`).
+
 ---
 
 ## 5. Data Model
@@ -237,6 +255,10 @@ CREATE INDEX idx_shots_product     ON product_shots(product_id);
 6. **The in-memory search matrix is derived, never authoritative** (ADR-014). It is rebuilt from
    `product_shots` at startup and extended only after an enrollment commits. It leaves out
    soft-deleted products and vectors from any other `model_id`.
+7. **Orphan photos are swept only at launch** (P1-5). A photo in `photos/` that no `product_shots`
+   row references (soft-deleted products count as referencing theirs) is deleted by `openCatalog()`,
+   before any enrollment draft can exist. Sweeping at any other time would delete a draft's photos,
+   which have no row until COMMIT. If the reference query fails, nothing is deleted.
 
 ---
 
@@ -393,7 +415,8 @@ BantayNiMama/
 │   │   ├── photoPath.ts       ← relative photo paths only (TR-43)
 │   │   ├── pixels.ts          ← channel layout, model input, reticle rect — worklet-callable (TR-21)
 │   │   ├── stats.ts           ← nearest-rank median / p90 for device measurements
-│   │   ├── referencePhoto.ts  ← photo path per shot; 512 px cap without upscaling (TR-42)
+│   │   ├── referencePhoto.ts  ← photo path per shot; 512 px cap without upscaling (TR-42); orphan detection
+│   │   ├── enrollment.ts      ← form → centavos (SR-21); duplicates ≥ τ (SR-23); 3–5 shots
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
@@ -405,18 +428,19 @@ BantayNiMama/
 │   │   ├── schema.ts          ← migrations, forward-only (TR-44)
 │   │   ├── migrate.ts         ← applies them, one transaction per version
 │   │   ├── transaction.ts     ← synchronous BEGIN IMMEDIATE / COMMIT / ROLLBACK
-│   │   ├── products.ts        ← insertProductWithShots (TR-45), getProduct
-│   │   ├── shots.ts           ← loadVectorIndex from embedding BLOBs (ADR-014)
+│   │   ├── catalog.ts         ← openCatalog(): migrate, model_id check, orphan sweep, index — once at launch
+│   │   ├── products.ts        ← insertProductWithShots (TR-45), getProduct, catalogCounts
+│   │   ├── shots.ts           ← loadVectorIndex from embedding BLOBs (ADR-014); referencedPhotoPaths
 │   │   ├── photos.ts          ← reference JPEG store in documentDirectory/photos/ (TR-42, TR-43)
-│   │   ├── meta.ts · ids.ts   ← read app_meta · UUID v4
-│   │   └── devCheck.ts        ← TEMPORARY P1-2 device check; replaced by enrollment in P1-5
-│   ├── dev/                   ← TEMPORARY device checks
-│   │   └── referenceCheck.ts  ← P1-4 frame-vs-JPEG agreement, photo sizes, relaunch re-embed
+│   │   └── meta.ts · ids.ts   ← read app_meta · UUID v4
 │   ├── features/
 │   │   ├── scanner/
-│   │   ├── enrollment/
+│   │   ├── enrollment/        ← P1-5
+│   │   │   ├── draft.ts       ← capture → JPEG → vector; one-transaction commit; rollback deletes photos
+│   │   │   ├── useEnrollment.ts ← draft state; extends the index after COMMIT (SR-24)
+│   │   │   └── EnrollmentPanel.tsx ← form, thumbnails, duplicate warning (SR-20, SR-21, SR-23)
 │   │   └── directory/
-│   ├── i18n/                  ← en.json, fil.json
+│   ├── i18n/                  ← i18next init, en.json, fil.json, typed keys (TR-16, SR-42)
 │   └── ui/                    ← shared components, theme
 └── app/                       ← expo-router routes
 ```

@@ -1,16 +1,9 @@
+import './src/i18n';
+
 import { StatusBar } from 'expo-status-bar';
+import i18next from 'i18next';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Alert,
-  Platform,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import {
   Camera,
   useCameraDevice,
@@ -20,16 +13,16 @@ import {
 } from 'react-native-vision-camera';
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
-import { runStorageCheck } from './src/db/devCheck';
-import {
-  clearReferenceCheck,
-  describeCaptures,
-  measureCapture,
-  verifyStoredPhotos,
-  type CaptureResult,
-} from './src/dev/referenceCheck';
+import { openCatalog, type Catalog } from './src/db/catalog';
+import { catalogCounts, getProduct, type Product } from './src/db/products';
+import { nearestShots, type VectorIndex } from './src/domain/knn.ts';
+import { match, rankProducts, type Decision, type ProductScore } from './src/domain/match.ts';
+import { formatCentavos } from './src/domain/money.ts';
+import { emptyBuffer, lockedDecision, pushDecision } from './src/domain/stability.ts';
 import { summarize } from './src/domain/stats.ts';
-import { dot } from './src/domain/vector.ts';
+import { EnrollmentPanel } from './src/features/enrollment/EnrollmentPanel';
+import { useEnrollment } from './src/features/enrollment/useEnrollment';
+import { LANGUAGES, type Language } from './src/i18n';
 import {
   captureReference,
   embedFrame,
@@ -39,37 +32,30 @@ import {
 } from './src/ml/frameEmbedder';
 import { loadEmbeddingModel, type Accelerator, type LoadedModel } from './src/ml/loadModel';
 import { MODEL_ID, RETICLE_FRACTION, TARGET_FPS } from './src/ml/model';
-import {
-  exportDataset,
-  load,
-  save,
-  saveDatasetToFolder,
-  type SpikeDataset,
-  type TestFrame,
-} from './src/spike/dataset';
-import { rankProducts, type Candidate, type Shot } from './src/spike/vectors';
 
-// PHASE 0 SPIKE UI, now running on the Phase 1 modules (src/ml, src/db). Throwaway: replaced by
-// app/ in P1-7. The P1-3 additions — CPU/GPU switch and per-stage timings — are temporary too.
+// TEMPORARY DEV HOST, replaced by app/ in P1-7. It hosts the real enrollment feature
+// (src/features/enrollment, fully translated) next to a scan readout, so P1-5's "enroll → scan →
+// locks" can be checked on device before P1-6 builds the scanner. The readouts below are
+// developer diagnostics, not user copy, which is why they are not translated.
 
-type Mode = 'scan' | 'enroll' | 'collect';
-
-const DEVICE_NAME = `${Platform.OS} ${Platform.Version}`;
+type Mode = 'enroll' | 'scan';
 
 /** How many recent frames the on-screen timing summary covers. */
 const TIMING_WINDOW = 40;
-
-interface Live {
-  vector: number[];
-  elapsedMs: number;
-  dim: number;
-  norm: number;
-}
 
 type ModelState =
   | { state: 'loading'; accelerator: Accelerator }
   | { state: 'loaded'; loaded: LoadedModel }
   | { state: 'error'; accelerator: Accelerator; error: string };
+
+type CatalogState = { ok: true; catalog: Catalog } | { ok: false; error: string };
+
+interface ScanView {
+  readonly locked: Decision | null;
+  readonly top: readonly ProductScore[];
+  /** KNN + policy + stability for this frame, JS thread. */
+  readonly searchMs: number;
+}
 
 function useEmbeddingModel(accelerator: Accelerator): ModelState {
   const [state, setState] = useState<ModelState>({ state: 'loading', accelerator });
@@ -82,7 +68,7 @@ function useEmbeddingModel(accelerator: Accelerator): ModelState {
         if (!cancelled) setState({ state: 'loaded', loaded });
       },
       (e: unknown) => {
-        if (!cancelled) setState({ state: 'error', accelerator, error: e instanceof Error ? e.message : String(e) });
+        if (!cancelled) setState({ state: 'error', accelerator, error: messageOf(e) });
       },
     );
     return () => {
@@ -93,7 +79,32 @@ function useEmbeddingModel(accelerator: Accelerator): ModelState {
   return state;
 }
 
+function tryOpenCatalog(): CatalogState {
+  try {
+    const catalog = openCatalog();
+    console.log(`[catalog] ${describeCatalog(catalog, catalogCounts(catalog.db))}`);
+    return { ok: true, catalog };
+  } catch (e) {
+    return { ok: false, error: messageOf(e) };
+  }
+}
+
 export default function App() {
+  // Once per launch, and before the camera can capture anything: the orphan-photo sweep inside
+  // relies on no enrollment draft existing yet.
+  const [catalogState] = useState(tryOpenCatalog);
+  if (!catalogState.ok) {
+    return (
+      <Centered>
+        <Text style={styles.info}>bantay.db could not be opened:</Text>
+        <Text style={styles.error}>{catalogState.error}</Text>
+      </Centered>
+    );
+  }
+  return <DevHost catalog={catalogState.catalog} />;
+}
+
+function DevHost({ catalog }: { catalog: Catalog }) {
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
   const preview = usePreviewOutput();
@@ -101,45 +112,42 @@ export default function App() {
   const modelState = useEmbeddingModel(accelerator);
   const model = modelState.state === 'loaded' ? modelState.loaded.model : undefined;
 
-  // P1-4: a second, CPU-only model instance for embedding saved JPEGs on the JS thread. The camera
+  // A second, CPU-only model instance for embedding saved JPEGs on the JS thread. The camera
   // worklet calls runSync on `model` continuously, and one TFLite interpreter must never run on
   // two threads at once.
   const stillModelState = useEmbeddingModel('cpu');
   const stillModel = stillModelState.state === 'loaded' ? stillModelState.loaded.model : undefined;
-  // Set from JS, read by the worklet on its next processed frame.
-  const captureRequest = useMemo(() => createSynchronizable(false), []);
-  const [captures, setCaptures] = useState<CaptureResult[]>([]);
-  const [storeCheck, setStoreCheck] = useState('P1-4 store: waiting for the still-image model');
-
-  useEffect(() => {
-    if (stillModel === undefined) return;
-    try {
-      setStoreCheck(verifyStoredPhotos(stillModel));
-    } catch (e) {
-      setStoreCheck(`P1-4 store check failed: ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }, [stillModel]);
-
-  // P1-2 storage check: run once, show on screen and in logcat (tag ReactNativeJS).
-  const dbProbe = useMemo(() => {
-    const text = runStorageCheck();
-    console.log(`[P1-2 storage check]\n${text}`);
-    return text;
-  }, []);
 
   const [mode, setMode] = useState<Mode>('enroll');
-  const [label, setLabel] = useState('');
-  const [dataset, setDataset] = useState<SpikeDataset>(() => load(DEVICE_NAME));
-  const [live, setLive] = useState<Live | null>(null);
-  const [ranked, setRanked] = useState<Candidate[]>([]);
+  const modeRef = useRef<Mode>(mode);
+  modeRef.current = mode;
+  const [language, setLanguage] = useState<Language>('en');
+
+  // The live search index (ADR-014). Enrollment replaces it after each commit, and the scan
+  // callback reads it on the next frame — that is the whole of SR-24.
+  const indexRef = useRef<VectorIndex>(catalog.index);
+  const stability = useRef(emptyBuffer);
+  const timings = useRef<StageTimings[]>([]);
+  const [scan, setScan] = useState<ScanView | null>(null);
   const [frameError, setFrameError] = useState<string | null>(null);
 
-  // The latest embedding, kept in a ref so the capture buttons can read it
-  // without the whole panel re-rendering on every frame.
-  const latest = useRef<Live | null>(null);
-  const shotsRef = useRef<Shot[]>(dataset.shots);
-  shotsRef.current = dataset.shots;
-  const timings = useRef<StageTimings[]>([]);
+  // Set from JS, read by the worklet on its next processed frame.
+  const captureRequest = useMemo(() => createSynchronizable(false), []);
+  const requestFrameCapture = useCallback(() => captureRequest.setBlocking(true), [captureRequest]);
+
+  const enrollment = useEnrollment({ catalog, indexRef, stillModel, requestFrameCapture });
+  const receiveCapture = useRef(enrollment.receiveCapture);
+  receiveCapture.current = enrollment.receiveCapture;
+
+  // Products never change in Phase 1 (no edit, no delete), so a looked-up row can be kept.
+  const products = useRef(new Map<string, Product | null>());
+  const productOf = useCallback(
+    (id: string) => {
+      if (!products.current.has(id)) products.current.set(id, getProduct(catalog.db, id));
+      return products.current.get(id) ?? null;
+    },
+    [catalog],
+  );
 
   useEffect(() => {
     if (!hasPermission) void requestPermission();
@@ -148,45 +156,41 @@ export default function App() {
   // Timings from one accelerator must never be summarised together with another's.
   useEffect(() => {
     timings.current = [];
-    setLive(null);
   }, [accelerator]);
 
-  const onEmbedding = useCallback((result: FrameEmbedding) => {
-    const vector = Array.from(result.vector);
-    latest.current = {
-      vector,
-      elapsedMs: result.timings.totalMs,
-      dim: result.vector.length,
-      norm: Math.sqrt(dot(result.vector, result.vector)),
-    };
-    timings.current = [...timings.current.slice(-(TIMING_WINDOW - 1)), result.timings];
-    setLive(latest.current);
-    setRanked(rankProducts(vector, shotsRef.current).slice(0, 3));
-  }, []);
+  // Entering scan mode starts a fresh stability window, so a lock never carries votes from frames
+  // taken before the product existed.
+  useEffect(() => {
+    stability.current = emptyBuffer;
+    setScan(null);
+  }, [mode]);
 
-  const onFrameError = useCallback((message: string) => {
-    setFrameError((previous) => (previous === message ? previous : message));
-  }, []);
+  const onEmbedding = useCallback(
+    (result: FrameEmbedding) => {
+      timings.current = [...timings.current.slice(-(TIMING_WINDOW - 1)), result.timings];
+      // No state change outside scan mode, so typing in the form never competes with 4 fps renders.
+      if (modeRef.current !== 'scan') return;
+
+      const t0 = performance.now();
+      const hits = nearestShots(indexRef.current, result.vector);
+      stability.current = pushDecision(stability.current, match(hits, catalog.meta.thresholds));
+      const locked = lockedDecision(stability.current);
+      const searchMs = performance.now() - t0;
+      setScan({ locked, top: rankProducts(hits).slice(0, 3), searchMs });
+    },
+    [catalog],
+  );
 
   const onReference = useCallback(
     (capture: ReferenceCapture) => {
       onEmbedding(capture.embedding);
-      if (stillModel === undefined) {
-        setFrameError('P1-4 capture: the still-image model has not loaded yet');
-        return;
-      }
-      measureCapture(capture, stillModel).then(
-        (result) => setCaptures((previous) => [...previous, result]),
-        (e: unknown) => setFrameError(`P1-4 capture failed: ${e instanceof Error ? e.message : String(e)}`),
-      );
+      receiveCapture.current(capture);
     },
-    [onEmbedding, stillModel],
+    [onEmbedding],
   );
 
-  const onClearCaptures = useCallback(() => {
-    const removed = clearReferenceCheck();
-    setCaptures([]);
-    setStoreCheck(`P1-4 store: cleared ${removed} photos`);
+  const onFrameError = useCallback((message: string) => {
+    setFrameError((previous) => (previous === message ? previous : message));
   }, []);
 
   // TR-26: throttle inside the worklet. Holding the interval on the camera
@@ -222,105 +226,18 @@ export default function App() {
 
   const outputs = useMemo(() => [preview, frameOutput], [preview, frameOutput]);
 
-  const persist = useCallback((next: SpikeDataset) => {
-    setDataset(next);
-    save(next);
+  const counts = useMemo(() => catalogCounts(catalog.db), [catalog, enrollment.savedCount]);
+
+  const onLanguage = useCallback((next: Language) => {
+    setLanguage(next);
+    void i18next.changeLanguage(next);
   }, []);
-
-  const captureShot = useCallback(() => {
-    const result = latest.current;
-    if (result == null) {
-      Alert.alert('No embedding yet');
-      return;
-    }
-    const name = label.trim();
-    if (name === '') {
-      Alert.alert('Type the product label first');
-      return;
-    }
-    persist({
-      ...dataset,
-      dim: result.dim,
-      shots: [...dataset.shots, { label: name, vector: result.vector }],
-    });
-  }, [dataset, label, persist]);
-
-  const captureFrame = useCallback(() => {
-    const result = latest.current;
-    if (result == null) {
-      Alert.alert('No embedding yet');
-      return;
-    }
-    const name = label.trim();
-    if (name === '') {
-      Alert.alert('Type the TRUE label first');
-      return;
-    }
-    const frame: TestFrame = {
-      trueLabel: name,
-      vector: result.vector,
-      elapsedMs: result.elapsedMs,
-      at: Date.now(),
-    };
-    persist({ ...dataset, dim: result.dim, frames: [...dataset.frames, frame] });
-  }, [dataset, label, persist]);
-
-  // Undo is by position because a shot carries no id, timestamp or photo — the
-  // last one captured is the only one the operator can reliably point at.
-  const undoLastShot = useCallback(() => {
-    if (dataset.shots.length === 0) return;
-    persist({ ...dataset, shots: dataset.shots.slice(0, -1) });
-  }, [dataset, persist]);
-
-  const undoLastFrame = useCallback(() => {
-    if (dataset.frames.length === 0) return;
-    persist({ ...dataset, frames: dataset.frames.slice(0, -1) });
-  }, [dataset, persist]);
-
-  // Test frames are deliberately left alone: dropping frames as a side effect
-  // would silently change what the gate is scored on. The prompt warns instead,
-  // because frames whose label has no shots can only ever score as misses.
-  const deleteProduct = useCallback(
-    (name: string) => {
-      const shotCount = dataset.shots.filter((s) => s.label === name).length;
-      const frameCount = dataset.frames.filter((f) => f.trueLabel === name).length;
-      const warning =
-        frameCount > 0
-          ? `\n\n${frameCount} test frame(s) still use this label. With no shots they will all score as misses.`
-          : '';
-      Alert.alert(`Delete "${name}"?`, `Removes all ${shotCount} reference shot(s).${warning}`, [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete',
-          style: 'destructive',
-          onPress: () =>
-            persist({ ...dataset, shots: dataset.shots.filter((s) => s.label !== name) }),
-        },
-      ]);
-    },
-    [dataset, persist],
-  );
-
-  const onExport = useCallback(() => {
-    exportDataset().catch((e: Error) => Alert.alert('Export failed', e.message));
-  }, []);
-
-  const onSaveToFolder = useCallback(() => {
-    saveDatasetToFolder()
-      .then((path) =>
-        Alert.alert(
-          'Saved',
-          `${path}\n${dataset.shots.length} shots · ${dataset.frames.length} test frames`,
-        ),
-      )
-      .catch((e: Error) => Alert.alert('Save failed', e.message));
-  }, [dataset]);
 
   if (!hasPermission) {
     return (
       <Centered>
         <Text style={styles.info}>Camera permission is required.</Text>
-        <Button label="Grant permission" onPress={() => void requestPermission()} />
+        <Tab label="Grant permission" active onPress={() => void requestPermission()} />
       </Centered>
     );
   }
@@ -336,7 +253,7 @@ export default function App() {
       <Centered>
         <Text style={styles.info}>Model failed to load ({modelState.accelerator}):</Text>
         <Text style={styles.dim}>{modelState.error}</Text>
-        {modelState.accelerator !== 'cpu' && <Button label="Use CPU instead" onPress={() => setAccelerator('cpu')} />}
+        {modelState.accelerator !== 'cpu' && <Tab label="Use CPU instead" active onPress={() => setAccelerator('cpu')} />}
       </Centered>
     );
   }
@@ -351,12 +268,6 @@ export default function App() {
     );
   }
 
-  const shotCounts = countByLabel(dataset.shots.map((s) => s.label));
-  const first = ranked[0];
-  const second = ranked[1];
-  const lastShot = dataset.shots[dataset.shots.length - 1];
-  const lastFrame = dataset.frames[dataset.frames.length - 1];
-
   return (
     <View style={styles.root}>
       <StatusBar style="light" />
@@ -367,115 +278,86 @@ export default function App() {
         </View>
       </View>
 
-      <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent}>
+      <ScrollView style={styles.panel} contentContainerStyle={styles.panelContent} keyboardShouldPersistTaps="handled">
         <View style={styles.row}>
-          {(['enroll', 'scan', 'collect'] as const).map((m) => (
-            <Pressable
-              key={m}
-              onPress={() => setMode(m)}
-              style={[styles.tab, mode === m && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, mode === m && styles.tabTextActive]}>{m}</Text>
-            </Pressable>
+          {(['enroll', 'scan'] as const).map((m) => (
+            <Tab key={m} label={m} active={mode === m} onPress={() => setMode(m)} />
+          ))}
+          {LANGUAGES.map((l) => (
+            <Tab key={l} label={l} active={language === l} onPress={() => onLanguage(l)} />
           ))}
         </View>
 
-        <View style={styles.row}>
-          {(['cpu', 'android-gpu'] as const).map((a) => (
-            <Pressable
-              key={a}
-              onPress={() => setAccelerator(a)}
-              style={[styles.tab, accelerator === a && styles.tabActive]}
-            >
-              <Text style={[styles.tabText, accelerator === a && styles.tabTextActive]}>{a}</Text>
-            </Pressable>
-          ))}
-        </View>
-
-        <Text style={styles.meta}>
-          {accelerator} · dim {live?.dim ?? '—'} · |v| {live ? live.norm.toFixed(5) : '—'} ·{' '}
-          {dataset.shots.length} shots / {Object.keys(shotCounts).length} products ·{' '}
-          {dataset.frames.length} test frames
-        </Text>
-        <Text style={styles.meta}>{describeTimings(timings.current)}</Text>
+        <Text style={styles.meta}>{describeCatalog(catalog, counts, indexRef.current.size)}</Text>
         {frameError !== null && <Text style={styles.error}>frame error: {frameError}</Text>}
-        <Text style={styles.meta}>{dbProbe}</Text>
-        <Text style={styles.meta}>{describeCaptures(captures)}</Text>
-        <Text style={styles.meta}>{storeCheck}</Text>
-        <View style={styles.row}>
-          <View style={styles.flex}>
-            <Button label="P1-4 capture" onPress={() => captureRequest.setBlocking(true)} />
-          </View>
-          <View style={styles.flex}>
-            <Button label="Clear P1-4" onPress={onClearCaptures} secondary />
-          </View>
-        </View>
 
-        {mode !== 'scan' && (
-          <TextInput
-            value={label}
-            onChangeText={setLabel}
-            placeholder={
-              mode === 'enroll'
-                ? 'Product label (e.g. palmolive-green-sachet)'
-                : 'TRUE label of what you are pointing at'
-            }
-            placeholderTextColor="#7b8794"
-            autoCapitalize="none"
-            autoCorrect={false}
-            style={styles.input}
-          />
-        )}
-
-        {mode === 'enroll' && <Button label="Capture reference shot" onPress={captureShot} />}
-        {mode === 'enroll' && lastShot !== undefined && (
-          <Button label={`Undo last shot (${lastShot.label})`} onPress={undoLastShot} secondary />
-        )}
-        {mode === 'collect' && <Button label="Record test frame" onPress={captureFrame} />}
-        {mode === 'collect' && lastFrame !== undefined && (
-          <Button
-            label={`Undo last test frame (${lastFrame.trueLabel})`}
-            onPress={undoLastFrame}
-            secondary
-          />
-        )}
-
-        <Text style={styles.heading}>Top 3</Text>
-        {ranked.length === 0 && <Text style={styles.dim}>No reference shots enrolled yet.</Text>}
-        {ranked.map((c, i) => (
-          <View key={c.label} style={styles.scoreRow}>
-            <Text style={styles.scoreLabel} numberOfLines={1}>
-              {i + 1}. {c.label}
-            </Text>
-            <Text style={styles.scoreValue}>{c.score.toFixed(4)}</Text>
-          </View>
-        ))}
-        {first !== undefined && second !== undefined && (
-          <Text style={styles.dim}>margin {(first.score - second.score).toFixed(4)}</Text>
-        )}
-
-        <Text style={styles.heading}>Enrolled</Text>
-        {Object.keys(shotCounts).length === 0 ? (
-          <Text style={styles.dim}>—</Text>
-        ) : (
+        {mode === 'enroll' && (
           <>
-            <Text style={styles.dim}>Tap a product to delete all its shots.</Text>
-            <View style={styles.chips}>
-              {Object.entries(shotCounts).map(([k, v]) => (
-                <Pressable key={k} onPress={() => deleteProduct(k)} style={styles.chip}>
-                  <Text style={styles.chipText}>
-                    {k} ({v}) ✕
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+            <Text style={styles.meta}>{describeMeasurements(enrollment.measurements)}</Text>
+            <EnrollmentPanel enrollment={enrollment} />
           </>
         )}
 
-        <Button label="Save dataset to folder" onPress={onSaveToFolder} />
-        <Button label="Export dataset JSON" onPress={onExport} secondary />
+        {mode === 'scan' && (
+          <>
+            <View style={styles.row}>
+              {(['cpu', 'android-gpu'] as const).map((a) => (
+                <Tab key={a} label={a} active={accelerator === a} onPress={() => setAccelerator(a)} />
+              ))}
+            </View>
+            <Text style={styles.meta}>{describeTimings(timings.current)}</Text>
+            <Text style={styles.lock}>{describeLock(scan?.locked ?? null, productOf)}</Text>
+            {scan?.top.map((p, i) => (
+              <View key={p.productId} style={styles.scoreRow}>
+                <Text style={styles.scoreLabel} numberOfLines={1}>
+                  {i + 1}. {productOf(p.productId)?.name ?? p.productId}
+                </Text>
+                <Text style={styles.scoreValue}>{p.score.toFixed(4)}</Text>
+              </View>
+            ))}
+            {scan !== null && <Text style={styles.dim}>knn + policy + stability {scan.searchMs.toFixed(1)} ms</Text>}
+          </>
+        )}
       </ScrollView>
     </View>
+  );
+}
+
+function describeCatalog(catalog: Catalog, counts: { products: number; shots: number }, indexSize = catalog.index.size): string {
+  const { meta } = catalog;
+  return (
+    `bantay.db schema ${catalog.migratedFrom}→${meta.schemaVersion} · ${meta.embeddingDim}-d · ` +
+    `τ ${meta.thresholds.tau} δ ${meta.thresholds.delta} · ${counts.products} products / ${counts.shots} shots · ` +
+    `index ${indexSize} · orphan photos removed ${catalog.orphanPhotosRemoved} · other-model shots ${catalog.otherModelShots}`
+  );
+}
+
+function describeLock(locked: Decision | null, productOf: (id: string) => Product | null): string {
+  const name = (id: string) => productOf(id)?.name ?? id;
+  if (locked === null) return 'settling…';
+  switch (locked.kind) {
+    case 'accept': {
+      const product = productOf(locked.product.productId);
+      const price = product?.pricePiece != null ? formatCentavos(product.pricePiece) : '—';
+      const margin = locked.margin === null ? '—' : locked.margin.toFixed(3);
+      return `LOCK ${name(locked.product.productId)} ${price} · score ${locked.product.score.toFixed(3)} · margin ${margin}`;
+    }
+    case 'disambiguate':
+      return `CHIPS ${name(locked.first.productId)} | ${name(locked.second.productId)} · margin ${locked.margin.toFixed(3)}`;
+    case 'unknown':
+      return `UNKNOWN${locked.best === null ? '' : ` · best ${name(locked.best.productId)} ${locked.best.score.toFixed(3)}`}`;
+  }
+}
+
+/** Frame-vs-JPEG agreement and bytes per shot over this session's real enrollments (ARCHITECTURE.md §4, NFR-08). */
+function describeMeasurements(measurements: readonly { agreement: number; bytes: number }[]): string {
+  const agreement = summarize(measurements.map((m) => m.agreement));
+  const bytes = summarize(measurements.map((m) => m.bytes));
+  if (agreement === null || bytes === null) return 'shots this session: none yet';
+  const min = Math.min(...measurements.map((m) => m.agreement));
+  return (
+    `shots this session n=${agreement.n}: frame-vs-JPEG dot min ${min.toFixed(4)} · median ${agreement.median.toFixed(4)} · ` +
+    `JPEG median ${(bytes.median / 1024).toFixed(1)} KB, max ${(bytes.max / 1024).toFixed(1)} KB`
   );
 }
 
@@ -496,28 +378,18 @@ function describeTimings(samples: readonly StageTimings[]): string {
   );
 }
 
-function countByLabel(labels: string[]): Record<string, number> {
-  const out: Record<string, number> = {};
-  for (const l of labels) out[l] = (out[l] ?? 0) + 1;
-  return out;
+function messageOf(e: unknown): string {
+  return e instanceof Error ? e.message : String(e);
 }
 
 function Centered({ children }: { children: React.ReactNode }) {
   return <View style={[styles.root, styles.centered]}>{children}</View>;
 }
 
-function Button({
-  label,
-  onPress,
-  secondary = false,
-}: {
-  label: string;
-  onPress: () => void;
-  secondary?: boolean;
-}) {
+function Tab({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
   return (
-    <Pressable onPress={onPress} style={[styles.button, secondary && styles.buttonSecondary]}>
-      <Text style={styles.buttonText}>{label}</Text>
+    <Pressable onPress={onPress} style={[styles.tab, active && styles.tabActive]}>
+      <Text style={[styles.tabText, active && styles.tabTextActive]}>{label}</Text>
     </Pressable>
   );
 }
@@ -542,13 +414,13 @@ const styles = StyleSheet.create({
     borderColor: '#ffd166',
     borderRadius: 8,
   },
-  panel: { maxHeight: '48%', backgroundColor: '#0b0f14' },
+  panel: { maxHeight: '55%', backgroundColor: '#0b0f14' },
   panelContent: { padding: 14, gap: 10, paddingBottom: 32 },
   row: { flexDirection: 'row', gap: 8 },
-  flex: { flex: 1 },
   tab: {
     flex: 1,
     paddingVertical: 8,
+    paddingHorizontal: 6,
     borderRadius: 6,
     backgroundColor: '#1b2430',
     alignItems: 'center',
@@ -557,21 +429,8 @@ const styles = StyleSheet.create({
   tabText: { color: '#9aa5b1', fontWeight: '600' },
   tabTextActive: { color: '#0b0f14' },
   meta: { color: '#9aa5b1', fontSize: 12, fontVariant: ['tabular-nums'] },
+  lock: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
   error: { color: '#ff6b6b', fontSize: 12 },
-  input: {
-    backgroundColor: '#1b2430',
-    color: '#ffffff',
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-  },
-  button: { backgroundColor: '#2b6cb0', borderRadius: 6, paddingVertical: 12, alignItems: 'center' },
-  buttonSecondary: { backgroundColor: '#1b2430' },
-  buttonText: { color: '#ffffff', fontWeight: '700' },
-  chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
-  chip: { backgroundColor: '#1b2430', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 6 },
-  chipText: { color: '#e6eaef', fontSize: 12 },
-  heading: { color: '#ffffff', fontWeight: '700', marginTop: 4 },
   dim: { color: '#7b8794', fontSize: 12 },
   info: { color: '#ffffff', textAlign: 'center' },
   scoreRow: { flexDirection: 'row', justifyContent: 'space-between', gap: 12 },

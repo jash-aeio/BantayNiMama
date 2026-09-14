@@ -2,7 +2,27 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { isRelativePhotoPath } from './photoPath.ts';
-import { REFERENCE_MAX_SIDE, referencePhotoPath, referenceSide } from './referencePhoto.ts';
+import { REFERENCE_MAX_SIDE, referencePhotoPath, referenceSide, unreferencedPhotos } from './referencePhoto.ts';
+
+describe('unreferencedPhotos (TR-45 orphans, TR-24)', () => {
+  test('names only the photos no shot row points at', () => {
+    assert.deepEqual(
+      unreferencedPhotos(['photos/a.jpg', 'photos/b.jpg', 'photos/c.jpg'], new Set(['photos/a.jpg', 'photos/c.jpg'])),
+      ['photos/b.jpg'],
+    );
+  });
+
+  test('never names a file outside photos/ or a non-relative path', () => {
+    assert.deepEqual(
+      unreferencedPhotos(['bantay.db', 'other/x.jpg', '/abs/photos/x.jpg', 'photos/../bantay.db'], new Set()),
+      [],
+    );
+  });
+
+  test('names nothing when every photo is referenced', () => {
+    assert.deepEqual(unreferencedPhotos(['photos/a.jpg'], new Set(['photos/a.jpg', 'photos/gone.jpg'])), []);
+  });
+});
 
 describe('referencePhotoPath (TR-43)', () => {
   test('puts one relative file per shot in photos/', () => {

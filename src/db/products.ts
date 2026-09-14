@@ -1,28 +1,20 @@
 import type { DB } from '@op-engineering/op-sqlite';
 
 import type { AppMeta } from '../domain/appMeta.ts';
+import { MAX_SHOTS, MIN_SHOTS, type NewProduct } from '../domain/enrollment.ts';
 import type { IndexedShot } from '../domain/knn.ts';
 import { isCentavos } from '../domain/money.ts';
-import { isRelativePhotoPath } from '../domain/photoPath.ts';
+import { referencePhotoPath } from '../domain/referencePhoto.ts';
 import { dot, vectorToBlob } from '../domain/vector.ts';
 import { newId } from './ids';
 import { inTransaction } from './transaction';
 
-/** SR-20 asks for 3–5 reference photos; TR-42 caps them at 5. */
-export const MIN_SHOTS = 3;
-export const MAX_SHOTS = 5;
-
-export interface NewProduct {
-  readonly name: string;
-  /** Whole centavos (TR-41). */
-  readonly pricePiece: number;
-  readonly pricePack: number | null;
-  readonly unitLabel: string | null;
-  readonly category: string | null;
-}
+export type { NewProduct };
 
 export interface NewShot {
-  /** Relative to the document directory (TR-43). */
+  /** Chosen when the shot was captured, because the photo was already saved under it. */
+  readonly id: string;
+  /** Relative to the document directory (TR-43); must be referencePhotoPath(id). */
   readonly photoPath: string;
   /** L2-normalized (TR-22), produced by the model named in app_meta (TR-23). */
   readonly vector: Float32Array;
@@ -66,9 +58,14 @@ export function insertProductWithShots(
   if (shots.length < MIN_SHOTS || shots.length > MAX_SHOTS) {
     throw new RangeError(`A product needs ${MIN_SHOTS}–${MAX_SHOTS} shots, got ${shots.length} (SR-20, TR-42)`);
   }
+  const ids = new Set<string>();
   for (const shot of shots) {
-    if (!isRelativePhotoPath(shot.photoPath)) {
-      throw new Error(`Photo path must be relative to the document directory, got "${shot.photoPath}" (TR-43)`);
+    if (ids.has(shot.id)) throw new Error(`Shot id ${shot.id} appears twice`);
+    ids.add(shot.id);
+    // A row pointing at another shot's photo would re-embed the wrong image after a model swap
+    // (TR-24). referencePhotoPath also guarantees the path is relative (TR-43).
+    if (shot.photoPath !== referencePhotoPath(shot.id)) {
+      throw new Error(`Shot ${shot.id} must point at ${referencePhotoPath(shot.id)}, got "${shot.photoPath}" (TR-43)`);
     }
     if (shot.vector.length !== meta.embeddingDim) {
       throw new RangeError(`Shot vector has ${shot.vector.length} dimensions; ${meta.modelId} gives ${meta.embeddingDim} (TR-23)`);
@@ -81,7 +78,7 @@ export function insertProductWithShots(
   }
 
   const productId = newId();
-  const indexed: IndexedShot[] = shots.map((shot) => ({ shotId: newId(), productId, vector: shot.vector }));
+  const indexed: IndexedShot[] = shots.map((shot) => ({ shotId: shot.id, productId, vector: shot.vector }));
 
   inTransaction(db, () => {
     db.executeSync(
@@ -89,12 +86,12 @@ export function insertProductWithShots(
         'VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       [productId, name, product.pricePiece, product.pricePack, product.unitLabel, product.category, now, now],
     );
-    shots.forEach((shot, i) => {
+    for (const shot of shots) {
       db.executeSync(
         'INSERT INTO product_shots (id, product_id, photo_path, model_id, embedding, created_at) VALUES (?, ?, ?, ?, ?, ?)',
-        [indexed[i]!.shotId, productId, shot.photoPath, meta.modelId, vectorToBlob(shot.vector), now],
+        [shot.id, productId, shot.photoPath, meta.modelId, vectorToBlob(shot.vector), now],
       );
-    });
+    }
   });
 
   return { productId, shots: indexed };
@@ -119,6 +116,14 @@ export function getProduct(db: DB, id: string): Product | null {
     createdAt: Number(row.created_at),
     updatedAt: Number(row.updated_at),
   };
+}
+
+/** Live products and all shot rows — the gate's persistence check counts these (PHASE_1_PLAN.md §4). */
+export function catalogCounts(db: DB): { products: number; shots: number } {
+  const row = db.executeSync(
+    'SELECT (SELECT count(*) FROM products WHERE deleted_at IS NULL) AS products, (SELECT count(*) FROM product_shots) AS shots',
+  ).rows[0];
+  return { products: Number(row?.products ?? 0), shots: Number(row?.shots ?? 0) };
 }
 
 function storedCentavos(value: unknown): number | null {

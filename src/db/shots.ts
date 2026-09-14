@@ -39,6 +39,15 @@ export function loadVectorIndex(
   return { index, otherModelShots };
 }
 
+/**
+ * Every photo_path a shot row points at, soft-deleted products included: their JPEGs must survive
+ * for restore (SR-32) and for re-embedding (TR-24). Throws rather than returning an empty set on
+ * failure, because the orphan sweep deletes whatever is not in this set.
+ */
+export function referencedPhotoPaths(db: DB): Set<string> {
+  return new Set(db.executeSync('SELECT photo_path FROM product_shots').rows.map((row) => String(row.photo_path)));
+}
+
 function asBlob(value: unknown): ArrayBuffer | ArrayBufferView {
   if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) return value;
   throw new Error(`product_shots.embedding is not a BLOB (got ${typeof value})`);

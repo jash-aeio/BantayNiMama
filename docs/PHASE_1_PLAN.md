@@ -1,7 +1,7 @@
 # Phase 1 Plan — Proof of Concept, Real Data Path
 
 > **Status:** Approved 2026-09-14 — decisions D-1 to D-4 settled (§3) · **Written:** 2026-09-14 ·
-> **In progress:** P1-1 to P1-4 done 2026-09-14; P1-5 next. Progress lives in
+> **In progress:** P1-1 to P1-4 done 2026-09-14; P1-5 code written, device check pending. Progress lives in
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Where a device result changed this plan, the step carries
 > an *Amended* note, and the original text is kept.
 >
@@ -170,6 +170,17 @@ adopted until its vectors are checked against CPU's.
 
 ### P1-5 · Enrollment, minimal
 
+> **Amended 2026-09-14 (code written; device check pending).**
+> - **`SR-24`:** met by extending the in-memory index after COMMIT. ADR-014 means the scanner no
+>   longer queries SQLite per frame, so the last bullet's "free" reasoning no longer applies.
+> - **Stored vectors:** they come from the saved JPEG, not the live frame. That is the path the
+>   P1-8 gate must measure (`ARCHITECTURE.md` §4).
+> - **Orphan sweep:** added. A kill between the JPEGs and COMMIT leaves orphans, and the next launch
+>   removes photos no shot row references (operator's decision).
+> - **i18n:** i18next was pulled forward from P1-7, so enrollment copy is never hardcoded
+>   (operator's decision).
+> - **Removed:** the P1-2 / P1-4 temporary checks and the spike's collect mode.
+
 - Form: name, per-piece price, optional per-pack price, unit label, category (`SR-21`); 3–5 shots
   (`SR-20`).
 - Duplicate check: KNN each new shot against the catalog; warn if a product clears τ (`SR-23`).
@@ -195,7 +206,9 @@ Worklet vector → JS → `knn` (`TR-30`) → `match` → `stability` → `getPr
 - `expo-router` ~57.0.21 with two tabs: **Scan** and **Products** (a plain list read from SQLite —
   it is how you check the catalog, not `SR-30`'s search) (`TR-14`).
 - i18n: `i18next` + `react-i18next` + `expo-localization`, `en.json` + `fil.json`, every string through
-  it (`TR-16`, `SR-42`, D-4). Audit each against `TR-51` before install.
+  it (`TR-16`, `SR-42`, D-4). Audit each against `TR-51` before install. *(Amended 2026-09-14:
+  `i18next` and `react-i18next` arrived in P1-5, already audited. P1-7 adds `expo-localization`
+  and moves the remaining strings.)*
 - Debug readout for the gate (§4 step 3–4), behind a dev toggle.
 - **Delete `App.tsx` and `src/spike/`** once P1-1's golden test and P1-3 cover what they held.
   `scripts/analyze.mjs` and `relabel.mjs` stay — both checked: they import only `node:fs`/`node:path`,
