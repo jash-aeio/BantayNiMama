@@ -1,4 +1,5 @@
 import type { PersistenceProblem } from '../../domain/gateCheck.ts';
+import { segmentLockLog, type LockEvent } from '../../domain/lockLog.ts';
 import { summarize } from '../../domain/stats.ts';
 import type { StageTimings } from '../../ml/frameEmbedder';
 import type { ShotMeasurement } from '../enrollment/useEnrollment';
@@ -81,6 +82,73 @@ export function describeEnrollmentMeasurements(measurements: readonly ShotMeasur
     `enrollment shots this session n=${agreement.n}: frame-vs-JPEG dot min ${min.toFixed(4)} · ` +
     `median ${agreement.median.toFixed(4)} · JPEG median ${(bytes.median / 1024).toFixed(1)} KB, max ${(bytes.max / 1024).toFixed(1)} KB`
   );
+}
+
+/**
+ * The scan run as one line per segment (split at Unknown locks), in first-seen order. Step 5 passes
+ * when each segment's locks name only the product scanned in it, and its chips include it.
+ */
+export function describeLockLog(events: readonly LockEvent[], nameOf: (id: string) => string): string[] {
+  const first = events[0];
+  const last = events[events.length - 1];
+  if (first === undefined || last === undefined) return ['lock log: empty (scan to fill it; lost on relaunch)'];
+  const segments = segmentLockLog(events);
+  const locks = events.filter((e) => e.kind === 'accept').length;
+  const chips = events.filter((e) => e.kind === 'disambiguate').length;
+  return [
+    `lock log: ${events.length} changes ${clock(first.atMs)}–${clock(last.atMs)} · ${locks} LOCK · ${chips} CHIPS · ` +
+      `${segments.length} segments (split at Unknown)`,
+    ...segments.map((segment, i) => {
+      const parts = segment.items.map((item) => {
+        const times = item.count > 1 ? ` ×${item.count}` : '';
+        return item.kind === 'accept'
+          ? `LOCK ${nameOf(item.productIds[0] ?? '')}${times}`
+          : `CHIPS ${item.productIds.map(nameOf).join(' | ')}${times}`;
+      });
+      return `#${i + 1} ${clock(segment.startMs)} · ${parts.join(' · ')}`;
+    }),
+  ];
+}
+
+/**
+ * The most recent lock changes with their numbers, for diagnosing a wrong lock. Scores are cosine
+ * similarities, and sharpness is shown ×1000. Each line lists the 5 frames that were in the
+ * stability window when the lock changed, oldest first.
+ */
+export function describeLockDetails(events: readonly LockEvent[], nameOf: (id: string) => string, limit = 30): string[] {
+  const shown = events.filter((e) => e.kind !== 'none').slice(-limit);
+  if (shown.length === 0) return [];
+  return [
+    `lock detail, last ${shown.length} (s score · m margin · votes oldest first: A accept, C chips, U unknown):`,
+    ...shown.map((e) => {
+      const head =
+        e.kind === 'accept'
+          ? `LOCK ${shortName(nameOf(e.productIds[0] ?? ''))}`
+          : e.kind === 'disambiguate'
+            ? `CHIPS ${e.productIds.map((id) => shortName(nameOf(id))).join(' | ')}`
+            : 'UNKNOWN';
+      const votes = e.votes
+        .map((v) => {
+          const who = v.topId === null ? '—' : shortName(nameOf(v.topId));
+          const tag = v.kind === 'accept' ? 'A' : v.kind === 'disambiguate' ? 'C' : 'U';
+          const sharpness = v.sharpness === null ? '' : ` sh${(v.sharpness * 1000).toFixed(1)}`;
+          return `${tag} ${who} ${fixed(v.topScore, 2)}/${fixed(v.margin, 2)}${sharpness}`;
+        })
+        .join(' | ');
+      return `${clock(e.atMs)} ${head} s${fixed(e.score, 3)} m${fixed(e.margin, 3)} · ${votes}`;
+    }),
+  ];
+}
+
+/** "Alaska Evaporada 360ml" → "Alaska…360ml": keeps the brand and the size or flavour that tells siblings apart. */
+function shortName(name: string): string {
+  const words = name.split(' ');
+  return words.length > 2 ? `${words[0]}…${words[words.length - 1]}` : name;
+}
+
+function clock(ms: number): string {
+  const d = new Date(ms);
+  return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
 }
 
 function fixed(value: number | null | undefined, digits = 4): string {

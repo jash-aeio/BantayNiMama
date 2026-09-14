@@ -10,7 +10,7 @@ on-device image embeddings, local vector search. **No backend, ever.**
 | Document | When to read it |
 |---|---|
 | [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | **Every session.** Current phase, blockers, what's next. |
-| [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) | **While Phase 1 is open.** Work breakdown in order, the exact gate, what is deferred, risks carried in. |
+| [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) | Reference now that Phase 1 is closed (gate passed 2026-09-14). It holds the gate protocol and lock-log method (§4), what was deferred to Phase 2 and 3 (§6), and the risks carried forward (§8). |
 | [`docs/PHASE_0_RUNBOOK.md`](docs/PHASE_0_RUNBOOK.md) | Reference now that Phase 0 is closed — how the labeled datasets were captured. Phase 3 retuning reuses its method. |
 | [`docs/PROJECT_SPECS.md`](docs/PROJECT_SPECS.md) | Before implementing anything. Requirement IDs live here. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Before touching the pipeline, schema, or matching policy. |

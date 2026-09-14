@@ -64,7 +64,12 @@ export function ScanScreen() {
     diagnostics.enrollmentMeasurements.current = enrollment.measurements;
   }, [enrollment.measurements, diagnostics]);
 
-  const scanner = useScanner({ catalog, indexRef, timingsRef: diagnostics.scanTimings });
+  const scanner = useScanner({
+    catalog,
+    indexRef,
+    timingsRef: diagnostics.scanTimings,
+    lockLogRef: diagnostics.lockLog,
+  });
   const { onVector, reset: resetScanner } = scanner;
 
   // A fresh stability window whenever scanning resumes, so a lock never carries votes from before

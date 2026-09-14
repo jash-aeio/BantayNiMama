@@ -79,6 +79,7 @@
     "title": "Gate check (debug)",
     "run": "Run check",
     "running": "Checking photo {{done}} of {{total}}…",
-    "needsModel": "The recognition model is still loading."
+    "needsModel": "The recognition model is still loading.",
+    "clearLog": "Clear lock log"
   }
 }

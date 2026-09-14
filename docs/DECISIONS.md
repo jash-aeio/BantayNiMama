@@ -426,3 +426,52 @@ at Expo SDK 57's pinned versions. `TR-14` is amended to match.
   only the registration would change. Revisit if deep links or many routes ever arrive.
 - **Every new native module is still audited before install.** The 25 packages installed here
   (the 23, plus `expo-localization` and its `rtl-detect`) had zero network-call hits.
+
+---
+
+## ADR-016 — Lock on 4 of 5 frames instead of 3
+
+**Status:** Accepted · 2026-09-14 · Amends `TR-36` · Revisit in Phase 3 alongside the τ/δ retune
+
+**Context.**
+
+- **Gate run 2 failed step 5** (P1-8, Infinix X6823, release APK, airplane mode). With a
+  motion-blurred **Alaska Evaporada 360ml** in the reticle, the app locked **Argentina Corned Beef
+  260g** and showed ₱35.00; the true price is ₱50.00. Under `PHASE_1_PLAN.md` §4, any wrong lock fails.
+- **Diagnosis** (lock log with each lock's 5 voting frames, a ~2-minute reproduction, votes
+  attributed to cans by protocol timing):
+  - The two cans rank as each other at similarities 0.63–0.76.
+  - **Accept-grade votes for the wrong can do occur** (margins 0.09 and 0.12, above δ = 0.075),
+    but **at most one per stability window** was seen. The failure needed three.
+  - The wrong lock itself did not reproduce: 7 LOCK, all correct.
+- **Sharpness does not explain it.** Laplacian variance on wrong-can votes ranged 1.7–12.6 (×1000),
+  against a frame median of 8.6. Measuring it cost **20.9 ms per frame**.
+
+**Decision** (operator's call):
+
+1. **`STABILITY_QUORUM` goes from 3 to 4**, in the same 5-frame window. τ and δ are unchanged.
+2. **The sharpness measurement leaves the worklet.** `laplacianVariance` and its tests stay in
+   `src/domain` for `TR-27`'s Phase 3 calibration.
+3. **The Phase 1 gate is re-run in full** (run 3). This change counts only if that run passes.
+
+**Rejected.**
+
+- *Raise δ to ~0.13 in `app_meta`.* It would have blocked every wrong accept vote seen, but it is
+  tuned on one pair in one short run. It also pushes correct locks to chips, where correct accepts
+  are already 74.7% against `NFR-01`'s 90%. τ/δ are retuned in Phase 3 on labeled data (`TR-35`).
+- *A sharpness gate now (`TR-27`).* It did not separate wrong votes, and cost 20.9 ms per frame.
+- *4-of-5 plus re-enrolling both cans.* Two changes at once, so a pass could not be credited to
+  either.
+- *Repeat the reproduction first, with screenshots.* More certain attribution, at the cost of one
+  more cycle before the gate.
+
+**Consequences.**
+
+- **A wrong lock now needs 4 of 5 frames to agree on the wrong product.** Lone or paired
+  accept-grade confusions cannot lock. **The confusion itself remains:** chips can still pair
+  Alaska with Argentina, and a sustained run of 4 wrong votes would still lock.
+- **Locks take longer and drop sooner.** Nominal time-to-lock rises from ~750 ms to ~1 s at 4 fps,
+  with less headroom against `NFR-04`'s p90 of 1.2 s. Two disagreeing frames now release a lock, so
+  expect more "point the box" moments. Neither is measured yet.
+- **Phase 3:** Alaska Evaporada 360ml / Argentina Corned Beef 260g joins the look-alike cases for
+  the τ/δ retune and the model bake-off (Q-3).

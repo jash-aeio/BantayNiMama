@@ -3,9 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAppServices } from '../../app/services';
+import { getProduct } from '../../db/products';
 import {
   describeEnrollmentMeasurements,
   describeGateCheck,
+  describeLockDetails,
+  describeLockLog,
   describeScanTimings,
   describeWorkletTimings,
 } from './describe';
@@ -22,6 +25,8 @@ export function GateCheckPanel() {
   const [open, setOpen] = useState(false);
   const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [lines, setLines] = useState<readonly string[]>([]);
+  // The lock log lives in a ref; bumping this re-renders after it is cleared.
+  const [, setLogVersion] = useState(0);
 
   const run = () => {
     if (stillModel.state !== 'loaded') {
@@ -48,6 +53,13 @@ export function GateCheckPanel() {
       .finally(() => setProgress(null));
   };
 
+  const clearLockLog = () => {
+    diagnostics.lockLog.current = [];
+    setLogVersion((n) => n + 1);
+  };
+
+  const nameOf = (id: string) => getProduct(catalog.db, id)?.name ?? id;
+
   return (
     <View style={styles.root}>
       <Pressable onPress={() => setOpen((o) => !o)} style={styles.header}>
@@ -70,6 +82,20 @@ export function GateCheckPanel() {
           <Text style={styles.line}>{describeWorkletTimings(diagnostics.workletTimings.current)}</Text>
           <Text style={styles.line}>{describeScanTimings(diagnostics.scanTimings.current)}</Text>
           <Text style={styles.line}>{describeEnrollmentMeasurements(diagnostics.enrollmentMeasurements.current)}</Text>
+
+          <Pressable onPress={clearLockLog} style={styles.button}>
+            <Text style={styles.buttonText}>{t('gate.clearLog')}</Text>
+          </Pressable>
+          {describeLockLog(diagnostics.lockLog.current, nameOf).map((line, i) => (
+            <Text key={`log-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
+          {describeLockDetails(diagnostics.lockLog.current, nameOf).map((line, i) => (
+            <Text key={`detail-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
         </View>
       )}
     </View>

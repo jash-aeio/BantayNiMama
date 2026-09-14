@@ -1,7 +1,10 @@
 # Phase 1 Plan — Proof of Concept, Real Data Path
 
 > **Status:** Approved 2026-09-14 — decisions D-1 to D-4 settled (§3) · **Written:** 2026-09-14 ·
-> **In progress:** P1-1 to P1-7 done 2026-09-14; P1-8 (the gate run) next. Progress lives in
+> **Closed 2026-09-14: gate PASS, verified with `/phase-gate`.** P1-1 to P1-8 are done. Run 2
+> failed step 5, and gate run 3 met every §4 criterion after ADR-016: 20/20, 0 wrong locks,
+> self-match 100/100, on the Infinix X6823 in airplane mode. This plan is now a reference: the gate
+> protocol (§4), what was deferred (§6), and the risks carried into Phase 2 and 3 (§8). Progress lives in
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Where a device result changed this plan, the step carries
 > an *Amended* note, and the original text is kept.
 >
@@ -52,7 +55,7 @@ All four settled on the option below. D-2 and D-3 are recorded as ADR-012.
 | **D-1** | **Exact gate wording** — what does "scan all 20" pass on? | See §4: correct product **locked or offered as a chip** for all 20, **zero wrong locks**, plus a deterministic self-match check. | Requiring 20/20 ACCEPT would fail on thresholds, not persistence — at Phase 0's τ/δ only 74.7% of correct frames auto-accept, and that is Phase 3's problem. A gate should fail only for the thing the phase is about. |
 | **D-2** | Test runner for `src/domain/` | **`node --test`** (Node 24's built-in runner, runs `.ts` directly) | Zero new dependencies to audit against `TR-51`, and domain code is pure by rule, so it needs nothing React-shaped. The alternative is `jest-expo` ~57.0.5 — more familiar, a few hundred transitive packages. Needs relative imports inside `src/domain/` (no `@/` alias). |
 | **D-3** | Golden replay fixture — the Phase 0 dataset as a regression test | **Local-only test that fails loudly if the file is absent**, not committed | The labeled file is 9.6 MB of JSON. Committing it bloats every clone forever; the alternative is packing vectors to binary (~2.7 MB, estimate) and committing that. Accepted consequence: a fresh clone cannot run it until the file is restored from backup (§2). |
-| **D-4** | Who writes the Filipino copy | **I draft `fil.json`, you correct it** before the gate run | `SR-42` requires `en` + `fil` from the first string. Phase 1 has maybe 30 strings; a native speaker's pass matters more than my draft. |
+| **D-4** | Who writes the Filipino copy | **I draft `fil.json`, you correct it** before the gate run. *Amended 2026-09-14 (operator's call): the pass happens before `/phase-gate` closes Phase 1, not before the gate run. The gate measures persistence and recognition, not copy, and the 20 products were enrolled and ready.* **Done 2026-09-14: reviewed, no corrections.** | `SR-42` requires `en` + `fil` from the first string. Phase 1 has maybe 30 strings; a native speaker's pass matters more than my draft. |
 
 ---
 
@@ -77,6 +80,19 @@ Agreed 2026-09-14 (D-1). Run on the **Infinix X6823, release APK, airplane mode*
    **Any lock on a wrong product fails the gate** (`NFR-02` — the cardinal rule does not wait for Phase 3).
 6. Record ACCEPT vs chip counts anyway — informational, feeds Phase 3.
 
+*Amended 2026-09-14 (after the first gate run, operator's call):*
+- **Step 5 evidence is the in-app lock log.** Every change of the locked decision is recorded with a
+  time, and the run is split into segments at Unknown locks (the operator points at an empty table
+  between products).
+- **Screenshots are backup only.** The first run sampled screenshots ~6 s apart. That missed one
+  product entirely and could not prove zero wrong locks between samples.
+
+*Amended 2026-09-14 (after gate run 2 failed step 5, operator's call):*
+- **Gate run 3 runs with a 4-of-5 lock quorum** (ADR-016, `TR-36`); τ and δ are unchanged.
+- **The whole gate is re-run:** force-stop, airplane mode, steps 3–4, all 20 scanned, with the lock
+  log and backup screenshots. The fix is credited only if run 3 passes. Run 2's failure stays on
+  record.
+
 **Gate:** steps 3, 4 and 5 all pass, recorded in `PROJECT_STATUS.md` with the date and device.
 
 ---
@@ -93,7 +109,7 @@ device. Each step has a *done when*.
 | File | Does | Requirements |
 |---|---|---|
 | `match.ts` | Aggregate KNN rows → products by **best** shot; pick top-1 / best *different* top-2; ACCEPT / DISAMBIGUATE / UNKNOWN | `TR-30`–`TR-34`, `TR-37` |
-| `stability.ts` | 5-slot ring buffer, lock on 3-of-5 agreement on the same `product_id` | `TR-36`, `SR-12` |
+| `stability.ts` | 5-slot ring buffer, lock on 3-of-5 agreement on the same `product_id` *(amended to 4-of-5 after gate run 2, ADR-016)* | `TR-36`, `SR-12` |
 | `money.ts` | Parse `"12.50"` → `1250` **by string, never via a float**; format `1250` → `₱12.50` at the render boundary | `TR-41`, ADR-007 |
 | `vector.ts` | L2-normalize, dot | `TR-22` |
 

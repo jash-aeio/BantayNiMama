@@ -180,7 +180,7 @@ object proposal replacing the fixed reticle.
 | **TR-33** | **DISAMBIGUATE** when `top1 ≥ τ` but the margin is `< δ`. |
 | **TR-34** | **REJECT → "Unknown Item"** otherwise. |
 | **TR-35** | τ and δ are stored in `app_meta` as configuration, calibrated empirically. **Never hard-coded.** |
-| **TR-36** | Temporal stability gate: lock a result only when **3 of the last 5** frame decisions agree. |
+| **TR-36** | Temporal stability gate: lock a result only when **4 of the last 5** frame decisions agree. *Amended 2026-09-14 (ADR-016): was 3 of 5. Gate run 2 locked a look-alike product, and the diagnosis found lone accept-grade votes for it, at most one per window.* |
 | **TR-37** | The matching policy must be a **pure function** over `(candidates, τ, δ, buffer)` so it is unit-testable without a camera. |
 | **TR-38** | The `SR-13` cutoff is stored in `app_meta` as `confirm_below`, calibrated empirically and never hard-coded — the same rule as `TR-35`. **No value chosen yet:** on Phase 0 data even 25 products leave 2.9% of un-enrolled frames accepted, so it comes from store data in Phase 3 (ADR-013). |
 | **TR-39** | Negative shots (`SR-14`) are stored in `product_shots` like any shot (vector as a BLOB — ADR-014), stamped with `model_id` (`TR-23`), with their JPEG kept (`TR-24`). They rank alongside products. If a negative is top-1 → **UNKNOWN**. As top-2 it still counts toward δ. A negative is never named, priced or shown as a chip. |

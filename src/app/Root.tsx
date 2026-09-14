@@ -14,6 +14,7 @@ import { openCatalog, type Catalog } from '../db/catalog';
 import { readMetaValue, writeMetaValue } from '../db/meta';
 import type { VectorIndex } from '../domain/knn.ts';
 import { resolveLanguage, UI_LANGUAGE_META_KEY, type Language } from '../domain/language.ts';
+import type { LockEvent } from '../domain/lockLog.ts';
 import type { ShotMeasurement } from '../features/enrollment/useEnrollment';
 import type { ScanTiming } from '../features/scanner/useScanner';
 import type { StageTimings } from '../ml/frameEmbedder';
@@ -78,7 +79,8 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
   const workletTimings = useRef<readonly StageTimings[]>([]);
   const scanTimings = useRef<readonly ScanTiming[]>([]);
   const enrollmentMeasurements = useRef<readonly ShotMeasurement[]>([]);
-  const diagnostics = useMemo(() => ({ workletTimings, scanTimings, enrollmentMeasurements }), []);
+  const lockLog = useRef<readonly LockEvent[]>([]);
+  const diagnostics = useMemo(() => ({ workletTimings, scanTimings, enrollmentMeasurements, lockLog }), []);
 
   const [language, setLanguageState] = useState(initialLanguage);
   const setLanguage = useCallback(

@@ -52,6 +52,8 @@ function embedCrop(cropped: NitroImage, model: TensorflowModel, t0: number): Fra
     const input = toModelInput(new Uint8Array(raw.buffer), raw.width, raw.height, layout);
     const t1 = performance.now();
 
+    // No sharpness measure here. laplacianVariance (src/domain/sharpness.ts) cost 20.9 ms per frame
+    // on the Infinix, and in the P1-8 diagnosis it did not separate wrong-product frames (TR-27).
     const head = model.runSync([input.buffer])[0];
     if (head === undefined) throw new Error('Model returned no output');
     const t2 = performance.now();

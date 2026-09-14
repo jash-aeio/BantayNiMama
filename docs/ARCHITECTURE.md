@@ -91,7 +91,7 @@ from `tsc` and from `node --test`, so it only shows on the device, as every fram
 ║  6. JS brute-force KNN     inline loop, in-memory matrix     9–234 ms  ║
 ║  7. Aggregate shots→products   best shot wins per product    <1 ms     ║
 ║  8. τ/δ policy             ACCEPT | DISAMBIGUATE | UNKNOWN   <1 ms     ║
-║  9. Stability ring buffer  require 3-of-5 agreement          <1 ms     ║
+║  9. Stability ring buffer  require 4-of-5 agreement          <1 ms     ║
 ║ 10. Fetch name + price     indexed lookup on lock            <1 ms     ║
 ║ 11. Render overlay         Reanimated shared values          <16 ms    ║
 ╚════════════════════════════════════════════════════════════════════════╝
@@ -99,14 +99,15 @@ from `tsc` and from `node --test`, so it only shows on the device, as every fram
 Stage times above are budgets. Measured values are in §8 (Infinix: 100.7 ms per frame on CPU).
 Per processed frame:  30–50 ms budget Android · 15–25 ms iOS
 CPU duty cycle:       12–20% at 4 fps
-Perceived lock:       ~750 ms (3 agreeing frames at 4 fps)
+Perceived lock:       ~1 s (4 agreeing frames at 4 fps; was ~750 ms at 3 — ADR-016)
 ```
 
 ### Why 4 fps
 
 `runAtTargetFps(4)` is the single biggest battery and thermal lever in the app (NFR-06). At 30 fps
-a budget Android thermally throttles within minutes. At 4 fps, with a 3-of-5 stability gate, a
-result still locks in ~750 ms — below the 1.2 s p90 target (NFR-04).
+a budget Android thermally throttles within minutes. At 4 fps, with a 4-of-5 stability gate
+(ADR-016), a result locks in ~1 s nominal. That is still below the 1.2 s p90 target (NFR-04), with
+less headroom than the original 3-of-5's ~750 ms; time-to-lock is not yet measured on device.
 
 ---
 
@@ -133,7 +134,11 @@ reticle crop (`captureReference`). The enrolled vector goes through one more res
 the live one does not.
 
 - **Measured:** on the Infinix, the two vectors agree at dot min 0.9803, median 0.9843, over 10
-  captures of one static scene.
+  captures of one static scene (P1-4). **On real products** (2026-09-14, two enrollment sessions,
+  92 shots, Infinix X6823, release APK, CPU), they agree at dot **min 0.9882 / 0.9804, median
+  0.9960 / 0.9963**. The worst shot (0.9804) bounds a score shift at ≈ 0.20, and a median shot at
+  ≈ 0.09. The bound is loose. The P1-5 / P1-6
+  scans ran on JPEG-path vectors and locked correctly.
 - **What that allows:** unit vectors at 0.984 are √(2 − 2·0.984) ≈ 0.18 apart, which is the most a
   similarity score can move (δ = 0.075). The typical move is far smaller, but it is unmeasured on
   real products.
@@ -141,7 +146,8 @@ the live one does not.
   the Phase 3 retune must therefore use JPEG-path enrollment vectors.
 - **Size:** the frame is 1280 × 720, so the reticle crop is 396 px. It is stored at that size rather
   than upscaled to 512: 17.5 KB median per shot, ~88 KB per 5-shot product against `NFR-08`'s
-  200 KB.
+  200 KB. **On real products** (same 92 shots): **21.9 / 24.2 KB median, 34.1 KB max** per
+  shot, so ≤ 170.5 KB even for a product made of five worst-case shots.
 
 **As implemented — `src/features/enrollment/` (P1-5, verified on the Infinix 2026-09-14: enroll
 → relaunch → scan locked the new products, and the size pair gave chips).**
@@ -281,7 +287,8 @@ else                                                  → UNKNOWN       TR-34
 ```
 
 Then the **temporal stability gate** (TR-36): push each decision into a 5-slot ring buffer; render a
-locked result only when 3 of 5 agree on the same `product_id`. This is what stops the overlay from
+locked result only when 4 of 5 agree on the same `product_id` (ADR-016; it was 3 of 5 until gate
+run 2 locked a look-alike can). This is what stops the overlay from
 flickering between neighbours.
 
 ### As implemented — `src/domain/` (P1-1, 2026-09-14)
@@ -490,16 +497,17 @@ a `require()` that works throughout development fails on the first release build
 | Stage | Budget | Measured |
 |---|---|---|
 | Sharpness gate | ~1 ms | not isolated by the spike |
-| Crop + resize | 1–3 ms | **CPU run: median 36.9 ms, p90 38.0** (P1-3, n = 40). Includes frame → image conversion and packing into Float32. With the GPU delegate: **median 36.6, p90 37.7**. The delegate does not touch this stage. **Later readings are ~60 ms:** P1-6 gave **median 60.4, p90 61.5** (n = 40, CPU, 2026-09-14), and two earlier spot readings agree. All were taken while charging. The cause is unconfirmed: heat, or P1-4's `embedCrop` refactor of this path. Re-measure unplugged and cool before acting on it. |
+| Crop + resize | 1–3 ms | **CPU run: median 36.9 ms, p90 38.0** (P1-3, n = 40). Includes frame → image conversion and packing into Float32. With the GPU delegate: **median 36.6, p90 37.7**. The delegate does not touch this stage. **Later readings are ~60 ms:** P1-6 gave **median 60.4, p90 61.5** (n = 40, CPU, 2026-09-14), and two earlier spot readings agree. Those were taken while charging. **Unplugged** (operator-reported, 2026-09-14): **median 59.7, p90 60.6**, then **59.6 / 61.2** in a second session (n = 40 each, during enrollment). So charging heat does not explain it. Right after a relaunch, over **6 frames only**, it read 35.9. That points at heat from sustained use rather than P1-4's `embedCrop` refactor, but it is unproven. A controlled cold-versus-warm run (n = 40 each) would settle it. Phase 3 work (`NFR-07`); it does not block the Phase 1 gate. |
 | TFLite inference | 8–40 ms | **CPU: median 62.8 ms, p90 72.2** (P1-3, n = 40). **`android-gpu` delegate: median 43.2 ms, p90 45.1**, 31% less. Whether GPU vectors match CPU vectors is **not yet measured**, so the delegate is not adopted: τ/δ were calibrated on CPU. |
 | L2-normalize | <0.1 ms | **median 0.9 ms** (P1-3, n = 40). Also copies the vector out of the model's output buffer. |
+| Sharpness (Laplacian variance, every 2nd px of 224², diagnostic) | ~1 ms (§3 budget) | **median 20.9 ms, p90 21.3** (P1-8 diagnosis, n = 40, 2026-09-14). About 20× the budget, and in the reproduction it did not separate wrong-product frames (`TR-27`). Infinix X6823, release APK. |
 | **Per-frame worklet total, split measurement** | **9–43 ms** | **CPU: median 100.7 ms, p90 109.1 · GPU delegate: median 81.2 ms, p90 83.0** — Infinix X6823, release APK, 2026-09-14, n = 40 each. Neither meets `NFR-07`. Crop + resize alone is ~37 ms, so even a free model would leave this stage near the budget. Not directly comparable to the 145.5 ms below: that number also covered converting the vector to a JS array inside the worklet. |
 | **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **Release: median 145.5 ms, p90 160.1 ms, range 126.5–339.5 ms** (n = 226 test frames). Debug: 140–248 ms, median ~148 ms (7 spot readings). See note. |
 | sqlite-vec KNN | 0.5–3 ms | **Could not run** — sqlite-vec does not load on 32-bit ARM (§5). Measured as a substitute: **JS brute force, 100 shots median 9.2 ms; 2,500 shots median 234.0 ms** (inline loop over one `Float32Array`, n = 10), and 831.1 ms at 2,500 when calling `dot()` per shot. Infinix X6823, release APK, 2026-09-14. |
 | Read vectors from SQLite | — | **56.3 ms** for 2,500 × 1280-d BLOBs, bit-exact round trip. Same device and date. |
-| JS brute-force KNN, in the scanner (P1-6) | — | **15 shots: median 1.31 ms, p90 4.23** (n = 200 live frames, `useScanner`). Infinix X6823, release APK, 2026-09-14. |
-| Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, n = 200 live frames: `match` + `pushDecision` + `lockedDecision`). Same device and date. |
-| **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms, not met.** This is a **sum of medians**, not one timed span: P1-6 worklet total 124.7 + KNN 1.31 + policy 0.07. The JS side is ~1% of it; the worklet is the whole problem. |
+| JS brute-force KNN, in the scanner | — | **15 shots: median 1.31 ms, p90 4.23** (P1-6). **100 shots: median 8.52 ms, p90 13.78** (P1-8 gate catalog). n = 200 live frames each, `useScanner`. The 100-shot figure agrees with P1-2's synthetic 9.2 ms. Infinix X6823, release APK, 2026-09-14. |
+| Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, 15 shots) · **0.08 / 0.10** (P1-8, 100 shots). n = 200 live frames each: `match` + `pushDecision` + `lockedDecision`. Same device and date. |
+| **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms at 15 shots, ~135 ms at 100 shots — not met.** These are **sums of medians**, not one timed span: P1-6 worklet 124.7 + KNN 1.31 + policy 0.07; P1-8 worklet 126.9 + KNN 8.52 + policy 0.08. The JS side is 1–7% of it; the worklet is the problem. |
 
 **Measurement, 2026-09-13.** 7 samples read off the spike's on-screen counter (`elapsedMs`, timed
 inside the worklet around crop → resize → `runSync` → L2-normalize): 140.5, 142.4, 147.5, 148.2,

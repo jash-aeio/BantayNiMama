@@ -79,6 +79,7 @@
     "title": "Gate check (debug)",
     "run": "Patakbuhin ang check",
     "running": "Sinusuri ang litrato {{done}} ng {{total}}…",
-    "needsModel": "Naglo-load pa ang model para sa pagkilala."
+    "needsModel": "Naglo-load pa ang model para sa pagkilala.",
+    "clearLog": "I-clear ang lock log"
   }
 }

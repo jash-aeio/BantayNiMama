@@ -3,6 +3,7 @@ import { createContext, useContext, type RefObject } from 'react';
 import type { Catalog } from '../db/catalog';
 import type { VectorIndex } from '../domain/knn.ts';
 import type { Language } from '../domain/language.ts';
+import type { LockEvent } from '../domain/lockLog.ts';
 import type { ShotMeasurement } from '../features/enrollment/useEnrollment';
 import type { ScanTiming } from '../features/scanner/useScanner';
 import type { StageTimings } from '../ml/frameEmbedder';
@@ -19,6 +20,8 @@ export interface Diagnostics {
   readonly scanTimings: RefObject<readonly ScanTiming[]>;
   /** Frame-vs-JPEG agreement and bytes for every shot captured this session (ARCHITECTURE.md §4). */
   readonly enrollmentMeasurements: RefObject<readonly ShotMeasurement[]>;
+  /** Every scanner lock change since launch or the last clear (PHASE_1_PLAN §4 step 5). */
+  readonly lockLog: RefObject<readonly LockEvent[]>;
 }
 
 export interface AppServices {

@@ -3,9 +3,14 @@
 
 import type { Decision } from './match.ts';
 
-/** TR-36: lock when 3 of the last 5 frame decisions agree — about 750 ms at 4 fps (TR-26). */
+/**
+ * TR-36, as amended by ADR-016: lock when **4** of the last 5 frame decisions agree, about 1 s at
+ * 4 fps (TR-26). It was 3 of 5 until gate run 2 (P1-8) locked a wrong product. The diagnosis then
+ * found lone accept-grade votes for a look-alike can, at most one per window. Needing 4 votes makes
+ * such a streak far harder to lock, at the cost of ~250 ms per lock (NFR-02 over speed).
+ */
 export const STABILITY_WINDOW = 5;
-export const STABILITY_QUORUM = 3;
+export const STABILITY_QUORUM = 4;
 
 export interface StabilityBuffer {
   /** Most recent last. Never longer than the window. */

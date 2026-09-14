@@ -535,10 +535,138 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       134.4 ms median / p90. That is the fourth reading near 60 ms for crop+resize. Battery was at
       100%; whether the charger was connected was not recorded.
     - **Camera pausing on the Products tab:** operator-reported, not measured.
+  - **Measured with the restored readout** while enrolling toward the gate (2026-09-14, n = 40
+    shots, Infinix X6823, release APK, CPU):
+    - Frame-vs-JPEG agreement on real products: dot **min 0.9882, median 0.9960**. This closes
+      the item owed before P1-8; P1-4 had measured only one static scene.
+    - JPEG size: **21.9 KB median, 32.5 KB max** per shot, within `NFR-08`.
+    - The worklet read crop+resize **59.7** / 60.6 ms, `runSync` 71.6 / 82.2, total **132.0** /
+      144.2 (n = 40, **unplugged**, operator-reported). So the ~60 ms crop+resize is not charging
+      heat. After a relaunch, over 6 frames only, crop+resize read 35.9 ms. That points at heat
+      from sustained use rather than code, but 6 frames prove nothing; a cold-versus-warm run
+      (n = 40 each) would settle it.
+    - **Second enrollment session** (9 more products, n = 52 shots, unplugged, operator-reported):
+      - Frame-vs-JPEG dot: **min 0.9804, median 0.9963**. The minimum is about P1-4's one-scene
+        worst (0.9803) and bounds a score shift at ≈ 0.20.
+      - JPEG: 24.2 KB median, 34.1 KB max, so ≤ 170.5 KB for five worst-case shots.
+      - Worklet: crop+resize **59.6** / 61.2, `runSync` 72.5 / 75.9, total **133.2** / 138.0 ms.
   - **Readout restored after the device check:** the per-session frame-vs-JPEG agreement and JPEG
     size line lived only in the deleted dev host. It moved to the gate check section
     ("enrollment shots this session"), fed from `useEnrollment` through the shared diagnostics refs.
     It is still owed before P1-8 on real products, and still lost on relaunch.
+- **P1-8 — gate run, first attempt** (2026-09-14, Infinix X6823, release APK, CPU). **Not yet a
+  pass.**
+  - **Setup:** 20 products / 100 shots, enrolled through the app. Same-brand pairs: Alaska
+    140/360 ml and Argentina 100/260 g (size-only, `L-02`); Lucky Me Noodle Soup Beef / Spicy
+    Labuyo Beef; Lucky Me Pancit Canton Chilimansi / Kalamansi; Knorr Chicken / Pork; Datu Puti
+    Soy Sauce / Vinegar. Force-stop confirmed (new process), airplane mode on (`TR-53`).
+  - **Steps 3–4 PASS:** 0 missing photos; self-match 100/100, own score min 1.000000; nearest
+    other shot median 0.7512, max 0.8954; 11.7 s. The check ran after the scan step, in the same
+    process; scanning writes nothing.
+  - **Step 5 (scan all 20), sampled:** 57 screenshots about 6 s apart, each checked against the
+    product in the reticle. Size pairs were attributed by list order.
+    - **19/20 observed correct:** 13 LOCK, 6 chips containing the right product.
+    - **0 wrong locks observed.**
+    - **Piattos Cheese 18g not observed:** one screenshot, still settling on Unknown.
+    - **Why it is not a pass:** a product is missing, and a wrong lock shorter than ~6 s could fall
+      between screenshots.
+    - **Near misses:** Datu Puti Soy Sauce ranked Vinegar top-1 (shown as chips), and Lucky Me Beef
+      was once chipped with Pancit Canton Chilimansi. Chips were tapped four times, which only shows
+      a price.
+  - **Latency at 100 shots:** KNN 8.52 / 13.78 ms, policy + stability 0.08 / 0.10 ms (n = 200).
+    Worklet crop+resize 59.2, total 126.9 ms (n = 40).
+- **Lock log for the gate run** (2026-09-14). Domain tests 131 → **139**.
+  - `src/domain/lockLog.ts`: `lockEvent`, `appendLockEvent` (capped at 5,000) and
+    `segmentLockLog`. The last splits a run at Unknown locks, counts re-locks, merges chip pairs
+    whichever product ranked first, and ignores lost-quorum events.
+  - `useScanner` appends an event on every lock change, which already happens only on key changes
+    and so adds no per-frame cost. `reset()` never clears the log.
+  - The gate check section shows one line per segment, with a translated "Clear lock log" button.
+  - `PHASE_1_PLAN.md` §4 amended: the lock log is step 5's evidence, and screenshots are backup.
+- **P1-8 — gate run 2** (2026-09-14, Infinix X6823, release APK, CPU). **FAILED step 5.**
+  - **Conditions:** force-stop confirmed (new process), airplane mode on, 20 products / 100 shots.
+  - **Lock log** 11:42:38–11:49:12: 98 changes, 20 LOCK, 26 CHIPS, 25 segments.
+  - **Wrong lock (fails §4):** at 11:43:56, with a motion-blurred **Alaska Evaporada 360ml** in the
+    reticle (backup screenshot 012), the app locked **Argentina Corned Beef 260g** and showed
+    ₱35.00; the true price is ₱50.00. The next screenshots show Alaska chips, then LOCK Alaska 360ml.
+  - **Every other outcome was correct:** all 20 products were locked (14, including Piattos, missed in
+    run 1) or offered as chips containing the right product (6). Chips mixed in other products at
+    times: Soy Sauce/Vinegar, Clover with Knorr, Lucky Me Beef with Pancit Canton Chilimansi,
+    Reno with Alaska 140ml.
+  - **Suspected cause: motion blur, not measured.** `TR-27`'s sharpness gate is deferred (floor 0),
+    and the log records no scores.
+  - **Steps 3–4 PASS in the same process** (pid 19300, airplane mode, after the scan): 0 missing
+    photos, self-match 100/100, own score min 1.000000, nearest other shot max 0.8954, 13.3 s.
+    Run 2 is therefore: step 3 pass, step 4 pass, **step 5 fail**.
+- **Wrong-lock diagnostics** (2026-09-14, after gate run 2; operator's call: diagnose before fixing).
+  Domain tests 139 → **145**. Nothing here changes a decision yet.
+  - `src/domain/sharpness.ts`: `laplacianVariance`, the variance of the Laplacian of luminance over
+    the 224² model input. It is worklet-callable and sampled every 2 px. It **measures only**:
+    `TR-27`'s floor is still uncalibrated, so no frame is dropped.
+  - **Sharpness is computed per frame** in `embedCrop`, as `sharpnessMs`, a separate stage between
+    crop+resize and `runSync`. Its worklet cost is **not yet measured**.
+  - **Lock events** now carry the locked decision's score and margin, plus the 5 stability-window
+    frames that voted (`FrameVote`: top-1, score, margin, sharpness).
+  - **Gate check section:** a sharpness distribution over the last 300 frames, and "lock detail"
+    lines for the last 30 lock changes.
+  - **Reproduction measured** (Infinix X6823, release APK, CPU, airplane mode, 12:03:46–12:07:04).
+    The operator held Alaska Evaporada 360ml steady then moving, then Argentina Corned Beef 260g the
+    same way.
+    - **No wrong lock reproduced:** 43 lock changes, 7 LOCK (all Alaska 360ml, during its own
+      phase), 22 CHIPS.
+    - **The confusion runs both ways.** In the Argentina 260g phase, Alaska 360ml repeatedly
+      ranked top-1 (scores 0.63–0.76), including accept-grade votes above δ: margin 0.09 at
+      12:06:11 and 0.12 at 12:06:27. At most one wrong accept vote per stability window was seen;
+      the gate failure needed three.
+    - **Chips in that phase:** some pairs left Argentina 260g out (Alaska 360 | Argentina 100g ×3,
+      Alaska 360 | 140 ×1).
+    - **Sharpness does not separate right from wrong** (×1000). Wrong-can votes ranged 1.7–12.6,
+      and the two wrong accept votes were 2.4 and 5.9. All frames (n = 300): p10 0.3, median 8.6,
+      p90 20.9.
+    - **Cost of measuring sharpness:** **20.9 / 21.3 ms** median/p90 per frame (n = 40), taking the
+      worklet total to 144.1 / 148.2 ms.
+    - **Limits:** there were no screenshots during the reproduction, so votes are attributed to a
+      can by protocol timing only. One pair, about 2 minutes.
+- **Lock quorum 3 → 4 of 5** (2026-09-14, ADR-016, `TR-36` amended; operator's call after the
+  diagnosis).
+  - `STABILITY_QUORUM` is now 4. `stability.test.ts` pins it, including that the 3-of-5 pattern
+    behind gate run 2 no longer locks.
+  - **Unchanged:** τ and δ.
+  - **Nominal time-to-lock:** about 1 s at 4 fps, up from ~750 ms. Not yet measured.
+  - **Sharpness measurement removed from the worklet** (it cost 20.9 ms per frame and did not
+    separate wrong votes). `laplacianVariance` stays in `src/domain` with its tests, and lock detail
+    lines keep score, margin and votes.
+  - **Verification:** credited only if gate run 3 passes, in a full re-run.
+- **P1-8 — gate run 3** (2026-09-14, Infinix X6823, release APK, CPU, 4-of-5 quorum). **Meets
+  `PHASE_1_PLAN.md` §4**, verified with `/phase-gate` after the operator's `fil.json` pass (D-4).
+  - **Conditions:** force-stop confirmed (new process, pid 27320), airplane mode on.
+  - **Steps 3–4 PASS**, run before the scan this time, as §4 orders:
+    - 20 products / 100 shots, index 100, other-model 0; schema 1, 1280-d, τ 0.46, δ 0.075.
+    - 100 photo rows, 0 missing.
+    - Self-match 100/100, own score min 1.000000; nearest other shot median 0.7512, max 0.8954.
+    - 13.3 s.
+  - **Step 5 PASS** (same process pid 27320 throughout; lock log 12:20:48–12:27:16):
+    - **20/20 products** locked correctly or offered as chips containing the product: 15 LOCK,
+      5 chips only (Alaska 360ml, Datu Puti Soy Sauce, Knorr Chicken, Knorr Pork, Pancit Canton
+      Chilimansi).
+    - **0 wrong locks** in 145 lock changes (24 LOCK, 26 CHIPS, 21 segments). Every LOCK names the
+      product scanned in its segment.
+    - **Attribution checked against 63 backup screenshots** where it mattered:
+      - Segment #8 was a second Clover lock, with the Clover bag in view (shot 024).
+      - Segment #3's LOCK Argentina 100g had the squat 100 g can in the reticle (shot 012).
+      - The "260", "SPICY LABUYO", "CHILIMANSI" and "KALAMANSI" labels are readable during their
+        segments.
+      - Alaska 140/360 ml was attributed by list order plus the operator's chip taps.
+  - **Caveats:**
+    - **Not proof of ADR-016.** One clean run is consistent with it, but run 2's wrong lock was
+      rare: it did not reproduce in 2 minutes, and run 1 observed none.
+    - **Chip taps:** chips were tapped ~10 times. A tap only shows a price and never creates a
+      lock.
+    - **Time-to-lock under 4-of-5** (`NFR-04`) is unmeasured.
+  - **Latency in this run** (n = 40 worklet / 200 JS): crop+resize 60.0, `runSync` 64.4, total
+    125.8 ms; KNN 8.45 / 11.37 ms; policy + stability 0.09 / 0.10 ms.
+- **Filipino copy reviewed** by the operator (2026-09-14, D-4): no corrections, so `fil.json` stands
+  as drafted (`SR-42`).
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.
@@ -549,6 +677,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     distractor bank. Results in ADR-013.
 
 ### Changed
+- **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2
+  (UI / UX) is in progress.
+  - **Every §4 criterion has measured evidence** on the Infinix X6823, release APK, in airplane mode:
+    - Setup: 20 products / 100 shots, with 4 same-brand variant pairs.
+    - Force-stop confirmed by a new process, the same process throughout.
+    - Step 3: products 20, shots 100, index 100, other-model 0; `app_meta` schema 1, 1280-d,
+      τ 0.46, δ 0.075; 0 missing photos.
+    - Step 4: self-match 100/100, own score min 1.000000.
+    - Step 5: 20/20 locked or chipped, **0 wrong locks** in the full lock log (145 changes).
+  - **The pass came on gate run 3.** Run 2 failed step 5 on one wrong lock, which led to the
+    diagnosis and ADR-016's 4-of-5 quorum.
+  - **Carried open, outside this gate:**
+    - `NFR-07`, per-frame ~126 ms against 60 ms.
+    - `NFR-01` and `NFR-03`, for Phase 3.
+    - `NFR-04`, time-to-lock under 4-of-5, unmeasured.
+    - GPU-vs-CPU vector agreement.
+    - The Add → enroll tap, never exercised.
+    - Look-alike confusion: Alaska / Argentina, Reno / Argentina.
+  - **P1-4's owed item** (does JPEG-path enrollment change real decisions?) is marked addressed by
+    the gate. It was not a controlled comparison.
 - **Docs brought up to date with P1-2 to P1-4** (2026-09-14). No code or threshold changed.
   - **`TR-42` clarified:** 512 px is a cap and never upscales. The 396 px reticle crop is stored
     at 396 px (P1-4, `NFR-08`).
