@@ -3,6 +3,6 @@
   "compilerOptions": {
     "types": ["node"]
   },
-  "include": ["src/domain/**/*.ts"],
+  "include": ["src/domain/**/*.ts", "src/db/**/*.test.ts", "src/db/**/*.testing.ts"],
   "exclude": ["node_modules"]
 }

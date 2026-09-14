@@ -12,9 +12,13 @@ import {
 } from 'react-native-vision-camera';
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
+import { catalogCounts } from '../db/products';
+import { appendInteraction, type InteractionKind } from '../domain/interactionLog.ts';
 import { EnrollmentPanel } from '../features/enrollment/EnrollmentPanel';
 import { useEnrollment } from '../features/enrollment/useEnrollment';
+import { RejectPanel } from '../features/scanner/RejectPanel';
 import { ScanOverlay } from '../features/scanner/ScanOverlay';
+import { useRejection } from '../features/scanner/useRejection';
 import { useScanner } from '../features/scanner/useScanner';
 import { captureReference, embedFrame, type FrameEmbedding, type ReferenceCapture } from '../ml/frameEmbedder';
 import { RETICLE_FRACTION, TARGET_FPS } from '../ml/model';
@@ -24,17 +28,21 @@ import { useAppServices } from './services';
 const WORKLET_TIMING_WINDOW = 40;
 
 /**
- * The Scan tab: one camera for both scanning and enrollment (operator's choice, P1-7).
+ * The Scan tab: one camera for scanning, enrollment and *Not in my list* (operator's choice, P1-7).
  *
  * Enrollment slides up under the live preview rather than opening a second screen. A second camera
  * with its own frame processor would need the scanner's stopped first, and SR-05 asks that Add
  * never blocks the preview. The camera is active only while this tab is focused, so the Products
  * tab costs no inference (NFR-06).
+ *
+ * Voting pauses while enrollment or a rejection is open (P2-3). The card is then pinned to what the
+ * tindera tapped, and a lock changing under her finger cannot redirect the tap to another product.
+ * Resuming starts a fresh stability window.
  */
 export function ScanScreen() {
   const { t } = useTranslation();
   const insets = useSafeAreaInsets();
-  const { catalog, indexRef, frameModel, stillModel, diagnostics, bumpCatalogVersion } = useAppServices();
+  const { catalog, indexRef, frameModel, stillModel, diagnostics, catalogVersion, bumpCatalogVersion } = useAppServices();
   const focused = useIsFocused();
   const { hasPermission, requestPermission } = useCameraPermission();
   const device = useCameraDevice('back');
@@ -43,46 +51,82 @@ export function ScanScreen() {
   const jpegModel = stillModel.state === 'loaded' ? stillModel.loaded.model : undefined;
 
   const [enrolling, setEnrolling] = useState(false);
-  const enrollingRef = useRef(enrolling);
-  enrollingRef.current = enrolling;
   const [frameError, setFrameError] = useState<string | null>(null);
+  const [torch, setTorch] = useState(false);
 
-  // Set from JS, read by the worklet on its next processed frame.
+  const log = useCallback(
+    (kind: InteractionKind, productIds: readonly string[]) => {
+      diagnostics.interactionLog.current = appendInteraction(diagnostics.interactionLog.current, { atMs: Date.now(), kind, productIds });
+    },
+    [diagnostics],
+  );
+
+  // One capture channel, set from JS and read by the worklet on its next processed frame. Enrollment
+  // and a rejection are never open together, so the owner says where the capture goes.
   const captureRequest = useMemo(() => createSynchronizable(false), []);
-  const requestFrameCapture = useCallback(() => captureRequest.setBlocking(true), [captureRequest]);
+  const captureOwner = useRef<'enroll' | 'reject'>('enroll');
+  const requestEnrollCapture = useCallback(() => {
+    captureOwner.current = 'enroll';
+    captureRequest.setBlocking(true);
+  }, [captureRequest]);
+  const requestRejectCapture = useCallback(() => {
+    captureOwner.current = 'reject';
+    captureRequest.setBlocking(true);
+  }, [captureRequest]);
 
-  const enrollment = useEnrollment({ catalog, indexRef, stillModel: jpegModel, requestFrameCapture });
-  const receiveCapture = useRef(enrollment.receiveCapture);
-  receiveCapture.current = enrollment.receiveCapture;
+  const enrollment = useEnrollment({ catalog, indexRef, stillModel: jpegModel, requestFrameCapture: requestEnrollCapture });
   useEffect(() => {
     if (enrollment.savedCount > 0) bumpCatalogVersion();
   }, [enrollment.savedCount, bumpCatalogVersion]);
 
-  // The gate check section shows these: frame-vs-JPEG agreement on real products is owed before
-  // P1-8 (ARCHITECTURE.md §4). Session-only, like the hook state it mirrors.
+  // The gate check section shows these (ARCHITECTURE.md §4). Session-only, like the hook state it mirrors.
   useEffect(() => {
     diagnostics.enrollmentMeasurements.current = enrollment.measurements;
   }, [enrollment.measurements, diagnostics]);
 
   const scanner = useScanner({
     catalog,
+    catalogVersion,
     indexRef,
     timingsRef: diagnostics.scanTimings,
     lockLogRef: diagnostics.lockLog,
   });
   const { onVector, reset: resetScanner } = scanner;
 
-  // A fresh stability window whenever scanning resumes, so a lock never carries votes from before
-  // the pause — or from before a product existed.
+  const rejection = useRejection({
+    catalog,
+    indexRef,
+    stillModel: jpegModel,
+    requestFrameCapture: requestRejectCapture,
+    classify: scanner.classify,
+    onCatalogChanged: bumpCatalogVersion,
+    log,
+  });
+  const rejecting = rejection.state.stage !== 'idle';
+
+  const pausedRef = useRef(false);
+  pausedRef.current = enrolling || rejecting;
+  const receivers = useRef({ enroll: enrollment.receiveCapture, reject: rejection.receiveCapture });
+  receivers.current = { enroll: enrollment.receiveCapture, reject: rejection.receiveCapture };
+
+  // A fresh stability window whenever scanning pauses or resumes, so a lock never carries votes from
+  // before the pause, from before a product existed, or from an index without the negative just saved.
   useEffect(() => {
     resetScanner();
-  }, [enrolling, focused, resetScanner]);
+  }, [enrolling, rejecting, focused, resetScanner]);
+
+  // SR-11. Off whenever the tab loses focus: a torch left on in a pocket drains the battery (NFR-06).
+  useEffect(() => {
+    if (!focused) setTorch(false);
+  }, [focused]);
+
+  const liveProductCount = useMemo(() => catalogCounts(catalog.db).products, [catalog, catalogVersion]);
 
   const onEmbedding = useCallback(
     (result: FrameEmbedding) => {
       const timings = diagnostics.workletTimings;
       timings.current = [...timings.current.slice(-(WORKLET_TIMING_WINDOW - 1)), result.timings];
-      if (!enrollingRef.current) onVector(result.vector);
+      if (!pausedRef.current) onVector(result.vector);
     },
     [onVector, diagnostics],
   );
@@ -90,7 +134,7 @@ export function ScanScreen() {
   const onReference = useCallback(
     (capture: ReferenceCapture) => {
       onEmbedding(capture.embedding);
-      receiveCapture.current(capture);
+      receivers.current[captureOwner.current](capture);
     },
     [onEmbedding],
   );
@@ -101,6 +145,11 @@ export function ScanScreen() {
 
   const openEnrollment = useCallback(() => setEnrolling(true), []);
   const closeEnrollment = useCallback(() => setEnrolling(false), []);
+  const toggleTorch = useCallback(() => {
+    log(torch ? 'torchOff' : 'torchOn', []);
+    setTorch(!torch);
+  }, [log, torch]);
+  const nameOf = useCallback((id: string) => scanner.productOf(id)?.name ?? '—', [scanner.productOf]);
 
   useEffect(() => {
     if (!hasPermission) void requestPermission();
@@ -175,23 +224,40 @@ export function ScanScreen() {
   return (
     <View style={styles.root}>
       <View style={styles.cameraWrap}>
-        <Camera style={StyleSheet.absoluteFill} device={device} isActive={focused} outputs={outputs} />
+        <Camera
+          style={StyleSheet.absoluteFill}
+          device={device}
+          isActive={focused}
+          outputs={outputs}
+          torchMode={torch && device.hasTorch ? 'on' : 'off'}
+        />
         <View pointerEvents="none" style={styles.reticleLayer}>
           <View style={styles.reticle} />
         </View>
-        {!enrolling && (
+        {!enrolling && device.hasTorch && (
+          <Pressable onPress={toggleTorch} style={[styles.topButton, styles.torchButton, torch && styles.torchOn, { top: insets.top + 12 }]}>
+            <Text style={[styles.topButtonText, torch && styles.torchOnText]}>{t(torch ? 'scan.torchTurnOff' : 'scan.torchTurnOn')}</Text>
+          </Pressable>
+        )}
+        {!enrolling && !rejecting && (
           <>
-            <Pressable onPress={openEnrollment} style={[styles.addButton, { top: insets.top + 12 }]}>
-              <Text style={styles.addButtonText}>{t('scan.addProduct')}</Text>
+            <Pressable onPress={openEnrollment} style={[styles.topButton, styles.addButton, { top: insets.top + 12 }]}>
+              <Text style={styles.topButtonText}>{t('scan.addProduct')}</Text>
             </Pressable>
             <ScanOverlay
               locked={scanner.locked}
+              liveProductCount={liveProductCount}
+              confirmBelow={catalog.meta.confirmBelow}
               thresholds={catalog.meta.thresholds}
               productOf={scanner.productOf}
+              photoOf={scanner.photoOf}
               onAdd={openEnrollment}
+              onReject={rejection.reject}
+              onLog={log}
             />
           </>
         )}
+        {!enrolling && rejecting && <RejectPanel rejection={rejection} nameOf={nameOf} />}
         {frameError !== null && (
           <Text style={[styles.frameError, { top: insets.top + 64 }]}>{t('scan.frameError', { message: frameError })}</Text>
         )}
@@ -233,15 +299,12 @@ const styles = StyleSheet.create({
     borderColor: '#ffd166',
     borderRadius: 8,
   },
-  addButton: {
-    position: 'absolute',
-    right: 12,
-    backgroundColor: 'rgba(43, 108, 176, 0.95)',
-    borderRadius: 20,
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-  },
-  addButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
+  topButton: { position: 'absolute', borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10 },
+  addButton: { right: 12, backgroundColor: 'rgba(43, 108, 176, 0.95)' },
+  torchButton: { left: 12, backgroundColor: 'rgba(27, 36, 48, 0.9)' },
+  torchOn: { backgroundColor: '#ffd166' },
+  topButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
+  torchOnText: { color: '#0b0f14' },
   frameError: { position: 'absolute', left: 12, right: 12, color: '#ff6b6b', fontSize: 12 },
   panel: { maxHeight: '55%', backgroundColor: '#0b0f14' },
   panelContent: { padding: 14, gap: 10, paddingBottom: 32 },

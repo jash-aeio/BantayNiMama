@@ -63,6 +63,33 @@
       "sure": "Sure",
       "likely": "Likely",
       "notSure": "Not sure"
+    },
+    "wrong": "Wrong?",
+    "neither": "Neither",
+    "torchTurnOn": "Light",
+    "torchTurnOff": "Light off",
+    "confirm": {
+      "question": "Is this {{name}}?",
+      "yes": "Yes",
+      "no": "No",
+      "photoLabel": "Saved photo of {{name}}"
+    },
+    "quickPick": {
+      "title": "Looks like a repacked item. Which one?"
+    },
+    "reject": {
+      "title": "Not this one?",
+      "appSaid": "The app said: {{names}}",
+      "notInListHint": "If this item is not in your list, keep it inside the box and tap below. The app will stop naming it.",
+      "notInList": "Not in my list",
+      "cancel": "Cancel",
+      "capturing": "Keep the item still inside the box…",
+      "saving": "Saving…",
+      "saved": "Saved. Next time, this item reads as Unknown.",
+      "mismatch": "The camera moved to something else, so nothing was saved. Keep the item inside the box and try again.",
+      "retry": "Try again",
+      "failed": "It was not saved. ({{message}})",
+      "next": "Scan next"
     }
   },
   "products": {

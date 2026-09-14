@@ -63,6 +63,33 @@
       "sure": "Tiyak",
       "likely": "Malamang",
       "notSure": "Hindi tiyak"
+    },
+    "wrong": "Mali?",
+    "neither": "Hindi alinman",
+    "torchTurnOn": "Ilaw",
+    "torchTurnOff": "Patayin ilaw",
+    "confirm": {
+      "question": "Ito ba ay {{name}}?",
+      "yes": "Oo",
+      "no": "Hindi",
+      "photoLabel": "Litrato ng {{name}}"
+    },
+    "quickPick": {
+      "title": "Mukhang repack. Alin ito?"
+    },
+    "reject": {
+      "title": "Hindi ito?",
+      "appSaid": "Ayon sa app: {{names}}",
+      "notInListHint": "Kung hindi nasa listahan ang item na ito, panatilihin ito sa loob ng kahon at pindutin sa ibaba. Hindi na ito pangangalanan ng app.",
+      "notInList": "Hindi nasa listahan ko",
+      "cancel": "Kanselahin",
+      "capturing": "Huwag igalaw ang item sa loob ng kahon…",
+      "saving": "Sine-save…",
+      "saved": "Na-save. Sa susunod, ito ay Hindi kilalang paninda.",
+      "mismatch": "Gumalaw ang camera sa ibang bagay, kaya walang na-save. Panatilihin ang item sa kahon at subukan muli.",
+      "retry": "Subukan muli",
+      "failed": "Hindi na-save. ({{message}})",
+      "next": "Mag-scan ng susunod"
     }
   },
   "products": {

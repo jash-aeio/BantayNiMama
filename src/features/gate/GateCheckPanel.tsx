@@ -7,6 +7,8 @@ import { getProduct } from '../../db/products';
 import {
   describeEnrollmentMeasurements,
   describeGateCheck,
+  describeInteractions,
+  describeLaunch,
   describeLockDetails,
   describeLockLog,
   describeScanTimings,
@@ -69,6 +71,7 @@ export function GateCheckPanel() {
       </Pressable>
       {open && (
         <View style={styles.body}>
+          <Text style={styles.line}>{describeLaunch(catalog)}</Text>
           <Pressable onPress={run} disabled={progress !== null} style={[styles.button, progress !== null && styles.disabled]}>
             <Text style={styles.buttonText}>
               {progress !== null ? t('gate.running', { done: progress.done, total: progress.total }) : t('gate.run')}
@@ -82,6 +85,11 @@ export function GateCheckPanel() {
           <Text style={styles.line}>{describeWorkletTimings(diagnostics.workletTimings.current)}</Text>
           <Text style={styles.line}>{describeScanTimings(diagnostics.scanTimings.current)}</Text>
           <Text style={styles.line}>{describeEnrollmentMeasurements(diagnostics.enrollmentMeasurements.current)}</Text>
+          {describeInteractions(diagnostics.interactionLog.current, nameOf).map((line, i) => (
+            <Text key={`tap-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
 
           <Pressable onPress={clearLockLog} style={styles.button}>
             <Text style={styles.buttonText}>{t('gate.clearLog')}</Text>

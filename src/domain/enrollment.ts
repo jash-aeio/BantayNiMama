@@ -2,9 +2,9 @@
 // and the duplicate check receives KNN rows the caller has already fetched.
 
 import { assertThresholds, rankProducts, type ProductScore, type ShotMatch, type Thresholds } from './match.ts';
-import { parsePesos } from './money.ts';
+import { parsePrices, type PriceError } from './priceEdit.ts';
 
-/** SR-20 asks for 3–5 reference photos; TR-42 caps them at 5. */
+/** SR-20 asks for 3–5 reference photos; TR-42 caps enrollment at 5 (corrections add up to 3, correction.ts). */
 export const MIN_SHOTS = 3;
 export const MAX_SHOTS = 5;
 
@@ -26,7 +26,7 @@ export interface EnrollmentForm {
   readonly category: string;
 }
 
-export type FormError = 'nameRequired' | 'piecePriceRequired' | 'piecePriceInvalid' | 'packPriceInvalid';
+export type FormError = 'nameRequired' | PriceError;
 
 export type ParsedForm =
   | { readonly ok: true; readonly product: NewProduct }
@@ -35,10 +35,9 @@ export type ParsedForm =
 /**
  * SR-21: name and per-piece price are required; pack price, unit and category are optional.
  *
- * Prices go through parsePesos, so "12.50" becomes 1250 without touching a float (TR-41). A price
- * of zero is refused: nothing on a sari-sari shelf is free, so ₱0.00 is a typo, and quoting it
- * confidently would cost the store money (NFR-02). Every error is returned at once, so the form
- * can mark all bad fields in one pass.
+ * Prices follow parsePrices, the same rules as a price edit (SR-06): "12.50" becomes 1250 without
+ * touching a float (TR-41), and ₱0.00 is refused. Every error is returned at once, so the form can
+ * mark all bad fields in one pass.
  */
 export function parseEnrollmentForm(form: EnrollmentForm): ParsedForm {
   const errors: FormError[] = [];
@@ -46,27 +45,16 @@ export function parseEnrollmentForm(form: EnrollmentForm): ParsedForm {
   const name = form.name.trim();
   if (name === '') errors.push('nameRequired');
 
-  let pricePiece: number | null = null;
-  if (form.pricePiece.trim() === '') {
-    errors.push('piecePriceRequired');
-  } else {
-    pricePiece = positiveCentavos(form.pricePiece);
-    if (pricePiece === null) errors.push('piecePriceInvalid');
-  }
+  const prices = parsePrices(form);
+  if (!prices.ok) errors.push(...prices.errors);
 
-  let pricePack: number | null = null;
-  if (form.pricePack.trim() !== '') {
-    pricePack = positiveCentavos(form.pricePack);
-    if (pricePack === null) errors.push('packPriceInvalid');
-  }
-
-  if (errors.length > 0 || pricePiece === null) return { ok: false, errors };
+  if (!prices.ok || errors.length > 0) return { ok: false, errors };
   return {
     ok: true,
     product: {
       name,
-      pricePiece,
-      pricePack,
+      pricePiece: prices.pricePiece,
+      pricePack: prices.pricePack,
       unitLabel: optionalText(form.unitLabel),
       category: optionalText(form.category),
     },
@@ -89,11 +77,6 @@ export function likelyDuplicates(
 ): ProductScore[] {
   assertThresholds(thresholds);
   return rankProducts(hitsPerShot.flat()).filter((p) => p.score >= thresholds.tau);
-}
-
-function positiveCentavos(text: string): number | null {
-  const centavos = parsePesos(text);
-  return centavos !== null && centavos > 0 ? centavos : null;
 }
 
 function optionalText(text: string): string | null {

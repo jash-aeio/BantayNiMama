@@ -11,12 +11,14 @@ export interface CatalogIdentity {
 }
 
 export interface PersistenceInput {
-  /** Live products and every shot row (catalogCounts). */
-  readonly counts: { readonly products: number; readonly shots: number };
-  /** Shots in the in-memory search index. */
+  /** Live products, every product_shots row and every negative_shots row (catalogCounts). */
+  readonly counts: { readonly products: number; readonly shots: number; readonly negatives: number };
+  /** Rows in the in-memory search index: live products' shots and negatives. */
   readonly indexSize: number;
-  /** Shots stamped with another model_id, which the index leaves out (TR-23). */
+  /** Shots and negatives stamped with another model_id, which the index leaves out (TR-23). */
   readonly otherModelShots: number;
+  /** Current-model shots of products in the trash, which the index leaves out (SR-32). */
+  readonly trashedShots: number;
   /** What app_meta says. */
   readonly meta: CatalogIdentity;
   /** What this build expects. */
@@ -29,15 +31,22 @@ export type PersistenceProblem =
   | { readonly kind: 'emptyCatalog' }
   | { readonly kind: 'schemaVersion' | 'embeddingDim'; readonly found: number; readonly expected: number }
   | { readonly kind: 'modelId'; readonly found: string; readonly expected: string }
-  | { readonly kind: 'indexMismatch'; readonly indexSize: number; readonly otherModelShots: number; readonly shots: number }
+  | {
+      readonly kind: 'indexMismatch';
+      readonly indexSize: number;
+      readonly otherModelShots: number;
+      readonly trashedShots: number;
+      /** product_shots + negative_shots rows. */
+      readonly rows: number;
+    }
   | { readonly kind: 'missingPhotos'; readonly paths: readonly string[] };
 
 /**
  * §4 step 3. An empty list means the catalog survived the force-quit intact.
  *
- * - **Index check:** every shot row must be either in the index or counted as another model's.
- *   Phase 1 has no soft delete, so a shot that is neither was lost between SQLite and search.
- *   Once SR-32 exists, soft-deleted shots join that sum.
+ * - **Index check:** every vector row, in product_shots or negative_shots, must be in the index,
+ *   counted as another model's, or belong to a product in the trash. A row that is none of those
+ *   was lost between SQLite and search. A negative missing from the index silences nothing (TR-39).
  * - **Product count:** not checked here, because only the operator knows how many products were
  *   enrolled. The readout shows the count for them to compare.
  */
@@ -53,12 +62,14 @@ export function persistenceProblems(input: PersistenceInput): PersistenceProblem
   if (input.meta.embeddingDim !== input.expected.embeddingDim) {
     problems.push({ kind: 'embeddingDim', found: input.meta.embeddingDim, expected: input.expected.embeddingDim });
   }
-  if (input.indexSize + input.otherModelShots !== input.counts.shots) {
+  const rows = input.counts.shots + input.counts.negatives;
+  if (input.indexSize + input.otherModelShots + input.trashedShots !== rows) {
     problems.push({
       kind: 'indexMismatch',
       indexSize: input.indexSize,
       otherModelShots: input.otherModelShots,
-      shots: input.counts.shots,
+      trashedShots: input.trashedShots,
+      rows,
     });
   }
   if (input.missingPhotos.length > 0) problems.push({ kind: 'missingPhotos', paths: input.missingPhotos });

@@ -2,6 +2,7 @@ import { createContext, useContext, type RefObject } from 'react';
 
 import type { Catalog } from '../db/catalog';
 import type { VectorIndex } from '../domain/knn.ts';
+import type { Interaction } from '../domain/interactionLog.ts';
 import type { Language } from '../domain/language.ts';
 import type { LockEvent } from '../domain/lockLog.ts';
 import type { ShotMeasurement } from '../features/enrollment/useEnrollment';
@@ -22,6 +23,8 @@ export interface Diagnostics {
   readonly enrollmentMeasurements: RefObject<readonly ShotMeasurement[]>;
   /** Every scanner lock change since launch or the last clear (PHASE_1_PLAN §4 step 5). */
   readonly lockLog: RefObject<readonly LockEvent[]>;
+  /** Every Yes, No, Not-in-my-list and torch tap since launch (PHASE_2_PLAN §4). Never persisted. */
+  readonly interactionLog: RefObject<readonly Interaction[]>;
 }
 
 export interface AppServices {

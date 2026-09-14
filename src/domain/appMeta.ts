@@ -22,7 +22,10 @@ export interface AppMeta {
   readonly embeddingDim: number;
   /** τ and δ, read from data — never constants (TR-35, ADR-008). */
   readonly thresholds: Thresholds;
-  /** TR-38: null until Phase 3 calibrates it from store data (ADR-013). */
+  /**
+   * TR-38: null until Phase 3 calibrates it from store data (ADR-013). Null means confirm every
+   * ACCEPT, not "never confirm" (ADR-017; inConfirmMode in scanDisplay.ts). A malformed row throws.
+   */
   readonly confirmBelow: number | null;
 }
 

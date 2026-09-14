@@ -1,7 +1,7 @@
 # BantayNiMama — Project Specification
 
 > **Status:** Approved · **Version:** 1.0 · **Last updated:** 2026-09-14
-> **Owner:** Jasper · **Phase:** 1 (Proof of concept — real data path; Phase 0 gate passed 2026-09-13)
+> **Owner:** Jasper · **Phase:** 2 (UI / UX; Phase 1 gate passed 2026-09-14 — plan in `PHASE_2_PLAN.md`)
 
 Offline-first, AI-assisted visual product scanner for Philippine sari-sari stores.
 Point the camera at a product; see its name and price. Teach it new products in seconds.
@@ -54,10 +54,10 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-04** | On no confident match, display **"Unknown Item"** with a prominent **Add** action. | MUST |
 | **SR-05** | The Add form must be reachable in one tap and must not block the camera preview. | MUST |
 | **SR-06** | Allow editing the price directly from the scan overlay. | MUST |
-| **SR-07** | Allow correcting a wrong match in one tap (reassign the frame to the correct product). | MUST |
+| **SR-07** | Allow correcting a wrong match in **two taps**, *Wrong?* then the correct product. The frame is reassigned to that product as a correction shot (`TR-42`). *Amended 2026-09-14 (ADR-019): was "in one tap". Literal one tap would put a second product name on every confident card.* | MUST |
 | **SR-08** | Allow deleting the matched product from the scan overlay. | SHOULD |
 | **SR-09** | When top-1 and top-2 are within δ, present a **two-choice disambiguation chip** rather than guessing. | MUST |
-| **SR-10** | Products flagged `is_ambiguous` bypass recognition and surface a pinned **quick-pick grid**. | MUST |
+| **SR-10** | Products flagged `is_ambiguous` are never named or priced by recognition. A frame that resolves to one opens a **quick-pick grid**, which is also pinned as a button on the Scan tab. *Amended 2026-09-14 (ADR-018): "bypass recognition" now means "bypass naming". Ambiguous products keep their shots, so a clear bag cannot lock as another product.* | MUST |
 | **SR-11** | Torch toggle for dim store interiors. | SHOULD |
 | **SR-12** | Recognition result must not flicker — a result locks only after temporal agreement. | MUST |
 | **SR-13** | **Confirm mode on a small catalog.** While fewer products are enrolled than `app_meta.confirm_below` (`TR-38`), an ACCEPT is shown as a one-tap question — *"Is this {name}? ₱{price}"* with **Yes / No** — never as a confident price. A small catalog cannot reject un-enrolled items (ADR-013). | MUST *(Phase 2; cutoff calibrated Phase 3)* |
@@ -150,10 +150,10 @@ object proposal replacing the fixed reticle.
 | **TR-12** | `react-native-fast-tflite` | TFLite runtime. Runs synchronously inside worklets; GPU delegate on Android, CoreML on iOS. |
 | **TR-13** | `@op-engineering/op-sqlite`, plain SQLite. *Amended 2026-09-14: sqlite-vec is off because its 32-bit ARM build cannot load (op-sqlite#456) — ADR-014.* | Metadata + vector storage (vectors as BLOBs) in one SQLite file. |
 | **TR-14** | `@react-navigation/native` + `@react-navigation/bottom-tabs` | Tab navigation: Scan and Products. *Amended 2026-09-14 (ADR-015): was `expo-router`. It added 73 packages and 11 native modules, reanimated among them, against 23 and 2 for this navigator, which is the one it wraps.* |
-| **TR-15** | `zustand` | UI/session state only. SQLite remains the source of truth. |
+| **TR-15** | `zustand` | UI/session state only. SQLite remains the source of truth. *Deferred 2026-09-14 (ADR-020): one React context covers app state; add only on a measured need.* |
 | **TR-16** | `i18next`, `react-i18next`, `expo-localization` | `en` + `fil` from the first commit. |
 | **TR-17** | `expo-file-system` | Reference photo storage in the document directory. |
-| **TR-18** | `react-native-reanimated` | Overlay rendering via shared values, off the React render path. |
+| **TR-18** | `react-native-reanimated` | Overlay rendering via shared values, off the React render path. *Deferred 2026-09-14 (ADR-020): the overlay re-renders only on lock change, and Reanimated 4 pins the `react-native-worklets` version the frame processor depends on (ADR-015).* |
 
 ### 7.3 Machine learning
 
@@ -182,8 +182,8 @@ object proposal replacing the fixed reticle.
 | **TR-35** | τ and δ are stored in `app_meta` as configuration, calibrated empirically. **Never hard-coded.** |
 | **TR-36** | Temporal stability gate: lock a result only when **4 of the last 5** frame decisions agree. *Amended 2026-09-14 (ADR-016): was 3 of 5. Gate run 2 locked a look-alike product, and the diagnosis found lone accept-grade votes for it, at most one per window.* |
 | **TR-37** | The matching policy must be a **pure function** over `(candidates, τ, δ, buffer)` so it is unit-testable without a camera. |
-| **TR-38** | The `SR-13` cutoff is stored in `app_meta` as `confirm_below`, calibrated empirically and never hard-coded — the same rule as `TR-35`. **No value chosen yet:** on Phase 0 data even 25 products leave 2.9% of un-enrolled frames accepted, so it comes from store data in Phase 3 (ADR-013). |
-| **TR-39** | Negative shots (`SR-14`) are stored in `product_shots` like any shot (vector as a BLOB — ADR-014), stamped with `model_id` (`TR-23`), with their JPEG kept (`TR-24`). They rank alongside products. If a negative is top-1 → **UNKNOWN**. As top-2 it still counts toward δ. A negative is never named, priced or shown as a chip. |
+| **TR-38** | The `SR-13` cutoff is stored in `app_meta` as `confirm_below`, calibrated empirically and never hard-coded — the same rule as `TR-35`. **No value chosen yet:** on Phase 0 data even 25 products leave 2.9% of un-enrolled frames accepted, so it comes from store data in Phase 3 (ADR-013). **Until a value is written, no row means confirm every ACCEPT**, and a malformed row is refused (ADR-017). |
+| **TR-39** | Negative shots (`SR-14`) are stored in their own table, `negative_shots`, which has no name or price column. Each keeps its vector as a BLOB (ADR-014), is stamped with `model_id` (`TR-23`), and keeps its JPEG (`TR-24`). *Amended 2026-09-14 (ADR-017): was "in `product_shots` like any shot". A row with no name cannot be named by a missed filter.* They rank alongside products. If a negative is top-1 → **UNKNOWN**. A chip pair containing a negative → **UNKNOWN**. As top-2 of an ACCEPT it still counts toward δ. A negative is never named, priced or shown as a chip. |
 
 ### 7.5 Data
 
@@ -191,7 +191,7 @@ object proposal replacing the fixed reticle.
 |---|---|
 | **TR-40** | Single SQLite database file holding both product metadata and the shot vectors (`product_shots.embedding`, BLOB). *Amended 2026-09-14 from the `vec0` virtual table — ADR-014.* |
 | **TR-41** | **Money stored as integer centavos.** Floats are forbidden for currency anywhere in the codebase. |
-| **TR-42** | Reference photos: at most 512 px longest edge, **never upscaled**, JPEG q80, max 5 per product. *Clarified 2026-09-14 (P1-4): at 1280 × 720 the reticle crop is 396 px and is stored at that size, because upscaling adds bytes (`NFR-08`) but no detail.* |
+| **TR-42** | Reference photos: at most 512 px longest edge, **never upscaled**, JPEG q80, max 5 enrollment shots per product **plus up to 3 correction shots** (`SR-07`), the oldest correction replaced first. *Amended 2026-09-14 (ADR-019): was max 5 per product. Top-10 search stays exact while a product has ≤ 9 shots.* *Clarified 2026-09-14 (P1-4): at 1280 × 720 the reticle crop is 396 px and is stored at that size, because upscaling adds bytes (`NFR-08`) but no detail.* |
 | **TR-43** | Photo paths stored **relative** to the document directory, never absolute. |
 | **TR-44** | Schema migrations keyed on `app_meta.schema_version`, forward-only. |
 | **TR-45** | Enrollment writes product + shots + vectors in **one transaction**. |

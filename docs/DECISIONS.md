@@ -475,3 +475,146 @@ at Expo SDK 57's pinned versions. `TR-14` is amended to match.
   expect more "point the box" moments. Neither is measured yet.
 - **Phase 3:** Alaska Evaporada 360ml / Argentina Corned Beef 260g joins the look-alike cases for
   the τ/δ retune and the model bake-off (Q-3).
+
+---
+
+## ADR-017 — Small-catalog safety as built: confirm until calibrated, negatives with no name
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Refines ADR-013 · Amends `TR-38`, `TR-39`
+
+**Context.** ADR-013 adopted confirm mode below `app_meta.confirm_below`, plus store-local
+negatives. It left two things open, and Phase 2 builds both (`PHASE_2_PLAN.md` D-1, E-1, E-5):
+
+- **What the app does before `confirm_below` has a value.** No value is known to be safe. In the
+  simulation on Phase 0 data, 25 products still leave **2.9%** of un-enrolled frames accepted, above
+  `NFR-02`'s 2%, and nothing above 25 was simulated.
+- **How a negative is stored.** As a hidden `products` row, it would have to be filtered out of
+  every query that names a product: `getProduct`, `listProducts`, `catalogCounts` and the `SR-23`
+  duplicate warning. One missed filter names a negative.
+
+**Decision.**
+
+1. **No `confirm_below` row means confirm every ACCEPT** (operator's call, D-1). A malformed row is
+   refused, as a malformed τ is. The cutoff logic is built and unit-tested with numbers, and Phase 3
+   writes the row.
+2. **Negatives live in their own table, `negative_shots`, which has no name or price column**
+   (E-1, adopted at plan approval). Each row keeps its JPEG and `model_id` (`TR-23`, `TR-24`). Its
+   vector is the JPEG's, as at enrollment.
+3. **Negatives and ambiguity are resolved per frame, after `match()` and before stability. Confirm
+   or quote is decided after the lock** (E-5). `match.ts` does not change, so the Phase 0 golden
+   replay stays a valid regression test (ADR-012).
+
+**Rejected.**
+
+- *Seed a provisional cutoff of 15 or 25.* Simulated false accepts: 9.7% and 2.9%.
+- *Negatives as `products` rows with a kind column*, which was `TR-39` as first written. Safe only
+  while every naming query remembers the filter.
+- *Negatives as `product_shots` rows with no product.* SQLite cannot drop `product_id`'s `NOT NULL`
+  without rebuilding the table.
+
+**Consequences.**
+
+- **Every ACCEPT costs a tap until Phase 3.** Acceptable before ship, not at ship.
+- **Three places must read `negative_shots`:** the index loader, the launch orphan sweep, and the
+  gate check. **If the sweep misses it, every negative's JPEG is deleted at the next launch.** Each
+  gets a test.
+- **A negative that captures a real product silences that product.** The guards are a capture check
+  (the next frame must still show the rejected lock) and a negatives list with delete
+  (`PHASE_2_PLAN.md` P2-3, P2-7).
+
+---
+
+## ADR-018 — Ambiguous products are recognised only to open the quick-pick grid
+
+**Status:** Accepted · 2026-09-14 · Amends `SR-10`
+
+**Context.** Repacked clear-bag goods look identical (`L-01`). `SR-10` said `is_ambiguous`
+products "bypass recognition", and `PHASE_1_PLAN.md` §6 left open whether they get vectors at all.
+
+**Decision** (operator's call, `PHASE_2_PLAN.md` D-2):
+
+1. **Ambiguous products keep their 3–5 shots.** A frame whose decision involves an ambiguous
+   product, whether as an ACCEPT or in a chip pair, becomes `quickPick` and opens the grid.
+2. **The scanner never names or prices an ambiguous product on its own.** A price appears only when
+   a tile is tapped.
+3. **The grid is also a pinned button** on the Scan tab whenever an ambiguous product exists.
+
+**Rejected.** *No vectors, grid button only.* A clear bag in the reticle would then have only other
+products to match, so it could lock as one of them and show a wrong price (`NFR-02`).
+
+**Consequences.**
+
+- `SR-10`'s "bypass recognition" now reads "bypass naming".
+- **The flag has to be right.** A product wrongly flagged costs the helper a tap. A clear-bag product
+  left unflagged can lock as its twin. The `SR-23` duplicate warning suggests flagging when a new
+  product clears τ against an existing one.
+
+---
+
+## ADR-019 — Corrections teach up to three extra shots, in two taps
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Amends `SR-07`, `TR-42`
+
+**Context.** `SR-07` asks that a wrong match be corrected by reassigning the frame to the right
+product. `TR-42` capped a product at 5 shots, and enrollment normally uses all 5, so a correction
+had nowhere to go. In Phase 1 a chip tap shows a price and teaches nothing.
+
+**Decision** (operator's calls, `PHASE_2_PLAN.md` D-3 and D-4):
+
+1. **A correction saves a `correction` shot on the chosen product.** The shot comes from the next
+   frame, which must still show the rejected lock.
+   - **At most 3 per product.** The oldest correction is replaced: its row is removed in the same
+     transaction, and its JPEG is deleted after COMMIT.
+   - **Enrollment shots are never replaced.** A product can hold 8 shots.
+2. **Correcting takes two taps:** *Wrong?*, then the right product.
+3. **A chip tap still teaches nothing.**
+
+**Rejected.**
+
+- *Log the correction, learn nothing.* The same wrong lock recurs.
+- *Replace the product's weakest enrollment shot.* It deletes an enrollment JPEG, and "weakest" is
+  a guess.
+- *Literal one tap.* It needs a second product's name on every confident card, which the helper
+  reads at arm's length.
+
+**Consequences.**
+
+- **`KNN_LIMIT` = 10 stays exact while a product has ≤ 9 shots.** The best shot of the second-best
+  product ranks at most shots(top-1) + 1. A domain test proves it. A cap above 9 must raise the
+  limit with it.
+- **Storage.** 8 shots take **193.6 KB** at the higher session median (24.2 KB per shot) and
+  **272.8 KB** at the largest measured shot (34.1 KB), on the Infinix X6823. `NFR-08` is worded for
+  5 reference photos, so it is not formally broken, but the worst case exceeds its intent.
+- **Calibration.** More shots raise a corrected product's best-shot score. Phase 0 calibrated τ/δ
+  at 6 shots per product, so the Phase 3 retune must include corrected products.
+- **Corrections are not a fix for true look-alikes.** Alaska 360ml and Argentina 260g already score
+  each other 0.63–0.76 (ADR-016).
+
+---
+
+## ADR-020 — Reanimated and zustand stay out until a measured need
+
+**Status:** Accepted · Revisit on measured overlay jank or state sprawl · 2026-09-14 · Defers
+`TR-15`, `TR-18`
+
+**Context.**
+
+- **The specs.** `TR-18` specified Reanimated shared values for the overlay, and `TR-15` specified
+  zustand for UI state. Phase 1 deferred both to Phase 2.
+- **What exists now.** Since P1-6 the overlay re-renders only when the locked decision changes,
+  never per frame. App-wide state is one React context, `AppServicesContext`.
+
+**Decision** (`PHASE_2_PLAN.md` E-3, adopted at plan approval): add neither in Phase 2.
+
+**Rejected.** *Adding them as specced.*
+
+- **Reanimated** has no hot path to take over. Reanimated 4 also ties itself to a
+  `react-native-worklets` version, and that library carries the camera frame processor, pinned at
+  0.10.1 for VisionCamera (ADR-015).
+- **zustand** would replace a context that works. SQLite stays the source of truth either way.
+
+**Consequences.**
+
+- `TR-15` and `TR-18` are marked deferred, not dropped.
+- Card animation, if wanted, uses React Native's built-in `Animated` with the native driver. That
+  adds no dependency.

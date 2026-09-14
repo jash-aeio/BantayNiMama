@@ -54,7 +54,7 @@ This is the most important thing to understand about the codebase.
 |---|---|---|
 | **Camera thread (worklet)** | Frame throttling, sharpness gate, crop/resize, TFLite inference, L2 normalization | Touch React state, call async JS, or query SQLite |
 | **JS thread** | Vector search, matching policy, stability buffer, DB reads, enrollment | Run inference on live frames |
-| **UI thread** | Overlay rendering via Reanimated shared values | Re-render React on the hot path |
+| **UI thread** | Native view rendering. The overlay is plain RN views that re-render only when the lock changes (P1-6); Reanimated is deferred (ADR-020) | Re-render React on the hot path |
 
 **Rule:** the worklet's only output is a `Float32Array(1280)` posted to the JS thread. Nothing else
 crosses that boundary per frame. An explicit capture during enrollment is the one exception: it
@@ -187,7 +187,7 @@ those rows (§3, §8). A native index can be added later without a data migratio
 rebuilt from the BLOBs.
 
 ```sql
--- Schema v1, as src/db/schema.ts (migration 1) creates it.
+-- Schema v2, as src/db/schema.ts creates it: migration 1 (P1-2) plus migration 2 (P2-2).
 -- "centavos" below means: INTEGER CHECK (col IS NULL OR (typeof(col) = 'integer' AND col >= 0))
 -- so SQLite itself rejects a float or negative price (TR-41).
 
@@ -212,16 +212,31 @@ CREATE TABLE product_shots (
   model_id   TEXT NOT NULL,           -- stamp: which model produced this vector (TR-23)
   embedding  BLOB NOT NULL CHECK (typeof(embedding) = 'blob'),
                                       -- little-endian Float32 × embedding_dim, L2-normalized (TR-22, ADR-014)
+  created_at INTEGER NOT NULL,
+  source     TEXT NOT NULL DEFAULT 'enroll'
+             CHECK (source IN ('enroll', 'correction', 'teach'))   -- migration 2; SR-07, SR-33, ADR-019
+);
+
+-- Migration 2. Store-local negatives (SR-14, TR-39, ADR-017). No name or price column, by design:
+-- no query can name or price a negative, whatever filter it forgets.
+CREATE TABLE negative_shots (
+  id         TEXT PRIMARY KEY,
+  photo_path TEXT NOT NULL,           -- RELATIVE, photos/<id>.jpg, same store as product shots (TR-43)
+  model_id   TEXT NOT NULL,           -- TR-23
+  embedding  BLOB NOT NULL CHECK (typeof(embedding) = 'blob'),   -- the saved JPEG's vector (TR-24)
+  source     TEXT NOT NULL CHECK (source IN ('confirm_no', 'wrong_lock', 'wrong_chip')),
   created_at INTEGER NOT NULL
 );
 
 CREATE TABLE price_history (
   id          TEXT PRIMARY KEY,
   product_id  TEXT NOT NULL REFERENCES products(id),
-  price_piece INTEGER,                -- centavos
-  price_pack  INTEGER,                -- centavos
+  price_piece INTEGER,                -- centavos: the price in force BEFORE changed_at (P2-2)
+  price_pack  INTEGER,                -- centavos: likewise
   changed_at  INTEGER NOT NULL
 );
+-- The current price lives in products, and each edit adds one row holding the prices it replaced.
+-- The first edit therefore keeps the enrollment price, even for Phase 1 products with no history rows.
 
 CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 -- Created before any migration runs, because schema_version lives in it.
@@ -248,6 +263,33 @@ CREATE INDEX idx_shots_product     ON product_shots(product_id);
   paths, dimension, unit length.
 - **Per connection:** `PRAGMA foreign_keys = ON`. The default journal mode stays, because WAL's
   `-wal` / `-shm` side files would break the one-file layout (`TR-46`).
+- **Migration 2 (P2-2).**
+  - **Changes:** adds `negative_shots` and `product_shots.source`. The column defaults to `'enroll'`,
+    which is true of every earlier shot.
+  - **Literal CHECK lists:** written out, not generated from `SHOT_SOURCES` / `NEGATIVE_SOURCES`, so a
+    shipped migration cannot change when a constant does. A test checks the lists agree.
+  - **No `confirm_below` row** (ADR-017).
+- **Tested against real SQLite, not on faith** (`src/db/*.test.ts`).
+  - **Adapter:** `node:sqlite` is built into Node (v24.13.1, SQLite 3.51.2; the Infinix has 3.51.3),
+    so it adds no dependency (`TR-51`). `nodeSqlite.testing.ts` puts it behind `executeSync`, and the
+    real migrations and repositories run under `npm test`.
+  - **The tests prove:**
+    - a Phase 1 catalog upgrades with every row and BLOB byte intact;
+    - a migration that fails part-way leaves the database at version 1;
+    - each `negative_shots` reader includes negatives.
+  - **Files those tests load** use `.ts` import extensions, as `src/domain/` does, because Node cannot
+    resolve extensionless imports.
+- **Repositories (P2-2).** Every multi-statement write is one transaction.
+  - **Photos are written first, rows last.** Files are deleted only after COMMIT: a replaced
+    correction, a purged product or a deleted negative.
+  - **A kill between COMMIT and a file delete** leaves orphans for the launch sweep, never a row
+    without its JPEG.
+  - **Missing or trashed product:** `updatePrice` and `insertCorrectionShot` throw and write nothing,
+    because a price or shot must never land on another product.
+  - **Rebuild or append:**
+    - *Rebuild* the index when a write removes vectors: delete, restore, a replaced correction, or a
+      deleted negative (E-4).
+    - *Append* when it only adds them.
 
 ### Invariants
 
@@ -256,16 +298,25 @@ CREATE INDEX idx_shots_product     ON product_shots(product_id);
    JPEG. This is why the JPEGs are never discarded (TR-24).
 3. **Photo paths are relative.** iOS rewrites the container path on every app update; absolute paths
    break silently after an upgrade (TR-43).
-4. **One product owns 3–5 vectors**, one per shot. Matching aggregates shots → products.
+4. **One product owns 3–5 enrollment vectors plus up to 3 correction vectors**, one per shot
+   (`TR-42`, ADR-019). The oldest correction is replaced first, and enrollment shots never are.
+   Matching aggregates shots → products. Top-10 search stays exact while a product has ≤ 9 shots.
 5. **Enrollment is one transaction.** A half-written product with vectors but no metadata will
    produce confident matches against a nonexistent item (TR-45).
-6. **The in-memory search matrix is derived, never authoritative** (ADR-014). It is rebuilt from
-   `product_shots` at startup and extended only after an enrollment commits. It leaves out
-   soft-deleted products and vectors from any other `model_id`.
-7. **Orphan photos are swept only at launch** (P1-5). A photo in `photos/` that no `product_shots`
-   row references (soft-deleted products count as referencing theirs) is deleted by `openCatalog()`,
-   before any enrollment draft can exist. Sweeping at any other time would delete a draft's photos,
-   which have no row until COMMIT. If the reference query fails, nothing is deleted.
+6. **The in-memory search matrix is derived, never authoritative** (ADR-014).
+   - **Built** at startup from `product_shots` and `negative_shots`. Each negative is a flagged
+     one-shot row.
+   - **Extended** only after a write commits.
+   - **Rebuilt** whenever a write removes vectors.
+   - **Leaves out** soft-deleted products and vectors from any other `model_id`.
+7. **Orphan photos are swept only at launch** (P1-5). `openCatalog()` deletes any photo in `photos/`
+   that no row references, before any draft can exist.
+   - **What counts as referenced:** `product_shots`, soft-deleted products' shots, and
+     `negative_shots`. **Leaving a table out of `referencedPhotoPaths` deletes every one of its JPEGs**
+     (ADR-017), and a test guards this.
+   - **Why only at launch:** at any other time the sweep would delete a draft's photos, which have no
+     row until COMMIT.
+   - **If the reference query fails,** nothing is deleted.
 
 ---
 
@@ -312,8 +363,13 @@ The pseudocode above is literal, with these edge cases pinned down by tests:
   accepted at 5 products, which is SR-44's first-run size. The mitigation lives in the UI and the
   catalog, not in this function (ADR-013, `SR-13`, `SR-14`).
 - **`LIMIT 10` is safe (TR-30).** The golden replay checks, for all 196 Phase 0 frames, that
-  top-1 and top-2 from the 10 nearest shots equal the full brute-force ranking. That holds while
-  a product has ≤ 6 shots; `TR-42` caps it at 5.
+  top-1 and top-2 from the 10 nearest shots equal the full brute-force ranking.
+  - **The bound:** this holds while a product has ≤ 9 shots, because only top-1's own shots can
+    rank above the second product's best shot.
+  - **The cap:** `TR-42` allows 8 since ADR-019.
+  - **Negatives** are one-shot rows, so any number of them keeps the bound.
+  - **The proof:** `knn.test.ts` checks it at 9 shots with up to 200 negatives, and shows that a
+    10th shot breaks it.
 - **Stability.**
   - **What agrees:** ACCEPTs agree on the product. DISAMBIGUATEs agree on the **unordered** pair,
     because near-tied products swap order frame to frame, which is the flicker this gate stops.
@@ -348,6 +404,75 @@ The pseudocode above is literal, with these edge cases pinned down by tests:
   (0.237 / 0.254) would read Sure, Argentina 260g's (0.160) Sure, and the size pair Not sure.
 - **Chips.** A tap shows that product's price until the next lock. Nothing is learned from the tap
   yet (`SR-07`, Phase 2).
+
+### Display step — `src/domain/scanDisplay.ts` (P2-1, 2026-09-14; wired into the scanner in P2-3)
+
+Negatives and ambiguity are resolved **per frame, before stability**. Quote or question is decided
+**after the lock**. `match()` is unchanged, so the golden replay stays valid (ADR-017, E-5).
+
+```
+decision = match(knn rows, τ/δ)                                   unchanged (ADR-012)
+frame    = resolveFrame(decision, { negativeIds, ambiguousIds })  per frame     TR-39, SR-10
+locked   = lockedDecision(pushDecision(buffer, frame))            4 of 5        TR-36
+card     = displayFor(locked, liveProductCount, confirm_below)    after lock    SR-13, TR-38
+```
+
+| Frame decision | Condition | Becomes |
+|---|---|---|
+| ACCEPT, or chips | a negative at top-1 or in the pair | UNKNOWN, with no best candidate |
+| UNKNOWN | its best candidate is a negative | UNKNOWN, with no best candidate |
+| ACCEPT, or chips | an ambiguous product involved, no negative | `quickPick` |
+| ACCEPT | a negative is only the runner-up | unchanged: it already counted toward δ |
+
+| Locked | Condition | Card |
+|---|---|---|
+| nothing | — | scanning |
+| ACCEPT | no `confirm_below` row, or live products < `confirm_below` | **confirm** (Yes / No) |
+| ACCEPT | live products ≥ `confirm_below` | quote |
+| DISAMBIGUATE | — | chips |
+| `quickPick` | — | grid |
+| UNKNOWN | — | unknown + Add |
+
+- **A negative outranks ambiguity.** The tindera has already said a negative is not in her list, and
+  UNKNOWN names nothing.
+- **Grid votes share one stability key**, whichever bag ranked first, because clear bags swap places
+  frame to frame.
+- **A negative is its own one-shot "product"** in the index (`negativeIds`). Building the index
+  refuses an id shared by a product and a negative, and a second row for one negative.
+- **Bad input throws.** A NaN product count would make `count < confirm_below` false and quote every
+  price, so `displayFor` refuses it, as `assertThresholds` refuses a NaN τ.
+- **The capture guard** (`correction.ts`): a negative or correction is saved only if the next frame's
+  resolved decision has the same stability key as the rejected lock.
+
+### The scan card as built — `src/features/scanner/` (P2-3, 2026-09-14)
+
+- **Per frame:** `useScanner` runs `resolveFrame` between `match()` and the vote. The repacked set
+  comes from SQLite and is re-read when `catalogVersion` changes. It is held in a ref, so `onVector`
+  keeps its identity and the camera worklet is never rebuilt. The lock log's votes keep the **raw**
+  decision, so a diagnosis still shows what a negative silenced.
+- **The card** is `displayFor(locked, liveProductCount, confirm_below)`.
+  - **Confirm:** the product's first enrollment photo, *"Is this {name}? ₱price"*, confidence bars, and
+    large Yes / No buttons.
+  - **Yes** shows the price only while the same lock holds, as a quote does. It adds no second tap.
+  - **No**, *Wrong?* on a quote, and *Neither* on chips open the reject sheet.
+- **Rejecting pins the card and pauses voting.** `domain/rejection.ts` is a reducer, and
+  `useRejection` performs only what its new stage allows.
+  - **The pin:** the card's stability key, the source, and the product ids, as shown at tap time.
+  - **The pause:** the Scan tab stops feeding votes, and resuming resets the stability window.
+  - **Late events are ignored:** a capture after Cancel, or a second tap. Cancel is refused mid-write,
+    so the result is always shown.
+- ***Not in my list*** reuses enrollment's capture channel. The worklet cuts the next frame, and an
+  owner ref routes the capture to the reject flow.
+  - **The guard:** `classify` puts the frame through the scanner's own KNN → policy → `resolveFrame`
+    path, without voting. A mismatch saves nothing and says so.
+  - **On a match:** JPEG → embed → `insertNegativeShot` → `appendToIndex`, in that order. The index
+    grows only after the INSERT, and a failed INSERT deletes the JPEG. The worklet does no new
+    per-frame work (`NFR-07`).
+- **Torch (`SR-11`):** VisionCamera's declarative `torchMode`, shown only when `device.hasTorch`, and
+  off whenever the tab loses focus.
+- **The interaction log:** Yes, No, *Not in my list* saved, refused or failed, chip picks and the
+  torch, each with a time. Held in memory, shown in the gate panel, never persisted.
+- **`quickPick` is interim:** chips for the products the frame involved, until P2-5's grid.
 
 ### Threshold calibration
 
@@ -402,7 +527,8 @@ store measurement.
   hidden items gives 4.7% at 5 products, with 79.1% correct accepts. The number is flattered: the
   bank and the test frames share one counter.
 - **Adopted instead:** confirm mode below `confirm_below` products, plus negatives the tindera
-  marks (`SR-13`, `SR-14`, `TR-38`, `TR-39`). Neither is built yet.
+  marks (`SR-13`, `SR-14`, `TR-38`, `TR-39`). The domain rules are built (P2-1, *Display step*
+  above). The schema, card and capture flow are not.
 
 ---
 
@@ -437,10 +563,10 @@ BantayNiMama/
 │   │   └── ProductsScreen.tsx ← plain list from SQLite; language switch; gate check
 │   ├── domain/                ← PURE TS. No I/O. Unit-tested.
 │   │   ├── match.ts           ← τ/δ policy
-│   │   ├── stability.ts       ← ring buffer
+│   │   ├── stability.ts       ← 4-of-5 vote over resolved frames (TR-36)
 │   │   ├── money.ts           ← centavo arithmetic
 │   │   ├── vector.ts          ← dot, L2-normalize, BLOB codec
-│   │   ├── knn.ts             ← brute-force top-10 over the in-memory matrix (TR-30, ADR-014)
+│   │   ├── knn.ts             ← brute-force top-10 over the in-memory matrix; negative flag per row (TR-30, TR-39, ADR-014)
 │   │   ├── appMeta.ts         ← strict app_meta parsing (TR-35, TR-38)
 │   │   ├── migrations.ts      ← migration planning (TR-44)
 │   │   ├── photoPath.ts       ← relative photo paths only (TR-43)
@@ -451,6 +577,13 @@ BantayNiMama/
 │   │   ├── confidence.ts      ← Sure / Likely / Not sure from δ (SR-03)
 │   │   ├── language.ts        ← saved ui_language, else phone locale (fil / tl), else en (SR-42)
 │   │   ├── gateCheck.ts       ← Phase 1 gate: persistence problems, self-match report (PHASE_1_PLAN §4)
+│   │   ├── lockLog.ts         ← every lock change with its voting frames; segments at Unknown
+│   │   ├── scanDisplay.ts     ← per frame: negative → Unknown, ambiguous → grid; after lock: quote or confirm (P2-1)
+│   │   ├── correction.ts      ← ≤ 3 correction shots, oldest replaced; the capture guard (SR-07, SR-14)
+│   │   ├── priceEdit.ts       ← typed prices → centavos, shared with enrollment; no-op edits write nothing (SR-06)
+│   │   ├── trash.ts           ← 10 s undo, 30-day purge (SR-32)
+│   │   ├── firstRun.ts        ← welcome / "n of 5" banner / complete (SR-44)
+│   │   ├── timeToLock.ts      ← NFR-04 proxy episodes, median / p90, calibration bias
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
@@ -464,14 +597,19 @@ BantayNiMama/
 │   │   ├── migrate.ts         ← applies them, one transaction per version
 │   │   ├── transaction.ts     ← synchronous BEGIN IMMEDIATE / COMMIT / ROLLBACK
 │   │   ├── catalog.ts         ← openCatalog(): migrate, model_id check, orphan sweep, index — once at launch
-│   │   ├── products.ts        ← insertProductWithShots (TR-45), getProduct, catalogCounts
-│   │   ├── shots.ts           ← loadVectorIndex from embedding BLOBs (ADR-014); referencedPhotoPaths
+│   │   ├── products.ts        ← insertProductWithShots (TR-45), updatePrice + price_history, trash / restore / purge, setAmbiguous, catalogCounts
+│   │   ├── shots.ts           ← loadVectorIndex incl. negatives (ADR-014); referencedPhotoPaths (both tables); insertCorrectionShot
+│   │   ├── negatives.ts       ← negative_shots: insert, list, delete (SR-14, TR-39)
+│   │   ├── schema.test.ts · repositories.test.ts ← real SQL under node:sqlite (P2-2)
+│   │   ├── nodeSqlite.testing.ts ← tests only: node:sqlite behind executeSync; excluded from the app build
 │   │   ├── photos.ts          ← reference JPEG store in documentDirectory/photos/ (TR-42, TR-43)
 │   │   └── meta.ts · ids.ts   ← read app_meta · UUID v4
 │   ├── features/
 │   │   ├── scanner/           ← P1-6
-│   │   │   ├── useScanner.ts  ← knn → match → stability; renders only on lock change; timings in refs
-│   │   │   └── ScanOverlay.tsx ← LOCK / CHIPS / Unknown + Add (SR-02–SR-05, SR-09)
+│   │   │   ├── useScanner.ts  ← knn → match → resolveFrame → stability; classify for the capture guard; renders only on lock change
+│   │   │   ├── ScanOverlay.tsx ← confirm / quote / chips / interim quick pick / Unknown (SR-02–SR-05, SR-09, SR-13)
+│   │   │   ├── useRejection.ts ← No / Wrong? / Neither → Not in my list: guard, JPEG, INSERT, index (SR-14)
+│   │   │   └── RejectPanel.tsx ← the reject sheet (P2-4 adds likely products and search)
 │   │   ├── enrollment/        ← P1-5
 │   │   │   ├── draft.ts       ← capture → JPEG → vector; one-transaction commit; rollback deletes photos
 │   │   │   ├── useEnrollment.ts ← draft state; extends the index after COMMIT (SR-24)

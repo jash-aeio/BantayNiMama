@@ -52,4 +52,13 @@ describe('parseAppMeta (TR-35, TR-38)', () => {
   test('refuses a non-integer confirm_below', () => {
     assert.throws(() => parseAppMeta({ ...seeded, confirm_below: '12.5' }), /whole number/);
   });
+
+  test('no confirm_below row means confirm every ACCEPT; a malformed row is refused, as τ is (ADR-017)', () => {
+    assert.equal(parseAppMeta(seeded).confirmBelow, null);
+    for (const confirm_below of ['', ' 12', '12 ', '-1', '1e1', 'NaN', '0x10']) {
+      assert.throws(() => parseAppMeta({ ...seeded, confirm_below }), Error, JSON.stringify(confirm_below));
+    }
+    // A written 0 is a deliberate "never ask", which only a Phase 3 calibration may write.
+    assert.equal(parseAppMeta({ ...seeded, confirm_below: '0' }).confirmBelow, 0);
+  });
 });

@@ -1,4 +1,6 @@
+import type { Catalog } from '../../db/catalog';
 import type { PersistenceProblem } from '../../domain/gateCheck.ts';
+import { countInteractions, type Interaction } from '../../domain/interactionLog.ts';
 import { segmentLockLog, type LockEvent } from '../../domain/lockLog.ts';
 import { summarize } from '../../domain/stats.ts';
 import type { StageTimings } from '../../ml/frameEmbedder';
@@ -10,12 +12,26 @@ import type { GateCheckResult } from './runGateCheck';
 // (PHASE_1_PLAN.md §4), not tindera copy, so they are not translated. Record a run from the screen:
 // console output did not reach logcat in the release build on the Infinix (P1-7).
 
+/**
+ * What openCatalog did at this launch. It is the P2-2 device checkpoint's evidence that migration 2
+ * ran on the real catalog ("schema 1 → 2"), and it reads "2 → 2" on every launch after that.
+ */
+export function describeLaunch(c: Catalog): string {
+  return (
+    // ASCII "->": the Infinix's font drew "→" as a stray glyph in this line (P2-2 checkpoint screenshot).
+    `launch · schema ${c.migratedFrom} -> ${c.meta.schemaVersion} · orphan photos removed ${c.orphanPhotosRemoved} · ` +
+    `index ${c.index.size} (negatives ${c.index.negativeIds.size}) · other-model ${c.otherModelShots}`
+  );
+}
+
 export function describeGateCheck(r: GateCheckResult): string[] {
   const s = r.selfMatch;
   const passed = r.problems.length === 0 && s.passed;
   return [
     `${passed ? 'PASS' : 'FAIL'} — PHASE_1_PLAN §4 steps 3 and 4`,
-    `step 3 · products ${r.counts.products} · shots ${r.counts.shots} · index ${r.indexSize} · other-model ${r.otherModelShots}`,
+    `step 3 · products ${r.counts.products} · shots ${r.counts.shots} (corrections ${r.counts.correctionShots}) · ` +
+      `negatives ${r.counts.negatives} · index ${r.indexSize} (negatives ${r.indexNegatives}) · other-model ${r.otherModelShots} · ` +
+      `trashed products ${r.counts.trashedProducts} (${r.trashedShots} shots)`,
     `step 3 · app_meta schema ${r.meta.schemaVersion} · ${r.meta.modelId} · ${r.meta.embeddingDim}-d · τ ${r.meta.thresholds.tau} · δ ${r.meta.thresholds.delta}`,
     `step 3 · photo rows ${r.photoRows} · missing ${r.missingPhotos.length}`,
     ...r.problems.map((p) => `step 3 PROBLEM · ${describeProblem(p)}`),
@@ -37,10 +53,21 @@ function describeProblem(p: PersistenceProblem): string {
     case 'modelId':
       return `model_id is ${p.found}, expected ${p.expected}`;
     case 'indexMismatch':
-      return `index ${p.indexSize} + other-model ${p.otherModelShots} ≠ ${p.shots} shot rows`;
+      return `index ${p.indexSize} + other-model ${p.otherModelShots} + trashed ${p.trashedShots} ≠ ${p.rows} vector rows`;
     case 'missingPhotos':
       return `missing photos: ${p.paths.slice(0, 3).join(', ')}${p.paths.length > 3 ? ` (+${p.paths.length - 3} more)` : ''}`;
   }
+}
+
+/** The interaction log as counts per kind (PHASE_2_PLAN §4), then the most recent taps with names. */
+export function describeInteractions(log: readonly Interaction[], nameOf: (id: string) => string, limit = 20): string[] {
+  if (log.length === 0) return ['interactions: none yet (lost on relaunch)'];
+  return [
+    `interactions n=${log.length}: ${countInteractions(log)
+      .map(([kind, n]) => `${kind} ${n}`)
+      .join(' · ')}`,
+    ...log.slice(-limit).map((e) => `${clock(e.atMs)} ${e.kind}${e.productIds.length > 0 ? ` · ${e.productIds.map(nameOf).join(' | ')}` : ''}`),
+  ];
 }
 
 /** Worklet per-stage median / p90 (P1-3). */
@@ -103,7 +130,9 @@ export function describeLockLog(events: readonly LockEvent[], nameOf: (id: strin
         const times = item.count > 1 ? ` ×${item.count}` : '';
         return item.kind === 'accept'
           ? `LOCK ${nameOf(item.productIds[0] ?? '')}${times}`
-          : `CHIPS ${item.productIds.map(nameOf).join(' | ')}${times}`;
+          : item.kind === 'quickPick'
+            ? `GRID ${item.productIds.map(nameOf).join(' | ')}${times}`
+            : `CHIPS ${item.productIds.map(nameOf).join(' | ')}${times}`;
       });
       return `#${i + 1} ${clock(segment.startMs)} · ${parts.join(' · ')}`;
     }),
@@ -126,7 +155,9 @@ export function describeLockDetails(events: readonly LockEvent[], nameOf: (id: s
           ? `LOCK ${shortName(nameOf(e.productIds[0] ?? ''))}`
           : e.kind === 'disambiguate'
             ? `CHIPS ${e.productIds.map((id) => shortName(nameOf(id))).join(' | ')}`
-            : 'UNKNOWN';
+            : e.kind === 'quickPick'
+              ? `GRID ${e.productIds.map((id) => shortName(nameOf(id))).join(' | ')}`
+              : 'UNKNOWN';
       const votes = e.votes
         .map((v) => {
           const who = v.topId === null ? '—' : shortName(nameOf(v.topId));

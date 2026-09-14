@@ -6,9 +6,10 @@ import { persistenceProblems, selfMatchReport, type PersistenceInput } from './g
 const identity = { schemaVersion: 1, modelId: 'mobilenet_v3_large_embedder_v1', embeddingDim: 1280 };
 
 const healthy = (overrides: Partial<PersistenceInput> = {}): PersistenceInput => ({
-  counts: { products: 20, shots: 100 },
+  counts: { products: 20, shots: 100, negatives: 0 },
   indexSize: 100,
   otherModelShots: 0,
+  trashedShots: 0,
   meta: identity,
   expected: identity,
   missingPhotos: [],
@@ -21,7 +22,9 @@ describe('persistenceProblems (PHASE_1_PLAN §4 step 3)', () => {
   });
 
   test('an empty catalog fails: a check over nothing proves nothing', () => {
-    assert.deepEqual(persistenceProblems(healthy({ counts: { products: 0, shots: 0 }, indexSize: 0 })), [{ kind: 'emptyCatalog' }]);
+    assert.deepEqual(persistenceProblems(healthy({ counts: { products: 0, shots: 0, negatives: 0 }, indexSize: 0 })), [
+      { kind: 'emptyCatalog' },
+    ]);
   });
 
   test('reports app_meta that does not match the build', () => {
@@ -36,12 +39,20 @@ describe('persistenceProblems (PHASE_1_PLAN §4 step 3)', () => {
 
   test('a shot row that is neither searchable nor another model\'s was lost', () => {
     assert.deepEqual(persistenceProblems(healthy({ indexSize: 99 })), [
-      { kind: 'indexMismatch', indexSize: 99, otherModelShots: 0, shots: 100 },
+      { kind: 'indexMismatch', indexSize: 99, otherModelShots: 0, trashedShots: 0, rows: 100 },
     ]);
   });
 
   test('other-model shots account for rows left out of the index (TR-23)', () => {
     assert.deepEqual(persistenceProblems(healthy({ indexSize: 95, otherModelShots: 5 })), []);
+  });
+
+  test('negatives are rows the index must hold; trashed products\' shots are rows it leaves out (TR-39, SR-32)', () => {
+    const withNegatives = { products: 20, shots: 100, negatives: 7 };
+    assert.deepEqual(persistenceProblems(healthy({ counts: withNegatives, indexSize: 102, trashedShots: 5 })), []);
+    assert.deepEqual(persistenceProblems(healthy({ counts: withNegatives, indexSize: 100 })), [
+      { kind: 'indexMismatch', indexSize: 100, otherModelShots: 0, trashedShots: 0, rows: 107 },
+    ]);
   });
 
   test('lists every missing photo (TR-43)', () => {

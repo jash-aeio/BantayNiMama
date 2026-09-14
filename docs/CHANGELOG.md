@@ -675,6 +675,149 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - At 5 products, 8.9% of false accepts are same-brand siblings.
   - Also measures three candidate fixes: a lone-candidate floor, τ scaled to catalog size, and a
     distractor bank. Results in ADR-013.
+- `docs/PHASE_2_PLAN.md` — Phase 2 (UI / UX) plan, approved 2026-09-14. **Nothing is built yet.**
+  - **Contents:** readiness, steps P2-1 to P2-9, deferrals, risks, and the measurements Phase 2
+    must record.
+  - **Gate:** two runs on the Infinix in airplane mode.
+    - *Upgrade* on the 20-product catalog: migration 1 → 2, edit / correct / delete from the scan
+      card, time-to-lock over 60 episodes.
+    - *Fresh install* on 5 products: first run, confirm mode, *Not in my list*, quick pick.
+    - Pass on **zero confident wrong prices**. `NFR-04` is recorded but does not block.
+  - **Decisions settled with the operator, all as recommended:**
+    - **D-1:** until Phase 3 writes `confirm_below`, every ACCEPT is a question (`SR-13`, `TR-38`,
+      ADR-017).
+    - **D-2:** ambiguous products keep their shots, and a frame that resolves to one opens the
+      quick-pick grid instead of naming it (`SR-10`, ADR-018).
+    - **D-3:** a correction saves up to 3 extra shots per product, oldest replaced first (`TR-42`,
+      ADR-019).
+    - **D-4:** correcting takes two taps, *Wrong?* then the right product (`SR-07`, ADR-019).
+  - **Engineering choices adopted:**
+    - Negatives in their own `negative_shots` table with no name column (`TR-39`, ADR-017).
+    - Negatives and ambiguity resolved per frame, with `match.ts` unchanged.
+    - Delete and restore rebuild the index from SQLite.
+    - Reanimated and zustand deferred again (`TR-15`, `TR-18`, ADR-020).
+- ADR-017 to ADR-020 in `docs/DECISIONS.md`.
+- **P2-1: the Phase 2 domain layer** (2026-09-14, branch `feat/phase-2-ui`). Pure and unit-tested.
+  Tests went from 147 to **210**, typecheck is clean, and the Phase 0 golden replay is unchanged
+  because `match.ts` is untouched (E-5). **Nothing is wired into the app yet, and nothing has run on a
+  device.**
+  - `scanDisplay.ts` (`SR-10`, `SR-13`, `TR-38`, `TR-39`, ADR-017, ADR-018):
+    - `resolveFrame` runs per frame, before stability. A negative at top-1 or in a chip pair becomes
+      UNKNOWN, carrying no negative id. An ambiguous product becomes `quickPick`. A negative outranks
+      ambiguity.
+    - `displayFor` runs after the lock. With no `confirm_below` row, every ACCEPT is `confirm`. A bad
+      product count throws instead of quoting.
+  - `stability.ts` votes on resolved frames, and grid votes agree whichever bag ranked first.
+    `lockLog.ts` records grid locks, and the gate readout labels them GRID.
+  - `knn.ts` (`TR-30`, `TR-39`, ADR-019):
+    - A negative flag per row, and `negativeIds` on the index. The index refuses an id shared by a
+      product and a negative, and a second row for one negative.
+    - A new test shows top-1 and top-2 from the 10 nearest shots equal the full ranking at 9 shots
+      per product with 0, 5 or 200 negatives. A second test shows a 10th shot breaks it.
+  - `correction.ts` (`SR-07`, `SR-14`, `TR-42`): `correctionsToReplace` drops the oldest correction
+    once a product holds 3, and never an enrollment or teach shot. `captureStillMatches` is the
+    capture guard.
+  - `priceEdit.ts` (`SR-06`, `TR-41`): `parsePrices` is now shared with enrollment, which behaves
+    the same. `planPriceEdit` writes nothing for an edit that lands on the stored prices.
+  - `trash.ts` (`SR-32`): a 10 s undo and a 30-day purge. A clock set backwards never purges.
+    **Known limit:** a clock set forwards purges early, and offline there is no trusted time to
+    check against.
+  - `firstRun.ts` (`SR-44`): welcome, the *n of 5* banner, or complete, from the product count and
+    a saved `first_run_dismissed`.
+  - `timeToLock.ts` (`NFR-04`):
+    - Builds lock episodes from the frame log and the lock log. Grid locks count as results.
+    - Episodes whose t_seen is lost, or whose clocks disagree, are counted and left out, never
+      guessed.
+    - Reports the nearest-rank median and p90, plus a p90 adjusted by the calibration bias.
+  - `appMeta.ts`: `confirm_below` tests. No row means confirm everything, and a malformed row is
+    refused. A written `0` is accepted as a deliberate value.
+- **P2-2: schema v2 and its repositories** (2026-09-14). Tests went from 210 to **231** and
+  typecheck is clean. **Device checkpoint PASS on the real 20-product catalog.**
+  - **Migration 2** (`TR-44`, `TR-39`, ADR-017, ADR-019):
+    - Adds `negative_shots` (no name or price column) and `product_shots.source`, which defaults to
+      `'enroll'`. The CHECK lists are literals.
+    - No `confirm_below` row.
+  - **Repositories**, each multi-statement write in one transaction:
+    - `updatePrice` (`SR-06`): a `price_history` row holds the prices in force **before** the change.
+    - `softDeleteProduct`, `restoreProduct`, `listTrash`, `purgeProducts` (`SR-08`, `SR-32`).
+    - `setAmbiguous` (`SR-10`).
+    - `insertCorrectionShot` (`SR-07`, D-3): the replaced correction is removed in the same
+      transaction.
+    - `insertNegativeShot`, `listNegatives`, `deleteNegative` (`SR-14`).
+    - `listPriceHistory`.
+    - Shot validation is shared by both vector tables (`assertNewShot`).
+  - **The three readers of `negative_shots` (E-1), each tested:**
+    - `loadVectorIndex` flags negatives;
+    - `referencedPhotoPaths` includes them, so the orphan sweep keeps their JPEGs;
+    - the gate check counts negatives, corrections and trashed shots, and self-matches negatives.
+  - **Tests against real SQLite:**
+    - `node:sqlite` is built into Node, so there is no new dependency (`TR-51`).
+    - `src/db/nodeSqlite.testing.ts` adapts it to `executeSync`. `npm test` now also runs
+      `src/db/**/*.test.ts`, and `src/db` files use `.ts` import extensions.
+    - The migration test shows a Phase 1 catalog upgrades with every row and BLOB byte intact, and
+      that a failed migration leaves version 1.
+  - **Gate panel:** a launch line (schema from → to, orphan sweep, index and its negatives), because
+    release builds do not log to logcat.
+  - **Backup before the migration** (operator's call; amends `PHASE_2_PLAN.md` §2):
+    - **How:** the Phase 0 debug APK was installed over the release app without launching it.
+      `bantay.db` and `photos/` were copied off with `run-as`.
+    - **Where:** `C:\BantayNiMamaBackups\gate-catalog-v1`.
+    - **Checks:** 101/101 SHA-256 hashes match the phone. The copy passes `integrity_check`, at
+      schema 1, with 20 products, 100 shots and 100 photos.
+    - Google Play Protect showed a dialog on both installs, and each needed a tap on the phone.
+  - **Rehearsal on a copy of that backup,** through the app's own code under `node:sqlite` on the
+    laptop:
+    - migration 1 → 2 in 3.4 ms, laptop time, not a device figure;
+    - rows byte-identical;
+    - index 100, sweep would delete 0, 0 gate problems.
+  - **Device checkpoint** (Infinix X6823, release APK, 14:15, gate A1 taken early):
+    - **Launch:** `schema 1 → 2 · orphan photos removed 0 · index 100 (negatives 0) · other-model 0`.
+    - **Gate check PASS:** products 20, shots 100, corrections 0, negatives 0, index 100,
+      other-model 0, trashed 0; schema 2, 1280-d, τ 0.46, δ 0.075.
+    - **Photos:** 100 rows, 0 missing.
+    - **Self-match:** 100/100, own score min 1.000000.
+    - **Nearest other shot:** median 0.7512, p90 0.8254, max 0.8954, identical to Phase 1 run 3.
+    - **Time:** 13.6 s.
+    - Not in airplane mode; the checkpoint makes no network claim.
+- **P2-3: the scan card — confirm mode, *Not in my list*, torch** (2026-09-14; `SR-11`, `SR-13`,
+  `SR-14`, `TR-38`, `TR-39`). Tests went from 231 to **245** and typecheck is clean. **Verified on the
+  Infinix X6823 (release APK) on the 20-product gate catalog.** That amends P2-3's done-when, by the
+  operator's call: confirm mode ignores catalog size until Phase 3 (D-1).
+  - **Built:**
+    - **Scanning:** `useScanner` runs `resolveFrame` before the vote. `classify` puts the capture
+      guard's frame through the same path without voting.
+    - **Card states:** `confirm` (first enrollment photo, *"Is this {name}? ₱price"*, confidence bars,
+      Yes / No), `quote` with *Wrong?*, `chips` with *Neither*, an interim `quickPick` until P2-5, and
+      Unknown.
+    - **Rejecting:** `domain/rejection.ts` (a reducer) and `useRejection` pin what the card showed and
+      pause voting. *Not in my list* saves the next frame only if it still resolves to the rejected
+      lock. The write order is JPEG → INSERT → index append.
+    - **Torch:** a toggle, shown only when `device.hasTorch`, and off on blur.
+    - **Interaction log:** `domain/interactionLog.ts`, shown in the gate panel and never persisted.
+    - **Repositories:** `ambiguousProductIds`, `firstEnrollPhotoPath`.
+    - Filipino copy is Claude's draft, for the operator's review before `/phase-gate`.
+  - **On device (14:39–15:12, not in airplane mode):**
+    - **Question card:** 3 Yes taps (Clover Chips, Lucky Me Beef, Piattos), each on a LOCK in the lock
+      log.
+    - **Torch:** it lit, and the button changed state.
+    - **2 negatives saved through the flow:**
+      - one before an app swipe-away (`am_kill … remove task` at 14:54:16), whose taps went with that
+        process;
+      - one logged in full: *Neither* on Pancit Canton Chilimansi | Kalamansi chips → start → saved,
+        all at 14:55:08.
+      - The operator did not name the marked items.
+    - **A negative silences after a relaunch:** the next process launched with `index 101
+      (negatives 1)`. Frames voting chips with that negative locked **UNKNOWN** 3 times
+      (14:54:22–14:54:43), with no name or score carried.
+    - **Force-stop relaunch:** `index 102 (negatives 2)`. **Gate check PASS:** 20 products, 100 shots,
+      2 negatives, photo rows 102, 0 missing, self-match **102/102**, own min 1.000000, 13.6 s.
+    - **Neighbours still lock with both negatives loaded:** Kalamansi LOCK ×4 (0.740–0.812),
+      Chilimansi LOCK (0.818), Lucky Me Beef LOCK ×3 (0.700–0.840). No vote for them hit a negative.
+  - **Not verified on device:** the capture guard's refusal. No mismatch was logged; it is proven
+    only by unit tests.
+  - **Incidental:** in one 40-frame reading at 14:47, crop+resize was **35.8 ms median**, the
+    P1-3 level. Other readings that session were 43–60 ms. It adds to the unconfirmed heat
+    explanation (`NFR-07`).
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

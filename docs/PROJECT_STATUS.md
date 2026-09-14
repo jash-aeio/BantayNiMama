@@ -13,13 +13,13 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 closed: gate PASS, verified with `/phase-gate` 2026-09-14** (branch `feat/phase-1-data-path`). Gate run 3, Infinix X6823, release APK, airplane mode: 20 products / 100 shots survived a force-stop, 0 missing photos, self-match 100/100, and all 20 locked or chipped with **0 wrong locks** in the full lock log. It followed run 2's failure and ADR-016 (lock quorum 3 → 4 of 5). Domain tests **147**, typecheck clean. |
-| **Next action** | 1. Merge `feat/phase-1-data-path` into `main` (PR).<br>2. Write the Phase 2 plan (UI / UX) before building. It must cover confirm mode and store-local negatives (`SR-13`, `SR-14`, ADR-013), edit / correct / delete (`SR-06`–`SR-08`), the quick-pick grid (`SR-10`), first run (`SR-44`), and measuring time-to-lock under 4-of-5 (`NFR-04`). |
+| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1, P2-2 and P2-3 are done** (2026-09-14). The Scan tab asks *"Is this…?"* for every ACCEPT. *Not in my list* saves negatives, which silence their item after a relaunch while the neighbouring products still lock. The gate check **PASSES** with 2 negatives (self-match 102/102). Tests **245**, typecheck clean. **The gate catalog now holds 2 negatives** (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
+| **Next action** | **P2-4** edit / correct / delete from the scan card, with undo (`SR-06`–`SR-08`, `SR-32`): the price editor bound to the tapped product id, *Wrong?* → likely products + search + *Not in my list*, soft delete with a 10 s undo and an index rebuild. **Done when** gate A2–A4 pass on the Infinix. **Carry in:** exercise the capture guard's refusal on device (never seen yet). |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
 | **Known soft spot** | **Un-enrolled products.** At τ/δ, 50 of 105 un-enrolled frames land in *disambiguate* (two wrong chips), so only 49.5% return Unknown (`NFR-03` ≥ 85%, not met). `analyze.mjs`'s 97.1% counts "not auto-accepted". All 3 false accepts are Zonrox bottles → Datu Puti vinegar. |
-| **New risk — small catalogs** | δ rejects un-enrolled items only when an enrolled product is close. Simulated on Phase 0 data, **15.1%** of un-enrolled frames are auto-accepted at 5 products (SR-44's first five), and 9.7% still at 15. Plan (ADR-013): confirm mode + store-local negatives (`SR-13`, `SR-14`), built in Phase 2. **No Phase 1 change** — the gate scans only enrolled items. |
+| **New risk — small catalogs** | δ rejects un-enrolled items only when an enrolled product is close. Simulated on Phase 0 data, **15.1%** of un-enrolled frames are auto-accepted at 5 products (SR-44's first five), and 9.7% still at 15. Plan (ADR-013): confirm mode + store-local negatives (`SR-13`, `SR-14`), built in Phase 2 (P2-3). Until Phase 3 calibrates `confirm_below`, **every ACCEPT is a question** (ADR-017). |
 | **Biggest risk** | Correct accepts are **74.7%** at τ/δ vs `NFR-01` ≥ 90%. Ranking is strong (top-3 100%) but margins are thin, so many correct matches fall to disambiguate. A Phase 3 problem — the Phase 0 gate measures ranking only. |
 
 ---
@@ -30,12 +30,40 @@
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
 | **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | 🔵 In progress — plan not yet written | — |
+| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-3 done (schema v2, confirm mode, negatives on device), P2-4 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
 
 Legend: ⚪ not started · 🔵 in progress · 🟢 passed gate · 🔴 gate failed
+
+---
+
+## Phase 2 checklist
+
+Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. All device steps on the
+**release** APK.
+
+- [x] Plan written; D-1 to D-4 settled, E-1 to E-5 adopted (ADR-017 to ADR-020) *(2026-09-14)*
+- [x] P2-1 Domain — display resolution, `confirm_below`, correction slots, price edit, trash, first run, time-to-lock; golden replay unchanged *(2026-09-14)*
+  - [x] `scanDisplay`, `correction`, `priceEdit`, `trash`, `firstRun` and `timeToLock` added. `knn` gains negatives, `stability` and `lockLog` learn the grid, and enrollment shares `parsePrices`. Tests 147 → 210, typecheck clean, golden replay unchanged.
+  - [x] KNN exactness proven at 9 shots per product with 0, 5 and 200 negatives, and shown to break at 10 shots (ADR-019)
+  - [ ] **Not yet exercised in the app:** nothing calls these until P2-2 to P2-8
+- [x] P2-2 Schema v2 — `negative_shots`, `product_shots.source`; migration tested under `node:sqlite`; device checkpoint on the 20-product catalog *(2026-09-14)*
+  - [x] Migration 2 and the repositories. The three `negative_shots` readers are tested, and the SQL runs under `node:sqlite` in `npm test`. Tests 210 → 231.
+  - [x] Catalog backed up before migrating (operator's call): debug APK + `run-as`, 101/101 SHA-256 match, `integrity_check` ok. A rehearsal on a copy found 0 gate problems.
+  - [x] **Checkpoint on the Infinix, release APK** (14:15): launch `schema 1 → 2`, sweep 0, index 100. **Gate check PASS:** 20 products, 100 shots, 0 missing, self-match 100/100, own min 1.000000, nearest other 0.7512 / 0.8254 / 0.8954, 13.6 s. **Gate A1 met early.**
+- [x] P2-3 Scan card — confirm mode, *Not in my list*, torch (`SR-13`, `SR-14`, `SR-11`) *(2026-09-14; verified on the 20-product catalog, done-when amended)*
+  - [x] Built: confirm / quote / chips / interim quick pick; reject flow as a reducer with the capture guard; torch; interaction log. Tests 231 → 245.
+  - [x] **On the Infinix, release APK:** 3 Yes taps on locks; 2 negatives saved via the flow; after a relaunch, chip votes with a negative locked **UNKNOWN** ×3; after a force-stop, **gate check PASS** (negatives 2, self-match 102/102, 0 missing); Kalamansi, Chilimansi and Lucky Me Beef still **LOCK** with both negatives loaded; torch lit.
+  - [ ] Capture guard's refusal (camera moved → nothing saved) not yet seen on device; unit tests only. The marked items were not named.
+  - [ ] Filipino copy for the card and sheet: operator review before `/phase-gate`
+- [ ] P2-4 Edit / correct / delete from the scan card, with undo (`SR-06`–`SR-08`, `SR-32`)
+- [ ] P2-5 Quick-pick grid (`SR-10`)
+- [ ] P2-6 First run, permission recovery, guided enrollment (`SR-44`, `SR-43`, `SR-20`, `SR-22`, `SR-25`)
+- [ ] P2-7 Directory (`SR-30`–`SR-35`) and the negatives list
+- [ ] P2-8 Time-to-lock measured and calibrated (`NFR-04`)
+- [ ] P2-9 Gate run — §4 parts A and B, then `/phase-gate`
 
 ---
 
@@ -224,6 +252,8 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Frame sharpness, ×1000 (P1-8 diagnosis, `TR-27`) | floor not yet calibrated | n = 300: **p10 0.3 · median 8.6 · p90 20.9**. Wrong-can votes 1.7–12.6, so it **does not separate** them. **Cost 20.9 / 21.3 ms per frame** (n = 40) — Infinix X6823, release APK | 2026-09-14 |
 | **Gate §4 step 5 (P1-8, run 3, full lock log, 4-of-5)** | correct lock or chip for all 20; **zero wrong locks** | **PASS — 20/20** (15 LOCK, 5 chips only), **0 wrong locks** in 145 lock changes (24 LOCK, 26 CHIPS); attribution checked against 63 backup screenshots. Steps 3–4 PASS in the same process after a force-stop — Infinix X6823, release APK, CPU, airplane mode | 2026-09-14 |
 | Reference photo size (`NFR-08`) | ≤ 200 KB per 5-shot product | **17.5 KB median, 17.6 KB max per shot** → ~88 KB per product (one scene); 396 px crop of a 1280×720 frame, JPEG q80 | 2026-09-14 |
+| **Migration 1 → 2 on the real catalog (P2-2, gate A1 early)** | rows survive; Phase 1 gate check still passes | **PASS.** Launch `schema 1 → 2`, orphan sweep 0, index 100 (negatives 0). Gate check: 20 products, 100 shots, 0 corrections, 0 negatives, 0 missing photos, self-match **100/100**, own min **1.000000**; nearest other shot median 0.7512 · p90 0.8254 · max 0.8954, identical to Phase 1 run 3; 13.6 s — Infinix X6823, release APK, CPU. Not in airplane mode. | 2026-09-14 |
+| **Scan card on device (P2-3)** | every ACCEPT a question; a negative reads Unknown after relaunch; neighbours still lock | **Met.** 3 Yes taps on locks (Clover, Lucky Me Beef, Piattos). After a relaunch (launch `negatives 1`), chip votes with the negative locked **UNKNOWN ×3**. After a force-stop (`index 102, negatives 2`): gate check PASS, self-match **102/102**, 0 missing photos. With both negatives loaded: Kalamansi LOCK ×4 (0.740–0.812), Chilimansi LOCK (0.818), Lucky Me Beef LOCK ×3 (0.700–0.840), no vote hitting a negative. **Not seen:** the capture guard's refusal. 20-product gate catalog, not 5 (amended) — Infinix X6823, release APK, CPU, not in airplane mode | 2026-09-14 |
 
 ---
 
@@ -237,6 +267,7 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Q-4 | INT8 accuracy cost | Phase 3 | Phase 3 |
 | Q-5 | `confirm_below` — catalog size at which confirm mode ends (`TR-38`, ADR-013) | Phase 3 store data | Phase 3 |
 | D-1–D-4 | ~~Phase 1 gate wording, test runner, golden fixture, Filipino copy~~ **Settled** — `PHASE_1_PLAN.md` §3, ADR-012 | Operator | Resolved 2026-09-14 |
+| D-1–D-4 (Phase 2) | ~~`confirm_below` default, quick-pick design, what a correction teaches, `SR-07` taps~~ **Settled**, all as recommended — `PHASE_2_PLAN.md` §3, ADR-017 to ADR-020 | Operator | Resolved 2026-09-14 |
 
 ---
 

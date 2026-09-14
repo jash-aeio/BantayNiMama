@@ -12,6 +12,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { openCatalog, type Catalog } from '../db/catalog';
 import { readMetaValue, writeMetaValue } from '../db/meta';
+import type { Interaction } from '../domain/interactionLog.ts';
 import type { VectorIndex } from '../domain/knn.ts';
 import { resolveLanguage, UI_LANGUAGE_META_KEY, type Language } from '../domain/language.ts';
 import type { LockEvent } from '../domain/lockLog.ts';
@@ -80,7 +81,8 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
   const scanTimings = useRef<readonly ScanTiming[]>([]);
   const enrollmentMeasurements = useRef<readonly ShotMeasurement[]>([]);
   const lockLog = useRef<readonly LockEvent[]>([]);
-  const diagnostics = useMemo(() => ({ workletTimings, scanTimings, enrollmentMeasurements, lockLog }), []);
+  const interactionLog = useRef<readonly Interaction[]>([]);
+  const diagnostics = useMemo(() => ({ workletTimings, scanTimings, enrollmentMeasurements, lockLog, interactionLog }), []);
 
   const [language, setLanguageState] = useState(initialLanguage);
   const setLanguage = useCallback(
