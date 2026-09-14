@@ -1,7 +1,7 @@
 # Phase 1 Plan — Proof of Concept, Real Data Path
 
 > **Status:** Approved 2026-09-14 — decisions D-1 to D-4 settled (§3) · **Written:** 2026-09-14 ·
-> **In progress:** P1-1 to P1-4 done 2026-09-14; P1-5 code written, device check pending. Progress lives in
+> **In progress:** P1-1 to P1-5 done 2026-09-14; P1-6 next. Progress lives in
 > [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Where a device result changed this plan, the step carries
 > an *Amended* note, and the original text is kept.
 >
@@ -170,7 +170,12 @@ adopted until its vectors are checked against CPU's.
 
 ### P1-5 · Enrollment, minimal
 
-> **Amended 2026-09-14 (code written; device check pending).**
+> **Done 2026-09-14 on the Infinix, release APK.** 3 products were enrolled, the app relaunched,
+> then each was scanned. Reno and Argentina 260g locked correctly. The 260g / 100g size pair gave
+> chips, and there were zero wrong locks. The duplicate warning fired on the second Argentina.
+> Frame-vs-JPEG agreement on real products is still owed before P1-8.
+>
+> **Amended 2026-09-14.**
 > - **`SR-24`:** met by extending the in-memory index after COMMIT. ADR-014 means the scanner no
 >   longer queries SQLite per frame, so the last bullet's "free" reasoning no longer applies.
 > - **Stored vectors:** they come from the saved JPEG, not the live frame. That is the path the

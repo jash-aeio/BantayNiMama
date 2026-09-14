@@ -143,7 +143,8 @@ the live one does not.
   than upscaled to 512: 17.5 KB median per shot, ~88 KB per 5-shot product against `NFR-08`'s
   200 KB.
 
-**As implemented — `src/features/enrollment/` (P1-5, 2026-09-14; not yet verified on device).**
+**As implemented — `src/features/enrollment/` (P1-5, verified on the Infinix 2026-09-14: enroll
+→ relaunch → scan locked the new products, and the size pair gave chips).**
 
 - **Shot ids are chosen at capture.** The JPEG is written as `photos/<shot id>.jpg` straight away.
   `insertProductWithShots` stores that same id and refuses any other path, so a row can never point

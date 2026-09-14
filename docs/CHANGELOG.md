@@ -352,8 +352,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       typecheck nor the Node tests could see it.
     - **Fix:** helpers now sit above the worklets that call them, and the rule is recorded in
       `ARCHITECTURE.md` §2 and `CLAUDE.md`.
-- **P1-5 — enrollment** (2026-09-14, **code only; not yet verified on device**). Domain tests
-  93 → **107**; typecheck clean.
+- **P1-5 — enrollment** (2026-09-14, **verified on device**). Domain tests 93 → **107**;
+  typecheck clean.
   - `src/domain/enrollment.ts`:
     - `parseEnrollmentForm` covers `SR-21`. Name and per-piece price are required, and every
       error is returned at once. Prices go through `parsePesos`, never a float (`TR-41`). A zero
@@ -403,6 +403,26 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - **Scan** — a lock readout (`knn` → `match` → `stability`) with top 3 and per-frame search
       time. It lets P1-5's "enroll → scan → locks" be checked before P1-6.
     - An `en` / `fil` switch.
+  - **Measured on device** — Infinix X6823, release APK, CPU, 2026-09-14:
+    - Enrolled Reno Liver Spread, Argentina Corned Beef 260g and Argentina Corned Beef 100g, 5 shots
+      each. When the second Argentina was saved, the duplicate warning fired and "Save anyway" was
+      used (`SR-23`).
+    - Relaunched after enrolling: 3 products / 15 shots, index 15, orphan sweep 0 (`TR-45`
+      persistence).
+    - Scanned in order Reno → 260g → 100g, 19 screenshots 5 s apart. Frames were matched to
+      products by that order (operator-reported):
+      - **Reno: LOCK** ₱20.00, score 0.750 / 0.746, margin 0.237 / 0.254.
+      - **260g: LOCK** ₱35.00, score 0.881, margin 0.160. Then **CHIPS** 260g | 100g, margins
+        0.042 / 0.021 / 0.012. The frame-level top-1 flipped between the two sizes, and the
+        stability gate held it as chips.
+      - **100g: CHIPS** only (0.821 vs 0.805). It never locked, as expected for a size-only pair
+        (`L-02`).
+      - Empty and in-between frames: UNKNOWN (best ≤ 0.37).
+      - **Zero wrong locks.** A new product locked with no restart (`SR-24`).
+    - KNN + policy + stability read **1.4–4.3 ms** per frame at 15 shots. This is a spot reading
+      from the screen, not a timed run; P1-6 times it.
+    - **Not recorded:** frame-vs-JPEG agreement on real products. The readout lasts one session
+      and was lost to the relaunch; it is owed before P1-8.
 - `scripts/small-catalog.mjs` — simulates small catalogs on the Phase 0 dataset (2026-09-14). It
   enrolls a random N of the 25 products and scores everything else as un-enrolled, 500 catalogs
   per size, per frame, at τ 0.46 / δ 0.075. Deterministic.
