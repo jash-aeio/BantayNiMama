@@ -818,6 +818,12 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **Incidental:** in one 40-frame reading at 14:47, crop+resize was **35.8 ms median**, the
     P1-3 level. Other readings that session were 43–60 ms. It adds to the unconfirmed heat
     explanation (`NFR-07`).
+- ADR-021 in `docs/DECISIONS.md`: a `price_history` row holds the prices it replaced (`SR-06`,
+  `SR-31`). This records the P2-2 choice so a later edit does not silently flip its meaning.
+- `ARCHITECTURE.md` §8 gains the P2-3 device readings (Infinix X6823, release APK, CPU):
+  - **KNN at 102 rows:** median 8.94 ms, p90 12.30 (n = 60).
+  - **Policy + stability, now including `resolveFrame`:** 0.09 / 0.12 ms (n = 60).
+  - **Crop + resize, four readings in one session** (n = 40 each): 35.8 up to 59.7 ms median.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

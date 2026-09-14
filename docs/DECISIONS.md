@@ -618,3 +618,36 @@ had nowhere to go. In Phase 1 a chip tap shows a price and teaches nothing.
 - `TR-15` and `TR-18` are marked deferred, not dropped.
 - Card animation, if wanted, uses React Native's built-in `Animated` with the native driver. That
   adds no dependency.
+
+---
+
+## ADR-021 — A `price_history` row holds the prices it replaced
+
+**Status:** Accepted · 2026-09-14 · Refines `SR-06`, `SR-31`
+
+**Context.** Schema v1 created `price_history (product_id, price_piece, price_pack, changed_at)`
+without saying whose prices a row holds. P2-2 had to decide when it built `updatePrice`:
+
+- **The Phase 1 products have no history.** The 20 gate products were enrolled before any history
+  was written, and enrollment writes no row.
+- **The audit is the only safeguard against price edits.** Anyone holding the phone can change a
+  price (`PHASE_2_PLAN.md` §8), so the history must keep every earlier price.
+
+**Decision.** Each price edit inserts one row with the prices **in force before** `changed_at`. The
+current prices live only in `products`. An edit that changes nothing writes no row. It is tested in
+`src/db/repositories.test.ts`.
+
+**Rejected.**
+
+- ***Rows hold the new prices.*** Each product's enrollment price would be lost at its first edit
+  unless enrollment also wrote a row and a data migration backfilled the 20 existing products. That
+  is a migration for a record nothing reads yet.
+- ***Both old and new columns.*** A schema change to store what the previous row already implies.
+
+**Consequences.**
+
+- **Reading the full history:** the rows oldest first, then the current prices in `products`.
+- **A row is not "the price set at `changed_at`".** Code that reads it that way shows every change one
+  step late.
+- **Changing this meaning later needs a migration that rewrites every existing row.** Switching
+  semantics without one silently mixes the two meanings in one table and corrupts the audit.
