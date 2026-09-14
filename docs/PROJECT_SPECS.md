@@ -60,6 +60,8 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-10** | Products flagged `is_ambiguous` bypass recognition and surface a pinned **quick-pick grid**. | MUST |
 | **SR-11** | Torch toggle for dim store interiors. | SHOULD |
 | **SR-12** | Recognition result must not flicker — a result locks only after temporal agreement. | MUST |
+| **SR-13** | **Confirm mode on a small catalog.** While fewer products are enrolled than `app_meta.confirm_below` (`TR-38`), an ACCEPT is shown as a one-tap question — *"Is this {name}? ₱{price}"* with **Yes / No** — never as a confident price. A small catalog cannot reject un-enrolled items (ADR-013). | MUST *(Phase 2; cutoff calibrated Phase 3)* |
+| **SR-14** | **"Not in my list."** From a *No* in SR-13, a wrong lock, or a wrong chip, one tap saves the current frame as a store-local **negative** (`TR-39`). A negative is never named, priced or offered. | MUST *(Phase 2)* |
 
 ### 4.2 Enrollment
 
@@ -91,7 +93,7 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-41** | **No network request may ever leave the device.** No telemetry, no analytics, no crash reporting upload. | MUST |
 | **SR-42** | UI language switchable between **English** and **Filipino** without restart. | MUST |
 | **SR-43** | Camera permission denial leads to a recovery screen with a route to system settings. | MUST |
-| **SR-44** | First run with an empty catalog presents a guided "add your first five items" flow. | MUST |
+| **SR-44** | First run with an empty catalog presents a guided "add your first five items" flow. Scans on a catalog this small are in confirm mode (`SR-13`): five products cannot reject un-enrolled items (ADR-013). | MUST |
 | **SR-45** | Export and import the full catalog as a single portable archive. | SHOULD *(Phase 4)* |
 
 ---
@@ -146,8 +148,8 @@ object proposal replacing the fixed reticle.
 | **TR-10** | `react-native-vision-camera` v5 + `react-native-vision-camera-worklets` | Camera + frame processors. The only RN camera with real frame processors; v5 is Nitro/worklets-based so a TFLite model is callable directly inside the worklet. v5 uses an outputs-based API (`usePreviewOutput`, `useFrameOutput`) and ships **no config plugin** — camera permissions are declared directly in `app.json`. |
 | **TR-11** | `react-native-nitro-image` | Native in-worklet crop, resize and raw-pixel access, via `HybridFrameConverter.convertFrameToImage()`. *Amended from `vision-camera-resize-plugin`, which targets VisionCamera v4 — see ADR-010.* Float32 conversion and channel-order mapping are done in application code. |
 | **TR-12** | `react-native-fast-tflite` | TFLite runtime. Runs synchronously inside worklets; GPU delegate on Android, CoreML on iOS. |
-| **TR-13** | `@op-engineering/op-sqlite` with **sqlite-vec** enabled | Metadata + vector storage in one SQLite file. |
-| **TR-14** | `expo-router` | File-based tab navigation. |
+| **TR-13** | `@op-engineering/op-sqlite`, plain SQLite. *Amended 2026-09-14: sqlite-vec is off because its 32-bit ARM build cannot load (op-sqlite#456) — ADR-014.* | Metadata + vector storage (vectors as BLOBs) in one SQLite file. |
+| **TR-14** | `@react-navigation/native` + `@react-navigation/bottom-tabs` | Tab navigation: Scan and Products. *Amended 2026-09-14 (ADR-015): was `expo-router`. It added 73 packages and 11 native modules, reanimated among them, against 23 and 2 for this navigator, which is the one it wraps.* |
 | **TR-15** | `zustand` | UI/session state only. SQLite remains the source of truth. |
 | **TR-16** | `i18next`, `react-i18next`, `expo-localization` | `en` + `fil` from the first commit. |
 | **TR-17** | `expo-file-system` | Reference photo storage in the document directory. |
@@ -172,22 +174,24 @@ object proposal replacing the fixed reticle.
 
 | ID | Requirement |
 |---|---|
-| **TR-30** | KNN over `vec_shots` with `LIMIT 10`. |
+| **TR-30** | Brute-force nearest-neighbour over every live shot vector, keeping the top 10. *Amended 2026-09-14 from "KNN over `vec_shots` with `LIMIT 10`" — ADR-014. Native search is still owed for `NFR-09`.* |
 | **TR-31** | Aggregate shots to products; a product's score is its **best** shot similarity. |
 | **TR-32** | **ACCEPT** when `top1 ≥ τ` **and** `(top1 − top2) ≥ δ`, top2 being the best *different* product. |
 | **TR-33** | **DISAMBIGUATE** when `top1 ≥ τ` but the margin is `< δ`. |
 | **TR-34** | **REJECT → "Unknown Item"** otherwise. |
 | **TR-35** | τ and δ are stored in `app_meta` as configuration, calibrated empirically. **Never hard-coded.** |
-| **TR-36** | Temporal stability gate: lock a result only when **3 of the last 5** frame decisions agree. |
+| **TR-36** | Temporal stability gate: lock a result only when **4 of the last 5** frame decisions agree. *Amended 2026-09-14 (ADR-016): was 3 of 5. Gate run 2 locked a look-alike product, and the diagnosis found lone accept-grade votes for it, at most one per window.* |
 | **TR-37** | The matching policy must be a **pure function** over `(candidates, τ, δ, buffer)` so it is unit-testable without a camera. |
+| **TR-38** | The `SR-13` cutoff is stored in `app_meta` as `confirm_below`, calibrated empirically and never hard-coded — the same rule as `TR-35`. **No value chosen yet:** on Phase 0 data even 25 products leave 2.9% of un-enrolled frames accepted, so it comes from store data in Phase 3 (ADR-013). |
+| **TR-39** | Negative shots (`SR-14`) are stored in `product_shots` like any shot (vector as a BLOB — ADR-014), stamped with `model_id` (`TR-23`), with their JPEG kept (`TR-24`). They rank alongside products. If a negative is top-1 → **UNKNOWN**. As top-2 it still counts toward δ. A negative is never named, priced or shown as a chip. |
 
 ### 7.5 Data
 
 | ID | Requirement |
 |---|---|
-| **TR-40** | Single SQLite database file holding both product metadata and the `vec0` virtual table. |
+| **TR-40** | Single SQLite database file holding both product metadata and the shot vectors (`product_shots.embedding`, BLOB). *Amended 2026-09-14 from the `vec0` virtual table — ADR-014.* |
 | **TR-41** | **Money stored as integer centavos.** Floats are forbidden for currency anywhere in the codebase. |
-| **TR-42** | Reference photos: 512 px longest edge, JPEG q80, max 5 per product. |
+| **TR-42** | Reference photos: at most 512 px longest edge, **never upscaled**, JPEG q80, max 5 per product. *Clarified 2026-09-14 (P1-4): at 1280 × 720 the reticle crop is 396 px and is stored at that size, because upscaling adds bytes (`NFR-08`) but no detail.* |
 | **TR-43** | Photo paths stored **relative** to the document directory, never absolute. |
 | **TR-44** | Schema migrations keyed on `app_meta.schema_version`, forward-only. |
 | **TR-45** | Enrollment writes product + shots + vectors in **one transaction**. |

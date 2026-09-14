@@ -27,16 +27,18 @@ database; the product is recognizable on the very next camera frame.
 
 ```
 camera frame → reticle crop → MobileNetV3 embedding (in-worklet)
-             → sqlite-vec KNN → τ/δ policy → 3-of-5 stability gate → price on screen
+             → nearest-neighbour search → τ/δ policy → 3-of-5 stability gate → price on screen
 ```
 
-~30–50 ms per processed frame on a budget Android, at 4 fps.
+Budget: ≤ 60 ms per processed frame at 4 fps (`NFR-07`). **Not met yet.** On an Infinix X6823
+(release build) crop + resize + inference measures a median 145.5 ms; see
+[`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 
 ## Status
 
-**Phase 0 — Embedding Viability Spike.** The core thesis is deliberately unvalidated: we are
-testing whether a generic mobile embedding model can separate real sari-sari SKUs under real store
-lighting *before* building an app around it.
+**Phase 1 — Proof of concept, real data path.** Phase 0 tested the core thesis first: a generic
+mobile embedding model ranked the right product first for **94.5%** of test photos of real
+sari-sari SKUs (gate ≥ 85%). Phase 1 now builds storage, enrollment and scanning on top of it.
 
 See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 
@@ -55,7 +57,7 @@ See [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md).
 ## Stack
 
 React Native · Expo SDK 57 (dev client) · react-native-vision-camera v5 ·
-react-native-fast-tflite · op-sqlite + sqlite-vec · expo-router · TypeScript
+react-native-fast-tflite · op-sqlite (vectors stored as BLOBs — ADR-014) · expo-router · TypeScript
 
 > **Expo Go will not work.** The native modules require a development build (`TR-03`).
 

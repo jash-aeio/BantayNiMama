@@ -1,8 +1,9 @@
 # BantayNiMama — Architecture
 
-> **Last updated:** 2026-09-12 · **Schema version:** 1 · **Model:** `mobilenet_v3_large_embedder_v1`
+> **Last updated:** 2026-09-14 · **Schema version:** 1 · **Model:** `mobilenet_v3_large_embedder_v1`
 >
-> **Stack:** Expo SDK 57 / RN 0.86.3 (ADR-009) · VisionCamera v5.2.3 · react-native-fast-tflite v3.0.1
+> **Stack:** Expo SDK 57 / RN 0.86.3 (ADR-009) · VisionCamera v5.2.3 · react-native-fast-tflite v3.0.1 ·
+> op-sqlite 18.2.1, plain SQLite *(sqlite-vec off: its 32-bit ARM build cannot load — ADR-014)*
 >
 > **Claude: update this document whenever you change the data model, the pipeline, the matching
 > policy, or a core dependency.** See [`../CLAUDE.md`](../CLAUDE.md).
@@ -31,7 +32,7 @@
 │   └─────┬──────┘        └─────┬──────┘                       │
 │         │                     │                              │
 │   ┌─────▼──────┐        ┌─────▼────────────────┐             │
-│   │  TFLite    │        │ SQLite + sqlite-vec  │             │
+│   │  TFLite    │        │ SQLite · BLOB vectors│             │
 │   │ MobileNetV3│        │ bantay.db            │             │
 │   └────────────┘        └──────────────────────┘             │
 │                         ┌──────────────────────┐             │
@@ -56,7 +57,19 @@ This is the most important thing to understand about the codebase.
 | **UI thread** | Overlay rendering via Reanimated shared values | Re-render React on the hot path |
 
 **Rule:** the worklet's only output is a `Float32Array(1280)` posted to the JS thread. Nothing else
-crosses that boundary per frame.
+crosses that boundary per frame. An explicit capture during enrollment is the one exception: it
+also sends that frame's reticle crop, once per button press (P1-4).
+
+**One model instance per thread.** The camera worklet calls `runSync` on its model continuously. A
+single TFLite interpreter must not run on two threads at once, so JS-thread embedding uses its own
+CPU-only instance: saved JPEGs at enrollment, and `TR-24` re-embeds. That costs a second copy of
+the model in memory.
+
+**Worklet helpers are declared above their callers.** The worklets Babel plugin captures what a
+`'worklet'` function references at the moment that function object is created, not when it runs.
+A helper declared further down the file is captured as `undefined`. JavaScript hoisting hides this
+from `tsc` and from `node --test`, so it only shows on the device, as every frame failing with
+"undefined is not a function" (P1-4).
 
 ---
 
@@ -75,24 +88,26 @@ crosses that boundary per frame.
 ╚════════╤═══════════════════════════════════════════════════════════════╝
          │  post Float32Array(1280)
 ╔════════▼═══════════════════ JS THREAD ═════════════════════════════════╗
-║  6. sqlite-vec KNN         brute force over ≤2500 vectors    0.5–3 ms  ║
+║  6. JS brute-force KNN     inline loop, in-memory matrix     9–234 ms  ║
 ║  7. Aggregate shots→products   best shot wins per product    <1 ms     ║
 ║  8. τ/δ policy             ACCEPT | DISAMBIGUATE | UNKNOWN   <1 ms     ║
-║  9. Stability ring buffer  require 3-of-5 agreement          <1 ms     ║
+║  9. Stability ring buffer  require 4-of-5 agreement          <1 ms     ║
 ║ 10. Fetch name + price     indexed lookup on lock            <1 ms     ║
 ║ 11. Render overlay         Reanimated shared values          <16 ms    ║
 ╚════════════════════════════════════════════════════════════════════════╝
 
+Stage times above are budgets. Measured values are in §8 (Infinix: 100.7 ms per frame on CPU).
 Per processed frame:  30–50 ms budget Android · 15–25 ms iOS
 CPU duty cycle:       12–20% at 4 fps
-Perceived lock:       ~750 ms (3 agreeing frames at 4 fps)
+Perceived lock:       ~1 s (4 agreeing frames at 4 fps; was ~750 ms at 3 — ADR-016)
 ```
 
 ### Why 4 fps
 
 `runAtTargetFps(4)` is the single biggest battery and thermal lever in the app (NFR-06). At 30 fps
-a budget Android thermally throttles within minutes. At 4 fps, with a 3-of-5 stability gate, a
-result still locks in ~750 ms — below the 1.2 s p90 target (NFR-04).
+a budget Android thermally throttles within minutes. At 4 fps, with a 4-of-5 stability gate
+(ADR-016), a result locks in ~1 s nominal. That is still below the 1.2 s p90 target (NFR-04), with
+less headroom than the original 3-of-5's ~750 ms; time-to-lock is not yet measured on device.
 
 ---
 
@@ -104,15 +119,54 @@ Separate path. Quality matters, latency does not, so this runs on the JS thread.
 Tap "Add"
   → guided capture of 3–5 angles          (SR-20)
   → quality check per frame               (SR-22)  blown out? dark? blurry?
-  → save each as 512px q80 JPEG           (TR-42)  documentDirectory/photos/
+  → save each as q80 JPEG, ≤ 512 px        (TR-42)  documentDirectory/photos/  (never upscaled)
   → embed each once on the JS thread
   → duplicate check: KNN vs catalog       (SR-23)  match > τ → "Ganito ba ito?"
   → ONE transaction:                      (TR-45)
        INSERT products
-       INSERT product_shots  × 3–5
-       INSERT vec_shots      × 3–5
+       INSERT product_shots  × 3–5   (photo path + embedding BLOB)
+  → add the vectors to the in-memory search matrix — only after COMMIT succeeds
   → live on the very next frame           (SR-24)
 ```
+
+**Enrollment embeds a JPEG, scanning embeds a frame** (measured in P1-4). Both come from the same
+reticle crop (`captureReference`). The enrolled vector goes through one more resize and JPEG q80;
+the live one does not.
+
+- **Measured:** on the Infinix, the two vectors agree at dot min 0.9803, median 0.9843, over 10
+  captures of one static scene (P1-4). **On real products** (2026-09-14, two enrollment sessions,
+  92 shots, Infinix X6823, release APK, CPU), they agree at dot **min 0.9882 / 0.9804, median
+  0.9960 / 0.9963**. The worst shot (0.9804) bounds a score shift at ≈ 0.20, and a median shot at
+  ≈ 0.09. The bound is loose. The P1-5 / P1-6
+  scans ran on JPEG-path vectors and locked correctly.
+- **What that allows:** unit vectors at 0.984 are √(2 − 2·0.984) ≈ 0.18 apart, which is the most a
+  similarity score can move (δ = 0.075). The typical move is far smaller, but it is unmeasured on
+  real products.
+- **Consequence:** Phase 0 calibrated τ/δ on live-frame vectors on both sides. The P1-8 gate and
+  the Phase 3 retune must therefore use JPEG-path enrollment vectors.
+- **Size:** the frame is 1280 × 720, so the reticle crop is 396 px. It is stored at that size rather
+  than upscaled to 512: 17.5 KB median per shot, ~88 KB per 5-shot product against `NFR-08`'s
+  200 KB. **On real products** (same 92 shots): **21.9 / 24.2 KB median, 34.1 KB max** per
+  shot, so ≤ 170.5 KB even for a product made of five worst-case shots.
+
+**As implemented — `src/features/enrollment/` (P1-5, verified on the Infinix 2026-09-14: enroll
+→ relaunch → scan locked the new products, and the size pair gave chips).**
+
+- **Shot ids are chosen at capture.** The JPEG is written as `photos/<shot id>.jpg` straight away.
+  `insertProductWithShots` stores that same id and refuses any other path, so a row can never point
+  at another shot's photo.
+- **The stored vector is the JPEG's** (CPU still model), never the live frame's. The frame vector
+  is kept only for the agreement readout.
+- **Duplicate check (`SR-23`):** each draft shot runs KNN against the index. `likelyDuplicates`
+  keeps products whose best score over all shots is **≥ τ**, the bar at which the scanner would
+  start naming them. It warns; "Save anyway" proceeds.
+- **Failure:** if the transaction throws, the draft's JPEGs are deleted. If the app is killed
+  before COMMIT, the photos are orphans, and the next launch's sweep removes them (§5, invariant 7).
+- **Search index:** `appendToIndex` runs only after `insertProductWithShots` returns, and the
+  scanner reads the new index on its next frame. That is all `SR-24` needs. With search in JS
+  (ADR-014), nothing re-queries SQLite per frame.
+- **`openCatalog()`** refuses a `bantay.db` whose `app_meta.model_id` differs from the bundled
+  `MODEL_ID` (`TR-23`).
 
 ---
 
@@ -120,15 +174,31 @@ Tap "Add"
 
 Single SQLite file: `documentDirectory/bantay.db`.
 
+**Opening it** (`src/db/open.ts`). op-sqlite is called with the document directory as an explicit,
+absolute `location`. With no location it would put the file in Android's `databases/` folder,
+which is outside the one-file-plus-`photos/` export layout (`TR-46`). Verified on the Infinix: SQLite
+3.51.3 opens `/data/user/0/com.jash.bantaynimama/files/bantay.db` (2026-09-14).
+
+**No sqlite-vec (ADR-014).** op-sqlite's bundled sqlite-vec cannot load on 32-bit ARM: its
+`libsqlite_vec.so` calls `ceil` without declaring `libm.so` (op-sqlite#456). So `package.json` has
+`"sqliteVec": false`. Each shot's vector is a `Float32Array` stored as a BLOB in `product_shots`,
+and that round trip is bit-exact on device. Search runs in JS over an in-memory matrix built from
+those rows (§3, §8). A native index can be added later without a data migration, because it is
+rebuilt from the BLOBs.
+
 ```sql
+-- Schema v1, as src/db/schema.ts (migration 1) creates it.
+-- "centavos" below means: INTEGER CHECK (col IS NULL OR (typeof(col) = 'integer' AND col >= 0))
+-- so SQLite itself rejects a float or negative price (TR-41).
+
 CREATE TABLE products (
-  id              TEXT PRIMARY KEY,   -- uuid
-  name            TEXT NOT NULL,
-  price_piece     INTEGER,            -- centavos; NEVER float (TR-41)
-  price_pack      INTEGER,            -- nullable; the "buo" price (SR-06)
+  id              TEXT PRIMARY KEY,   -- uuid v4
+  name            TEXT NOT NULL CHECK (length(trim(name)) > 0),
+  price_piece     INTEGER,            -- centavos (TR-41)
+  price_pack      INTEGER,            -- centavos; the "buo" price (SR-06)
   unit_label      TEXT,               -- "sachet", "bote", "piraso"
   category        TEXT,
-  is_ambiguous    INTEGER DEFAULT 0,  -- 1 → quick-pick grid, skip recognition (SR-10)
+  is_ambiguous    INTEGER NOT NULL DEFAULT 0 CHECK (is_ambiguous IN (0, 1)),  -- SR-10
   created_at      INTEGER NOT NULL,
   updated_at      INTEGER NOT NULL,
   last_scanned_at INTEGER,
@@ -140,27 +210,44 @@ CREATE TABLE product_shots (
   product_id TEXT NOT NULL REFERENCES products(id),
   photo_path TEXT NOT NULL,           -- RELATIVE to documentDirectory (TR-43)
   model_id   TEXT NOT NULL,           -- stamp: which model produced this vector (TR-23)
+  embedding  BLOB NOT NULL CHECK (typeof(embedding) = 'blob'),
+                                      -- little-endian Float32 × embedding_dim, L2-normalized (TR-22, ADR-014)
   created_at INTEGER NOT NULL
 );
 
-CREATE VIRTUAL TABLE vec_shots USING vec0(
-  shot_id    TEXT PRIMARY KEY,
-  product_id TEXT,
-  embedding  FLOAT[1280]              -- L2-normalized at write time (TR-22)
-);
-
 CREATE TABLE price_history (
-  id TEXT PRIMARY KEY, product_id TEXT, price_piece INTEGER,
-  price_pack INTEGER, changed_at INTEGER
+  id          TEXT PRIMARY KEY,
+  product_id  TEXT NOT NULL REFERENCES products(id),
+  price_piece INTEGER,                -- centavos
+  price_pack  INTEGER,                -- centavos
+  changed_at  INTEGER NOT NULL
 );
 
-CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT);
--- schema_version, model_id, model_version, embedding_dim, tau, delta
+CREATE TABLE app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+-- Created before any migration runs, because schema_version lives in it.
+-- schema_version, model_id, embedding_dim, tau, delta; confirm_below once calibrated (TR-38)
 
 CREATE INDEX idx_products_name     ON products(name);
 CREATE INDEX idx_products_deleted  ON products(deleted_at);
 CREATE INDEX idx_shots_product     ON product_shots(product_id);
 ```
+
+**How the schema gets there** (`src/db/`, P1-2):
+
+- **Migrations are forward-only (`TR-44`).** `migrate()` plans with `planMigrations`, then runs
+  each version in its own transaction together with its `schema_version` bump. A crash therefore
+  leaves the database at the last version that fully applied. A database **newer** than the app is
+  refused, not opened: an older APK must not guess at tables whose meaning has changed.
+- **Seeded once, as data (`TR-35`, ADR-008).** Migration 1 writes the Phase 0 calibration
+  (`model_id`, `embedding_dim` 1280, τ 0.46, δ 0.075) into `app_meta`. After that, code only reads
+  them. `parseAppMeta` refuses a blank or malformed value, because `Number('')` is 0 and a zero τ
+  accepts everything. `confirm_below` is not seeded (`TR-38`).
+- **Transactions are synchronous `BEGIN IMMEDIATE … COMMIT`.** Because it runs through
+  `executeSync`, nothing else on the JS thread can interleave with a half-written enrollment.
+  `insertProductWithShots` validates everything before `BEGIN`: centavos, 3–5 shots, relative
+  paths, dimension, unit length.
+- **Per connection:** `PRAGMA foreign_keys = ON`. The default journal mode stays, because WAL's
+  `-wal` / `-shm` side files would break the one-file layout (`TR-46`).
 
 ### Invariants
 
@@ -172,6 +259,13 @@ CREATE INDEX idx_shots_product     ON product_shots(product_id);
 4. **One product owns 3–5 vectors**, one per shot. Matching aggregates shots → products.
 5. **Enrollment is one transaction.** A half-written product with vectors but no metadata will
    produce confident matches against a nonexistent item (TR-45).
+6. **The in-memory search matrix is derived, never authoritative** (ADR-014). It is rebuilt from
+   `product_shots` at startup and extended only after an enrollment commits. It leaves out
+   soft-deleted products and vectors from any other `model_id`.
+7. **Orphan photos are swept only at launch** (P1-5). A photo in `photos/` that no `product_shots`
+   row references (soft-deleted products count as referencing theirs) is deleted by `openCatalog()`,
+   before any enrollment draft can exist. Sweeping at any other time would delete a draft's photos,
+   which have no row until COMMIT. If the reference query fails, nothing is deleted.
 
 ---
 
@@ -193,8 +287,67 @@ else                                                  → UNKNOWN       TR-34
 ```
 
 Then the **temporal stability gate** (TR-36): push each decision into a 5-slot ring buffer; render a
-locked result only when 3 of 5 agree on the same `product_id`. This is what stops the overlay from
+locked result only when 4 of 5 agree on the same `product_id` (ADR-016; it was 3 of 5 until gate
+run 2 locked a look-alike can). This is what stops the overlay from
 flickering between neighbours.
+
+### As implemented — `src/domain/` (P1-1, 2026-09-14)
+
+The pseudocode above is literal, with these edge cases pinned down by tests:
+
+- **Entry point.** `match(rows, { tau, delta })` is `decide(rankProducts(rows), …)`. Rows carry
+  **cosine similarity**, which the JS search computes directly as a dot product (ADR-014).
+- **Ties.** Equal product scores rank by `productId` in code-unit order, so the result does not
+  depend on the phone's locale. An **exact top-1 / top-2 tie always disambiguates**, even at
+  δ = 0, because accepting would be a coin flip.
+- **Bad thresholds throw.** A NaN τ or δ makes every `<` comparison false, which would turn the
+  policy into "accept everything". Thresholds come from `app_meta` as TEXT, so `decide()` refuses
+  anything non-finite or out of range with a `RangeError`. Non-finite similarities are dropped
+  before ranking.
+- **A lone candidate** at or above τ is ACCEPTed with `margin: null`. **Consequence:** δ does the
+  un-enrolled rejection (see calibration below), and δ only works when some enrolled product sits
+  close to the item. The problem is a *sparse* catalog, not only a catalog of one. With a few
+  products, top-2 exists but is far away, so the margin looks large and an un-enrolled item is
+  accepted. Simulated on Phase 0 data (*Small catalogs*, below), 15.1% of un-enrolled frames are
+  accepted at 5 products, which is SR-44's first-run size. The mitigation lives in the UI and the
+  catalog, not in this function (ADR-013, `SR-13`, `SR-14`).
+- **`LIMIT 10` is safe (TR-30).** The golden replay checks, for all 196 Phase 0 frames, that
+  top-1 and top-2 from the 10 nearest shots equal the full brute-force ranking. That holds while
+  a product has ≤ 6 shots; `TR-42` caps it at 5.
+- **Stability.**
+  - **What agrees:** ACCEPTs agree on the product. DISAMBIGUATEs agree on the **unordered** pair,
+    because near-tied products swap order frame to frame, which is the flicker this gate stops.
+    UNKNOWNs agree with each other, so "Unknown Item" locks too (`SR-04`).
+  - **What is returned:** the lock is the *most recent* decision with the winning key, so the
+    confidence shown is current. It is `null` until something reaches quorum.
+  - **Quorum rule:** quorum must exceed half the window, so two results can never lock at once.
+- **Golden replay.** `match.golden.test.ts` runs this policy over the Phase 0 dataset. It must
+  reproduce 86/91 top-1 and 68 / 19 / 4 accept / disambiguate / unknown on enrolled frames. On
+  un-enrolled frames it must give 3 / 50 / 52, with all 3 false accepts → Datu Puti vinegar
+  (ADR-012).
+
+### As rendered — `src/features/scanner/` (P1-6, verified on the Infinix 2026-09-14)
+
+- **The overlay shows exactly `lockedDecision`.** When no result has quorum, it shows a neutral
+  "point the box at a product", never the previous lock. Holding a lock through lost quorum would
+  cut flicker. It would also leave a confident price on screen while the camera sees something else,
+  and `NFR-02` outranks flicker.
+- **React renders on lock changes only.** `useScanner` compares `decisionKey`s. Per-frame state
+  (votes, timings, the dev top 3) lives in refs.
+- **Confidence (`SR-03`, `src/domain/confidence.ts`)** comes in three bands, never a number:
+
+  | Decision | Condition | Shown |
+  |---|---|---|
+  | ACCEPT | margin ≥ 2δ | Sure (3 bars) |
+  | ACCEPT | margin < 2δ, or no second product (`margin: null`) | Likely (2 bars) |
+  | DISAMBIGUATE | — | Not sure (1 bar) + two chips |
+  | UNKNOWN | — | "Unknown item" + Add |
+
+  δ is read from `app_meta` (`TR-35`). Only the multiple `SURE_MARGIN_IN_DELTAS = 2` is a constant:
+  an operator-chosen placeholder, retuned in Phase 3. On the P1-5 scans, Reno's margins
+  (0.237 / 0.254) would read Sure, Argentina 260g's (0.160) Sure, and the size pair Not sure.
+- **Chips.** A tap shows that product's price until the next lock. Nothing is learned from the tap
+  yet (`SR-07`, Phase 2).
 
 ### Threshold calibration
 
@@ -220,6 +373,37 @@ catalog. Tune toward **precision** — NFR-02 outranks NFR-01.
 - **Small samples at the edges.** 5 wrong matches, 105 negatives; the 95% CI on FP 3/196 is
   0.5–4.4%, which spans the `NFR-02` ceiling. Retune in Phase 3 on the full catalog.
 
+### Small catalogs — simulated (2026-09-14)
+
+`scripts/small-catalog.mjs` enrolls a random N of the 25 Phase 0 products and treats everything else
+as un-enrolled: the `unknown:` frames plus the frames of the products left out. It uses the same data
+and phone as above (Infinix X6823), τ 0.46 / δ 0.075, 500 random catalogs per size. Results are
+**per frame, before the 3-of-5 stability gate**. This is a **simulation on Phase 0 data**, not a
+store measurement.
+
+| Products enrolled | Un-enrolled frames auto-accepted (wrong price) | Correct accepts |
+|---|---|---|
+| 1 | 7.9% | 95.6% |
+| 2 | 12.0% | 92.7% |
+| 3 | 14.2% | 91.4% |
+| 5 | **15.1%** | 88.8% |
+| 10 | 12.6% | 83.1% |
+| 15 | 9.7% | 79.1% |
+| 25 | 2.9% — the 3/105 above | 74.7% |
+
+- **The risk is sparsity, not a missing top-2.** It peaks near SR-44's five products and is still
+  9.7% at 15. `NFR-02` allows ≤ 2%.
+- **Mostly unrelated items.** At 5 products, 8.9% of false accepts are same-brand siblings. The
+  most frequent pairs are Ajinomoto salt → Colgate sachet and Century Tuna → Nissin spicy seafood.
+- **Fixes in the policy were rejected** (ADR-013).
+  - A 0.60 floor for a lone candidate fixes only N=1, where correct accepts drop to 65.9%.
+  - Holding ≤ 2% with τ alone takes 0.58–0.61, where correct accepts drop to 59.7–71.0%.
+- **Deferred to Phase 3: a bundled distractor bank.** Using half the un-enrolled brand families as
+  hidden items gives 4.7% at 5 products, with 79.1% correct accepts. The number is flattered: the
+  bank and the test frames share one counter.
+- **Adopted instead:** confirm mode below `confirm_below` products, plus negatives the tindera
+  marks (`SR-13`, `SR-14`, `TR-38`, `TR-39`). Neither is built yet.
+
 ---
 
 ## 7. Directory Layout
@@ -242,35 +426,66 @@ BantayNiMama/
 │                              `npm run fetch-model` (scripts/fetch-model.mjs)
 ├── scripts/
 │   ├── fetch-model.mjs        ← dev-time model download (TR-20)
-│   └── analyze.mjs            ← Phase 0 offline accuracy + τ/δ sweep
-├── App.tsx                    ← PHASE 0 ONLY. Throwaway spike UI; replaced by app/
-│                              once the gate passes.
-├── src/spike/                 ← PHASE 0 ONLY. Deleted at the start of Phase 1.
-│   ├── config.ts              ← spike constants (τ/δ are NOT here — see TR-35)
-│   ├── embed.ts               ← in-worklet crop→resize→runSync→L2-normalize
-│   ├── vectors.ts             ← pure cosine ranking + τ/δ decision
-│   └── dataset.ts             ← capture, persist, share-sheet export
+│   ├── analyze.mjs            ← Phase 0 offline accuracy + τ/δ sweep
+│   └── small-catalog.mjs      ← small-catalog false-accept simulation (ADR-013)
+├── index.ts                   ← registers src/app/Root (App.tsx and src/spike/ were deleted in P1-7)
 ├── src/
+│   ├── app/                   ← app shell (TR-14, ADR-015): React Navigation, two tabs
+│   │   ├── Root.tsx           ← boot: catalog, language, both models once; tab navigator
+│   │   ├── services.ts        ← shared context: catalog, index, models, language, diagnostics
+│   │   ├── ScanScreen.tsx     ← one camera (live only while focused); overlay; enrollment slides up
+│   │   └── ProductsScreen.tsx ← plain list from SQLite; language switch; gate check
 │   ├── domain/                ← PURE TS. No I/O. Unit-tested.
 │   │   ├── match.ts           ← τ/δ policy
 │   │   ├── stability.ts       ← ring buffer
-│   │   └── money.ts           ← centavo arithmetic
+│   │   ├── money.ts           ← centavo arithmetic
+│   │   ├── vector.ts          ← dot, L2-normalize, BLOB codec
+│   │   ├── knn.ts             ← brute-force top-10 over the in-memory matrix (TR-30, ADR-014)
+│   │   ├── appMeta.ts         ← strict app_meta parsing (TR-35, TR-38)
+│   │   ├── migrations.ts      ← migration planning (TR-44)
+│   │   ├── photoPath.ts       ← relative photo paths only (TR-43)
+│   │   ├── pixels.ts          ← channel layout, model input, reticle rect — worklet-callable (TR-21)
+│   │   ├── stats.ts           ← nearest-rank median / p90 for device measurements
+│   │   ├── referencePhoto.ts  ← photo path per shot; 512 px cap without upscaling (TR-42); orphan detection
+│   │   ├── enrollment.ts      ← form → centavos (SR-21); duplicates ≥ τ (SR-23); 3–5 shots
+│   │   ├── confidence.ts      ← Sure / Likely / Not sure from δ (SR-03)
+│   │   ├── language.ts        ← saved ui_language, else phone locale (fil / tl), else en (SR-42)
+│   │   ├── gateCheck.ts       ← Phase 1 gate: persistence problems, self-match report (PHASE_1_PLAN §4)
+│   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
+│   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
+│   │   ├── loadModel.ts       ← expo-asset → file:// → TFLite, CPU or GPU; tensor shapes checked (TR-29)
+│   │   ├── frameEmbedder.ts   ← camera-thread worklet; per-stage timings (TR-25)
+│   │   ├── stillEmbedder.ts   ← saved JPEG → vector on the JS thread (enrollment, TR-24)
+│   │   └── useEmbeddingModel.ts ← one model instance per call, loaded once in Root
 │   ├── db/                    ← schema, migrations, repositories
+│   │   ├── open.ts            ← openDatabase(): bantay.db in documentDirectory (TR-46)
+│   │   ├── schema.ts          ← migrations, forward-only (TR-44)
+│   │   ├── migrate.ts         ← applies them, one transaction per version
+│   │   ├── transaction.ts     ← synchronous BEGIN IMMEDIATE / COMMIT / ROLLBACK
+│   │   ├── catalog.ts         ← openCatalog(): migrate, model_id check, orphan sweep, index — once at launch
+│   │   ├── products.ts        ← insertProductWithShots (TR-45), getProduct, catalogCounts
+│   │   ├── shots.ts           ← loadVectorIndex from embedding BLOBs (ADR-014); referencedPhotoPaths
+│   │   ├── photos.ts          ← reference JPEG store in documentDirectory/photos/ (TR-42, TR-43)
+│   │   └── meta.ts · ids.ts   ← read app_meta · UUID v4
 │   ├── features/
-│   │   ├── scanner/
-│   │   ├── enrollment/
-│   │   └── directory/
-│   ├── i18n/                  ← en.json, fil.json
-│   └── ui/                    ← shared components, theme
-└── app/                       ← expo-router routes
+│   │   ├── scanner/           ← P1-6
+│   │   │   ├── useScanner.ts  ← knn → match → stability; renders only on lock change; timings in refs
+│   │   │   └── ScanOverlay.tsx ← LOCK / CHIPS / Unknown + Add (SR-02–SR-05, SR-09)
+│   │   ├── enrollment/        ← P1-5
+│   │   │   ├── draft.ts       ← capture → JPEG → vector; one-transaction commit; rollback deletes photos
+│   │   │   ├── useEnrollment.ts ← draft state; extends the index after COMMIT (SR-24)
+│   │   │   └── EnrollmentPanel.tsx ← form, thumbnails, duplicate warning (SR-20, SR-21, SR-23)
+│   │   ├── gate/              ← P1-7: runGateCheck (re-embed every JPEG, KNN), readout, panel
+│   │   └── directory/         ← Phase 2
+│   ├── i18n/                  ← i18next init, en.json, fil.json, typed keys (TR-16, SR-42)
+│   └── ui/                    ← shared components, theme (Phase 2)
 ```
 
 **The `src/domain/` boundary matters.** Anything that can be a pure function goes there and gets
 unit tests. Everything hard to test (camera, native modules) stays thin and delegates to it.
 
-**Loading the model is not a plain `require()`.** `src/ml/` — and `App.tsx` while Phase 0 stands in
-for it — resolves the bundled `.tflite` through `expo-asset` to a real `file://` path before handing
+**Loading the model is not a plain `require()`.** `src/ml/loadModel.ts` resolves the bundled `.tflite` through `expo-asset` to a real `file://` path before handing
 it to `react-native-fast-tflite`. A bare `require()` resolves to an `http://` Metro URL in debug and
 to a schemeless Android resource name in release, and the library's loader understands only URLs. So
 a `require()` that works throughout development fails on the first release build (TR-29, ADR-011).
@@ -282,12 +497,17 @@ a `require()` that works throughout development fails on the first release build
 | Stage | Budget | Measured |
 |---|---|---|
 | Sharpness gate | ~1 ms | not isolated by the spike |
-| Crop + resize | 1–3 ms | not isolated — folded into the row below |
-| TFLite inference | 8–40 ms | not isolated — folded into the row below |
+| Crop + resize | 1–3 ms | **CPU run: median 36.9 ms, p90 38.0** (P1-3, n = 40). Includes frame → image conversion and packing into Float32. With the GPU delegate: **median 36.6, p90 37.7**. The delegate does not touch this stage. **Later readings are ~60 ms:** P1-6 gave **median 60.4, p90 61.5** (n = 40, CPU, 2026-09-14), and two earlier spot readings agree. Those were taken while charging. **Unplugged** (operator-reported, 2026-09-14): **median 59.7, p90 60.6**, then **59.6 / 61.2** in a second session (n = 40 each, during enrollment). So charging heat does not explain it. Right after a relaunch, over **6 frames only**, it read 35.9. That points at heat from sustained use rather than P1-4's `embedCrop` refactor, but it is unproven. A controlled cold-versus-warm run (n = 40 each) would settle it. Phase 3 work (`NFR-07`); it does not block the Phase 1 gate. |
+| TFLite inference | 8–40 ms | **CPU: median 62.8 ms, p90 72.2** (P1-3, n = 40). **`android-gpu` delegate: median 43.2 ms, p90 45.1**, 31% less. Whether GPU vectors match CPU vectors is **not yet measured**, so the delegate is not adopted: τ/δ were calibrated on CPU. |
+| L2-normalize | <0.1 ms | **median 0.9 ms** (P1-3, n = 40). Also copies the vector out of the model's output buffer. |
+| Sharpness (Laplacian variance, every 2nd px of 224², diagnostic) | ~1 ms (§3 budget) | **median 20.9 ms, p90 21.3** (P1-8 diagnosis, n = 40, 2026-09-14). About 20× the budget, and in the reproduction it did not separate wrong-product frames (`TR-27`). Infinix X6823, release APK. |
+| **Per-frame worklet total, split measurement** | **9–43 ms** | **CPU: median 100.7 ms, p90 109.1 · GPU delegate: median 81.2 ms, p90 83.0** — Infinix X6823, release APK, 2026-09-14, n = 40 each. Neither meets `NFR-07`. Crop + resize alone is ~37 ms, so even a free model would leave this stage near the budget. Not directly comparable to the 145.5 ms below: that number also covered converting the vector to a JS array inside the worklet. |
 | **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **Release: median 145.5 ms, p90 160.1 ms, range 126.5–339.5 ms** (n = 226 test frames). Debug: 140–248 ms, median ~148 ms (7 spot readings). See note. |
-| sqlite-vec KNN | 0.5–3 ms | _pending Phase 1_ |
-| Policy + stability | <2 ms | _pending Phase 1_ |
-| **Total per frame** | **≤ 60 ms** (NFR-07) | _pending — but already exceeded by the row above_ |
+| sqlite-vec KNN | 0.5–3 ms | **Could not run** — sqlite-vec does not load on 32-bit ARM (§5). Measured as a substitute: **JS brute force, 100 shots median 9.2 ms; 2,500 shots median 234.0 ms** (inline loop over one `Float32Array`, n = 10), and 831.1 ms at 2,500 when calling `dot()` per shot. Infinix X6823, release APK, 2026-09-14. |
+| Read vectors from SQLite | — | **56.3 ms** for 2,500 × 1280-d BLOBs, bit-exact round trip. Same device and date. |
+| JS brute-force KNN, in the scanner | — | **15 shots: median 1.31 ms, p90 4.23** (P1-6). **100 shots: median 8.52 ms, p90 13.78** (P1-8 gate catalog). n = 200 live frames each, `useScanner`. The 100-shot figure agrees with P1-2's synthetic 9.2 ms. Infinix X6823, release APK, 2026-09-14. |
+| Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, 15 shots) · **0.08 / 0.10** (P1-8, 100 shots). n = 200 live frames each: `match` + `pushDecision` + `lockedDecision`. Same device and date. |
+| **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms at 15 shots, ~135 ms at 100 shots — not met.** These are **sums of medians**, not one timed span: P1-6 worklet 124.7 + KNN 1.31 + policy 0.07; P1-8 worklet 126.9 + KNN 8.52 + policy 0.08. The JS side is 1–7% of it; the worklet is the problem. |
 
 **Measurement, 2026-09-13.** 7 samples read off the spike's on-screen counter (`elapsedMs`, timed
 inside the worklet around crop → resize → `runSync` → L2-normalize): 140.5, 142.4, 147.5, 148.2,
@@ -320,11 +540,15 @@ min 126.5, median 145.5, p90 160.1, max 339.5 ms. Same device.
 
 ## 9. Architectural Constraints
 
-- **No ANN index.** 500 SKUs × 5 shots = 2,500 vectors. Brute-force cosine is sub-millisecond.
-  HNSW here is complexity for zero gain. Revisit only above ~50,000 vectors.
+- **No ANN index.** 500 SKUs × 5 shots = 2,500 vectors, few enough for brute force. The original
+  "sub-millisecond" figure was an estimate for native code. The JS brute force used for now
+  (ADR-014) **measured 234 ms at 2,500 shots** on the Infinix, which is why native search is still
+  owed for `NFR-09`. HNSW would not fix that and adds complexity; revisit only above ~50,000 vectors.
 - **No backend, no API keys, no auth** (TR-50). If a feature seems to need one, it is out of scope.
 - **No runtime network I/O from any dependency** (TR-51). Audit every package before adding it.
 - **SQLite is the source of truth.** Zustand holds UI state only; never cache catalog data in it.
+  The in-memory search matrix is a derived index rebuilt from SQLite, not a cache of record
+  (ADR-014).
 - **Inference never runs on the JS thread** during live scanning (TR-25). Enrollment is exempt.
 
 ---

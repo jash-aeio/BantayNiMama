@@ -1,7 +1,12 @@
 # Phase 1 Plan — Proof of Concept, Real Data Path
 
 > **Status:** Approved 2026-09-14 — decisions D-1 to D-4 settled (§3) · **Written:** 2026-09-14 ·
-> **Implementation not started.**
+> **Closed 2026-09-14: gate PASS, verified with `/phase-gate`.** P1-1 to P1-8 are done. Run 2
+> failed step 5, and gate run 3 met every §4 criterion after ADR-016: 20/20, 0 wrong locks,
+> self-match 100/100, on the Infinix X6823 in airplane mode. This plan is now a reference: the gate
+> protocol (§4), what was deferred (§6), and the risks carried into Phase 2 and 3 (§8). Progress lives in
+> [`PROJECT_STATUS.md`](PROJECT_STATUS.md). Where a device result changed this plan, the step carries
+> an *Amended* note, and the original text is kept.
 >
 > Phase 0 answered *"can the model tell products apart?"* Phase 1 answers *"does a product survive
 > the trip camera → JPEG → SQLite → force-quit → relaunch → camera, and still come back as itself?"*
@@ -20,8 +25,8 @@
 | Gate reproducible, not a one-off | `/phase-gate` rebuilt it from the raw phone backup (SHA-256 `a9f9232c…`) | ✅ |
 | τ / δ calibrated | τ 0.46, δ 0.075 from the score histogram (`ARCHITECTURE.md` §6) | ✅ |
 | Release-build model loading solved | `TR-29` / ADR-011, verified in airplane mode | ✅ |
-| Storage dependency fits the device | `@op-engineering/op-sqlite` 18.2.1 ships `libsqlite_vec.so` for **`armeabi-v7a`** (checked in the package tarball, 2026-09-14) — the Infinix is covered | ✅ (build not yet run) |
-| `NFR-07` latency | Median 145.5 ms vs ≤ 60 ms — **not met** | ⚠ Carried, not blocking — see §8 |
+| Storage dependency fits the device | `@op-engineering/op-sqlite` 18.2.1 ships `libsqlite_vec.so` for **`armeabi-v7a`** (checked in the package tarball, 2026-09-14) — the Infinix is covered | ✅ (build not yet run) — ❌ **on device 2026-09-14**: the library loads, but its sqlite-vec does not (op-sqlite#456). Plain SQLite works → ADR-014 |
+| `NFR-07` latency | Median 145.5 ms vs ≤ 60 ms — **not met** *(P1-3 split: 100.7 ms CPU, 81.2 ms GPU)* | ⚠ Carried, not blocking — see §8 |
 | `NFR-01` / `NFR-03` at τ/δ | 74.7% accepts, 49.5% Unknown — **not met** | ⚠ Phase 3 by design — the Phase 1 gate does not test accuracy |
 
 ---
@@ -50,7 +55,7 @@ All four settled on the option below. D-2 and D-3 are recorded as ADR-012.
 | **D-1** | **Exact gate wording** — what does "scan all 20" pass on? | See §4: correct product **locked or offered as a chip** for all 20, **zero wrong locks**, plus a deterministic self-match check. | Requiring 20/20 ACCEPT would fail on thresholds, not persistence — at Phase 0's τ/δ only 74.7% of correct frames auto-accept, and that is Phase 3's problem. A gate should fail only for the thing the phase is about. |
 | **D-2** | Test runner for `src/domain/` | **`node --test`** (Node 24's built-in runner, runs `.ts` directly) | Zero new dependencies to audit against `TR-51`, and domain code is pure by rule, so it needs nothing React-shaped. The alternative is `jest-expo` ~57.0.5 — more familiar, a few hundred transitive packages. Needs relative imports inside `src/domain/` (no `@/` alias). |
 | **D-3** | Golden replay fixture — the Phase 0 dataset as a regression test | **Local-only test that fails loudly if the file is absent**, not committed | The labeled file is 9.6 MB of JSON. Committing it bloats every clone forever; the alternative is packing vectors to binary (~2.7 MB, estimate) and committing that. Accepted consequence: a fresh clone cannot run it until the file is restored from backup (§2). |
-| **D-4** | Who writes the Filipino copy | **I draft `fil.json`, you correct it** before the gate run | `SR-42` requires `en` + `fil` from the first string. Phase 1 has maybe 30 strings; a native speaker's pass matters more than my draft. |
+| **D-4** | Who writes the Filipino copy | **I draft `fil.json`, you correct it** before the gate run. *Amended 2026-09-14 (operator's call): the pass happens before `/phase-gate` closes Phase 1, not before the gate run. The gate measures persistence and recognition, not copy, and the 20 products were enrolled and ready.* **Done 2026-09-14: reviewed, no corrections.** | `SR-42` requires `en` + `fil` from the first string. Phase 1 has maybe 30 strings; a native speaker's pass matters more than my draft. |
 
 ---
 
@@ -62,7 +67,9 @@ Agreed 2026-09-14 (D-1). Run on the **Infinix X6823, release APK, airplane mode*
    At least two same-brand variant pairs, so the scan step can actually fail.
 2. **Force-quit** (Settings → Apps → Force stop, not just swipe away) and relaunch.
 3. **Persistence check** — a debug readout, shown on screen:
-   - row counts of `products`, `product_shots`, `vec_shots` match what was enrolled;
+   - row counts of `products` and `product_shots` match what was enrolled. Each shot row carries
+     its vector as an `embedding` BLOB. *(Amended 2026-09-14: ADR-014 removed the separate
+     `vec_shots` table. The check is unchanged: every enrolled vector is still counted.)*
    - `app_meta` reports `schema_version 1`, `model_id`, `embedding_dim 1280`, τ, δ;
    - every `photo_path` resolves to an existing file under `documentDirectory` (`TR-43`).
 4. **Self-match check** — deterministic, no camera variance: re-embed every stored JPEG and query
@@ -72,6 +79,19 @@ Agreed 2026-09-14 (D-1). Run on the **Infinix X6823, release APK, airplane mode*
    (`TR-32`, `TR-36`) or **shows it as one of the two disambiguation chips** (`TR-33`).
    **Any lock on a wrong product fails the gate** (`NFR-02` — the cardinal rule does not wait for Phase 3).
 6. Record ACCEPT vs chip counts anyway — informational, feeds Phase 3.
+
+*Amended 2026-09-14 (after the first gate run, operator's call):*
+- **Step 5 evidence is the in-app lock log.** Every change of the locked decision is recorded with a
+  time, and the run is split into segments at Unknown locks (the operator points at an empty table
+  between products).
+- **Screenshots are backup only.** The first run sampled screenshots ~6 s apart. That missed one
+  product entirely and could not prove zero wrong locks between samples.
+
+*Amended 2026-09-14 (after gate run 2 failed step 5, operator's call):*
+- **Gate run 3 runs with a 4-of-5 lock quorum** (ADR-016, `TR-36`); τ and δ are unchanged.
+- **The whole gate is re-run:** force-stop, airplane mode, steps 3–4, all 20 scanned, with the lock
+  log and backup screenshots. The fix is credited only if run 3 passes. Run 2's failure stays on
+  record.
 
 **Gate:** steps 3, 4 and 5 all pass, recorded in `PROJECT_STATUS.md` with the date and device.
 
@@ -89,7 +109,7 @@ device. Each step has a *done when*.
 | File | Does | Requirements |
 |---|---|---|
 | `match.ts` | Aggregate KNN rows → products by **best** shot; pick top-1 / best *different* top-2; ACCEPT / DISAMBIGUATE / UNKNOWN | `TR-30`–`TR-34`, `TR-37` |
-| `stability.ts` | 5-slot ring buffer, lock on 3-of-5 agreement on the same `product_id` | `TR-36`, `SR-12` |
+| `stability.ts` | 5-slot ring buffer, lock on 3-of-5 agreement on the same `product_id` *(amended to 4-of-5 after gate run 2, ADR-016)* | `TR-36`, `SR-12` |
 | `money.ts` | Parse `"12.50"` → `1250` **by string, never via a float**; format `1250` → `₱12.50` at the render boundary | `TR-41`, ADR-007 |
 | `vector.ts` | L2-normalize, dot | `TR-22` |
 
@@ -102,6 +122,11 @@ device. Each step has a *done when*.
 *Done when:* `npm test` and `npm run typecheck` pass; golden replay matches to the frame.
 
 ### P1-2 · Storage — first device checkpoint
+
+> **Amended 2026-09-14 (ADR-014).** The checkpoint did its job: op-sqlite's bundled sqlite-vec
+> cannot load on 32-bit ARM (op-sqlite#456). Vectors are now BLOBs in `product_shots`, searched by a
+> pure inline JS loop over an in-memory matrix (9.2 ms at 100 shots, 234 ms at 2,500, measured on
+> the Infinix). The sqlite-vec and `vec0` bullets below are kept as the original plan.
 
 - Add `@op-engineering/op-sqlite` with `"op-sqlite": { "sqliteVec": true }` in `package.json`
   (`TR-13`). **Never enable `libsql` / `turso`** — those are the only paths in the library that open a
@@ -135,8 +160,19 @@ device. Each step has a *done when*.
   Record both in `ARCHITECTURE.md` §8. No redesign in Phase 1.
 
 *Done when:* live frames produce 1280-d unit vectors on device; split timings recorded.
+**Done 2026-09-14** — CPU 100.7 ms, `android-gpu` 81.2 ms per frame (`ARCHITECTURE.md` §8). GPU not
+adopted until its vectors are checked against CPU's.
 
 ### P1-4 · Photo store
+
+> **Amended 2026-09-14 (measured).**
+> - **Size:** the frame is 1280 × 720, so the reticle crop is 396 px. `TR-42`'s 512 px is applied
+>   as a cap and never upscales.
+> - **Model instances:** JPEGs are embedded by a **second, CPU-only model instance**. The camera
+>   worklet already runs `runSync` on the first, and one interpreter must not run on two threads.
+> - **Result:** frame-vs-JPEG dot min 0.9803 / median 0.9843, at 17.5 KB per shot. After a
+>   force-stop, re-embeds match their saved vectors at 1.000000.
+> - **Still owed before P1-8:** whether JPEG-path enrollment changes real decisions.
 
 - Reticle crop → 512 px → JPEG q80 → `documentDirectory/photos/<shot_id>.jpg`; store the **relative**
   path (`TR-42`, `TR-43`, `TR-17`) via nitro-image `saveToFileAsync(path, 'jpg', 80)`.
@@ -150,6 +186,22 @@ device. Each step has a *done when*.
 
 ### P1-5 · Enrollment, minimal
 
+> **Done 2026-09-14 on the Infinix, release APK.** 3 products were enrolled, the app relaunched,
+> then each was scanned. Reno and Argentina 260g locked correctly. The 260g / 100g size pair gave
+> chips, and there were zero wrong locks. The duplicate warning fired on the second Argentina.
+> Frame-vs-JPEG agreement on real products is still owed before P1-8.
+>
+> **Amended 2026-09-14.**
+> - **`SR-24`:** met by extending the in-memory index after COMMIT. ADR-014 means the scanner no
+>   longer queries SQLite per frame, so the last bullet's "free" reasoning no longer applies.
+> - **Stored vectors:** they come from the saved JPEG, not the live frame. That is the path the
+>   P1-8 gate must measure (`ARCHITECTURE.md` §4).
+> - **Orphan sweep:** added. A kill between the JPEGs and COMMIT leaves orphans, and the next launch
+>   removes photos no shot row references (operator's decision).
+> - **i18n:** i18next was pulled forward from P1-7, so enrollment copy is never hardcoded
+>   (operator's decision).
+> - **Removed:** the P1-2 / P1-4 temporary checks and the spike's collect mode.
+
 - Form: name, per-piece price, optional per-pack price, unit label, category (`SR-21`); 3–5 shots
   (`SR-20`).
 - Duplicate check: KNN each new shot against the catalog; warn if a product clears τ (`SR-23`).
@@ -162,6 +214,22 @@ device. Each step has a *done when*.
 
 ### P1-6 · Scanner, minimal
 
+> **Done 2026-09-14 on the Infinix, release APK.**
+> - **Scan:** 3 locks, all correct, and zero wrong locks. Chips showed the price on tap, and an
+>   un-enrolled item read Unknown.
+> - **Timings:** KNN 1.31 ms and policy + stability 0.07 ms median (§8).
+> - **Near miss:** Reno held sideways ranked Argentina 100g top-1, and δ turned it into chips.
+> - **Not exercised:** tapping Add.
+>
+> **Amended 2026-09-14.**
+> - **Confidence (`SR-03`)** is three bands built from δ, chosen by the operator: Sure (margin
+>   ≥ 2δ), Likely, and Not sure (chips). A lone candidate is never Sure (ADR-013). No number is
+>   shown, because a similarity is not a probability.
+> - **Losing quorum clears the overlay** to "scanning" instead of holding the last lock. Holding it
+>   could show a confident, stale price (`NFR-02` over flicker).
+> - **Tapping a chip** shows that product's price until the next lock. Learning from the tap is
+>   `SR-07`, in Phase 2.
+
 Worklet vector → JS → `knn` (`TR-30`) → `match` → `stability` → `getProduct` → overlay.
 
 - Locked: name + price (`SR-02`) + confidence (`SR-03`). Unknown: "Unknown Item" + Add (`SR-04`).
@@ -172,10 +240,30 @@ Worklet vector → JS → `knn` (`TR-30`) → `match` → `stability` → `getPr
 
 ### P1-7 · App shell and cleanup
 
+> **Done 2026-09-14 on the Infinix, release APK.**
+> - **Tabs and enrollment:** both tabs work, and a 4th product was enrolled from the Scan tab.
+> - **Language:** Filipino survived a force-stop.
+> - **Gate check dry run PASS** on 4 products / 20 shots: 0 missing photos, self-match 20/20 at
+>   1.000000, in 2.4 s.
+> - **Record P1-8 from screenshots:** the readout never reached logcat in release.
+>
+> **Amended 2026-09-14.**
+> - **Navigation:** React Navigation bottom tabs, not `expo-router`. Operator's call, ADR-015:
+>   23 packages instead of 73, and no reanimated to clash with the frame processor's worklets.
+> - **Enrollment** lives inside the Scan tab, sharing its one camera. The camera is live only while
+>   the tab is focused.
+> - **The gate check** is a collapsed section at the bottom of the Products tab. It shows §4 steps
+>   3–4 and latency readouts on screen.
+> - **Language** follows the phone (`fil` / `tl` → Filipino). A manual choice is saved in
+>   `app_meta.ui_language` and applies without a restart (`SR-42`).
+> - **Removed:** the GPU toggle. The delegate is not adopted until its vectors are checked.
+
 - `expo-router` ~57.0.21 with two tabs: **Scan** and **Products** (a plain list read from SQLite —
   it is how you check the catalog, not `SR-30`'s search) (`TR-14`).
 - i18n: `i18next` + `react-i18next` + `expo-localization`, `en.json` + `fil.json`, every string through
-  it (`TR-16`, `SR-42`, D-4). Audit each against `TR-51` before install.
+  it (`TR-16`, `SR-42`, D-4). Audit each against `TR-51` before install. *(Amended 2026-09-14:
+  `i18next` and `react-i18next` arrived in P1-5, already audited. P1-7 adds `expo-localization`
+  and moves the remaining strings.)*
 - Debug readout for the gate (§4 step 3–4), behind a dev toggle.
 - **Delete `App.tsx` and `src/spike/`** once P1-1's golden test and P1-3 cover what they held.
   `scripts/analyze.mjs` and `relabel.mjs` stay — both checked: they import only `node:fs`/`node:path`,
@@ -207,11 +295,20 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
 
 ## 7. Design questions P1-2 must settle (not decisions for you — engineering)
 
-- **KNN starvation.** `TR-30` takes `LIMIT 10` from `vec_shots`, then joins products. Once soft delete
+- **KNN starvation.** *Resolved by ADR-014: with search in JS, soft-deleted shots and other
+  `model_id`s are simply left out of the in-memory matrix.* Original note: `TR-30` takes `LIMIT 10` from `vec_shots`, then joins products. Once soft delete
   (`SR-32`) or a second `model_id` exists, stale vectors can fill those 10 slots and hide live
   products. Phase 1 has neither, but schema v1 should not paint Phase 2 into a corner — either filter
   inside the `vec0` query (metadata column, if the bundled version supports it) or delete vectors on
   soft delete and re-embed from JPEGs on restore (`TR-24` makes that possible).
+- **Negative shots (ADR-013, `TR-39`).** *Settled by schema v1 (2026-09-14): it has no `kind`
+  column. A forward-only migration (`TR-44`) adds one when Phase 2 builds negatives. Nothing in v1
+  blocks it, because negatives are ordinary `product_shots` rows (`TR-39`).* Original note: Phase 2
+  will store frames the tindera marks "Not in my list" in `vec_shots`, as shots that must never be
+  named. Phase 1 builds none, but schema v1
+  should leave a way to tell a negative apart without re-embedding. For example, a `kind`
+  column on `products`, which the KNN already joins. A forward-only migration (`TR-44`) could also
+  add it later; decide which.
 - **Shot count vs calibration.** Phase 0 calibrated τ/δ on **6** shots per product; `TR-42` caps at
   **5**. Best-of-5 scores are slightly lower than best-of-6 — expect it, note it, retune in Phase 3.
 
@@ -221,12 +318,13 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
 
 | Risk | Status | Phase 1 action |
 |---|---|---|
-| **`NFR-07` latency, 145.5 ms median** | Not met. At 4 fps (250 ms interval) it fits, with no headroom; the worst frame (339.5 ms) overruns. | Split stages and try the GPU delegate (P1-3). Record. Do not redesign — the numbers decide that. |
+| **`NFR-07` latency, 145.5 ms median** | Not met. At 4 fps (250 ms interval) it fits, with no headroom; the worst frame (339.5 ms) overruns. **Split measured (P1-3):** crop + resize ~37 ms, `runSync` 62.8 ms CPU / 43.2 ms GPU; totals 100.7 / 81.2 ms. | Split stages and try the GPU delegate (P1-3) — **done**. Do not redesign — the numbers decide that. |
 | 32-bit test phone | The only device; `armeabi-v7a` gives up TFLite's arm64 kernels | Note every number as 32-bit. A 64-bit budget phone is the more representative target and remains unmeasured. |
-| **Enrollment domain gap** (frame vs JPEG) | New — Phase 0 never exercised the JPEG path | Measure in P1-4 before the gate. |
-| op-sqlite native build | Untested in this project | Day-one checkpoint (P1-2). |
+| **Enrollment domain gap** (frame vs JPEG) | **Measured (P1-4):** dot median 0.9843, min 0.9803 on one static scene. A score can move by up to 0.18; δ is 0.075. | Measure in P1-4 — **done**. Still owed: its effect on real decisions, before the P1-8 gate. |
+| op-sqlite native build | **Failed on device** — sqlite-vec cannot load on 32-bit ARM (op-sqlite#456); plain SQLite works | Day-one checkpoint (P1-2) — **did its job**. BLOB vectors + JS search (ADR-014); native search owed for `NFR-09`. |
 | Release-only failures | Already bit once (ADR-011) | Every checkpoint runs on the **release** APK. |
 | Un-enrolled items land in disambiguate (`NFR-03` 49.5%) | Known | Nothing — Phase 3. The gate's zero-wrong-lock rule still applies. |
+| **Small catalogs accept un-enrolled items** (ADR-013) | New — simulated **15.1%** of un-enrolled frames at 5 products | Nothing in the policy. The gate enrolls 20 and scans only enrolled items, so it cannot surface this. Leave room for negative shots in schema v1 (§7). |
 
 ---
 
@@ -235,7 +333,7 @@ Deferred, not dropped. The schema carries the columns so no migration is needed 
 | What | Where it goes |
 |---|---|
 | Crop+resize vs `runSync` split, CPU vs GPU delegate | `ARCHITECTURE.md` §8 |
-| sqlite-vec KNN latency; policy + stability latency | `ARCHITECTURE.md` §8 (`pending Phase 1` rows) |
+| KNN latency (JS brute force, ADR-014); policy + stability latency | `ARCHITECTURE.md` §8 (`pending Phase 1` rows) |
 | Frame-vs-JPEG embedding agreement | `ARCHITECTURE.md` §4, `PROJECT_STATUS.md` |
 | Bytes per shot / per product (`NFR-08`) | `PROJECT_STATUS.md` measured table |
 | Gate result: counts, self-match scores, ACCEPT vs chip split | `PROJECT_STATUS.md`, `CHANGELOG.md` |
@@ -250,4 +348,4 @@ All on the Infinix X6823, release APK, named in every row.
 - [x] `CLAUDE.md` — this plan added to the *Read first* table *(2026-09-14)*
 - [x] `PROJECT_SPECS.md` — header moved to Phase 1 *(2026-09-14)*
 - [x] `DECISIONS.md` — ADR-012 for D-2 / D-3 *(2026-09-14)*
-- [ ] `ARCHITECTURE.md` §7 — remove `src/spike/` and `App.tsx` from the layout **when P1-7 deletes them**, not before
+- [x] `ARCHITECTURE.md` §7 — remove `src/spike/` and `App.tsx` from the layout **when P1-7 deletes them**, not before *(2026-09-14)*

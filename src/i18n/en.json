@@ -1,0 +1,85 @@
+{
+  "app": {
+    "loading": "Loading…",
+    "catalogError": "Your product list could not be opened.",
+    "modelError": "The recognition model could not be loaded."
+  },
+  "camera": {
+    "permissionNeeded": "BantayNiMama needs the camera to recognise products.",
+    "grant": "Allow camera",
+    "none": "No back camera was found on this phone."
+  },
+  "tabs": {
+    "scan": "Scan",
+    "products": "Products"
+  },
+  "enroll": {
+    "title": "Add a product",
+    "close": "Back to scanning",
+    "name": "Product name",
+    "namePlaceholder": "e.g. Lucky Me Pancit Canton Kalamansi",
+    "pricePiece": "Price per piece (₱)",
+    "pricePack": "Price for the whole pack (₱, optional)",
+    "unitLabel": "Unit (optional)",
+    "unitPlaceholder": "sachet, bote, piraso",
+    "category": "Category (optional)",
+    "shotsProgress": "Photos: {{taken}} of {{max}} — take at least {{min}}",
+    "captureHint": "Fit the product inside the box. Turn it a little between photos.",
+    "capture": "Take photo",
+    "capturing": "Taking photo…",
+    "removeShot": "Remove photo {{number}}",
+    "save": "Save product",
+    "discard": "Start over",
+    "saved": "Saved: {{name}} — {{price}}",
+    "errors": {
+      "nameRequired": "Type the product name.",
+      "piecePriceRequired": "Type the price per piece.",
+      "piecePriceInvalid": "The price per piece should look like 12.50.",
+      "packPriceInvalid": "The pack price should look like 120.00.",
+      "needShots": "Take at least {{min}} photos.",
+      "modelNotReady": "The camera model is still loading. Try again in a moment.",
+      "captureFailed": "The photo was not saved. ({{message}})",
+      "saveFailed": "The product was not saved, and its photos were removed. Please take the photos again. ({{message}})"
+    },
+    "duplicate": {
+      "live": "Looks like something already in your list: {{names}}",
+      "title": "Already in your list?",
+      "body": "These photos look like {{names}}. Save it as a new product anyway?",
+      "saveAnyway": "Save anyway",
+      "cancel": "Cancel"
+    }
+  },
+  "scan": {
+    "scanning": "Point the box at a product",
+    "addProduct": "+ Add product",
+    "frameError": "The camera could not read a frame. ({{message}})",
+    "unknown": "Unknown item",
+    "add": "Add",
+    "whichOne": "Which one is it?",
+    "noPrice": "No price yet",
+    "perUnit": "{{price}} / {{unit}}",
+    "pack": "Whole pack: {{price}}",
+    "confidence": {
+      "sure": "Sure",
+      "likely": "Likely",
+      "notSure": "Not sure"
+    }
+  },
+  "products": {
+    "title": "Products",
+    "empty": "No products yet. Add one from the Scan tab.",
+    "shots": "{{n}} photos"
+  },
+  "settings": {
+    "language": "Language",
+    "english": "English",
+    "filipino": "Filipino"
+  },
+  "gate": {
+    "title": "Gate check (debug)",
+    "run": "Run check",
+    "running": "Checking photo {{done}} of {{total}}…",
+    "needsModel": "The recognition model is still loading.",
+    "clearLog": "Clear lock log"
+  }
+}

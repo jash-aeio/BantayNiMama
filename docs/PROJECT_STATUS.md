@@ -4,8 +4,8 @@
 > decided.** Keep it short — it is a dashboard, not a journal. The journal is `CHANGELOG.md`.
 
 **Last updated:** 2026-09-14
-**Current phase:** Phase 1 — Proof of concept, real data path *(Phase 0 gate passed and verified 2026-09-13)*
-**Overall health:** 🟢 Core thesis holds at the Phase 0 gate — latency (`NFR-07`) and un-enrolled handling are open
+**Current phase:** Phase 2 — UI / UX *(Phase 1 gate passed and verified with `/phase-gate` 2026-09-14; Phase 0 gate 2026-09-13)*
+**Overall health:** 🟢 The real data path holds: 20 products survive a force-stop and scan with zero wrong locks. Latency (`NFR-07`), un-enrolled handling (`NFR-03`) and look-alike confusion are open.
 
 ---
 
@@ -13,11 +13,13 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 1 — real data path.** Phase 0 gate verified by `/phase-gate` (2026-09-13): top-1 **94.5%** (86/91) on 19 gated products, reproduced from the raw phone backup (SHA-256 `a9f9232c…`) through `relabel.mjs` → `analyze.mjs`. |
-| **Next action** | Plan approved 2026-09-14 — [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md). First its §2 housekeeping: merge the Phase 0 branch into `main`, back up `spike/results/` off the laptop. Then P1-1 (domain layer, test-first) and P1-2's day-one checkpoint (`select vec_version()` on the release APK). Carry forward: τ 0.46 / δ 0.075 go into `app_meta` (`TR-35`), never constants. |
+| **Working on** | **Phase 1 closed: gate PASS, verified with `/phase-gate` 2026-09-14** (branch `feat/phase-1-data-path`). Gate run 3, Infinix X6823, release APK, airplane mode: 20 products / 100 shots survived a force-stop, 0 missing photos, self-match 100/100, and all 20 locked or chipped with **0 wrong locks** in the full lock log. It followed run 2's failure and ADR-016 (lock quorum 3 → 4 of 5). Domain tests **147**, typecheck clean. |
+| **Next action** | 1. Merge `feat/phase-1-data-path` into `main` (PR).<br>2. Write the Phase 2 plan (UI / UX) before building. It must cover confirm mode and store-local negatives (`SR-13`, `SR-14`, ADR-013), edit / correct / delete (`SR-06`–`SR-08`), the quick-pick grid (`SR-10`), first run (`SR-44`), and measuring time-to-lock under 4-of-5 (`NFR-04`). |
 | **Blocked on** | Nothing. |
-| **Watch out for** | Per-frame latency **median 145.5 ms, p90 160.1 ms** on the release APK (n = 226) vs a 25–40 ms budget — `NFR-07` is not met, and the release build did not fix it. See `ARCHITECTURE.md` §8. |
+| **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
+| **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
 | **Known soft spot** | **Un-enrolled products.** At τ/δ, 50 of 105 un-enrolled frames land in *disambiguate* (two wrong chips), so only 49.5% return Unknown (`NFR-03` ≥ 85%, not met). `analyze.mjs`'s 97.1% counts "not auto-accepted". All 3 false accepts are Zonrox bottles → Datu Puti vinegar. |
+| **New risk — small catalogs** | δ rejects un-enrolled items only when an enrolled product is close. Simulated on Phase 0 data, **15.1%** of un-enrolled frames are auto-accepted at 5 products (SR-44's first five), and 9.7% still at 15. Plan (ADR-013): confirm mode + store-local negatives (`SR-13`, `SR-14`), built in Phase 2. **No Phase 1 change** — the gate scans only enrolled items. |
 | **Biggest risk** | Correct accepts are **74.7%** at τ/δ vs `NFR-01` ≥ 90%. Ranking is strong (top-3 100%) but margins are thin, so many correct matches fall to disambiguate. A Phase 3 problem — the Phase 0 gate measures ranking only. |
 
 ---
@@ -27,8 +29,8 @@
 | Phase | Name | Status | Gate |
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
-| **1** | Proof of concept — real data path | 🔵 In progress | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | ⚪ Not started | — |
+| **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
+| 2 | UI / UX | 🔵 In progress — plan not yet written | — |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
@@ -43,16 +45,95 @@ Detail and "done when" for each step: [`PHASE_1_PLAN.md`](PHASE_1_PLAN.md) §5. 
 **release** APK.
 
 - [x] Plan written and decisions D-1 to D-4 settled *(2026-09-14)*
-- [ ] Housekeeping (§2): Phase 0 branch merged into `main`; `spike/results/` backed up off the laptop
-- [ ] P1-1 Domain layer — `match`, `stability`, `money`, `vector` under `node --test`; golden replay
+- [x] Housekeeping (§2): Phase 0 merged into `main` (PR #1, `1d21f27`); `spike/results/` copied to
+      `C:\BantayNiMamaBackups`, all 6 SHA-256 checksums match *(2026-09-14)*. C: is a **different
+      physical SSD** from the repo's D:, so one disk failing is covered — losing the laptop is not.
+- [x] P1-1 Domain layer — `match`, `stability`, `money`, `vector` under `node --test`; golden replay
       reproduces Phase 0 (86/91 top-1, 68/91 accepts, 3/196 false accepts) (`TR-30`–`TR-37`, `TR-41`)
-- [ ] P1-2 Storage — **checkpoint:** `select vec_version()` on device; schema v1 + `app_meta` seed (`TR-13`, `TR-35`, `TR-44`)
-- [ ] P1-3 ML module — frame + still embedders; crop/resize vs `runSync` split timed; GPU delegate tried (`TR-25`, `TR-29`)
-- [ ] P1-4 Photo store — relative paths; frame-vs-JPEG agreement and bytes/shot measured (`TR-42`, `TR-43`, `NFR-08`)
-- [ ] P1-5 Enrollment — one transaction, photos first (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`)
-- [ ] P1-6 Scanner — lock / chips / Unknown; KNN and policy latency timed (`SR-02`–`SR-04`, `SR-09`, `SR-12`)
-- [ ] P1-7 App shell — two tabs, `en` + `fil` (Claude drafts, operator corrects); spike code deleted (`TR-14`, `TR-16`, `SR-42`)
-- [ ] P1-8 **Gate run** — 20 products, force stop, airplane mode, then `/phase-gate`
+      *(2026-09-14, 40 tests)*
+- [x] P1-2 Storage — day-one device checkpoint; schema v1 + `app_meta` seed (`TR-13`, `TR-35`, `TR-44`, ADR-014) *(2026-09-14)*
+  - [x] op-sqlite ~18.2.1 added, `sqliteVec` on, network-audited (`TR-51`); `openDatabase()` + checkpoint probe written *(2026-09-14)*
+  - [x] **Checkpoint on the Infinix, release APK** *(2026-09-14)* — sqlite-vec **failed** to load (op-sqlite#456). The second build passed: plain SQLite opens `bantay.db`, BLOB vectors are bit-exact, JS KNN takes 9.2 ms at 100 shots and 234 ms at 2,500 → ADR-014
+  - [x] Pure inline KNN, BLOB codec, `app_meta` parsing and migration planning in `src/domain` — tests 40 → 74 *(2026-09-14)*
+  - [x] Schema v1 (`product_shots.embedding` BLOB), forward-only migration, `app_meta` seed, `insertProductWithShots` (one transaction), `loadVectorIndex` *(2026-09-14)*
+  - [x] **On the Infinix** *(2026-09-14)*: `bantay.db` migrated 0 → 1 with `app_meta` intact. Enroll, close, reopen and search found each shot's own vector top-1 at 1.000000, with the price back as 1250 centavos (3 shots reloaded in 0.6 ms). A failed transaction left no row.
+- [x] P1-3 ML module — frame + still embedders; crop/resize vs `runSync` split timed; GPU delegate tried (`TR-25`, `TR-29`) *(2026-09-14)*
+  - [x] `src/ml/` (`loadModel`, `frameEmbedder`, `stillEmbedder`, shared `model.ts`) plus `src/domain/pixels.ts` and `stats.ts`; spike embedder deleted; tests 74 → 88 *(2026-09-14)*
+  - [x] **On the Infinix** *(2026-09-14)*: live frames give 1280-d vectors at length 1.00000. Per-frame total median **100.7 ms on CPU, 81.2 ms with `android-gpu`**; `runSync` 62.8 → 43.2 ms; crop+resize ~37 ms either way (n = 40 each; `ARCHITECTURE.md` §8)
+  - [ ] Before adopting the GPU delegate: check its vectors agree with CPU's (τ/δ were calibrated on CPU)
+  - [x] `stillEmbedder` on device *(2026-09-14, in P1-4)*: 10 saved JPEGs embedded on the JS thread, and each re-embed after a force-stop matched its saved vector at dot 1.000000
+- [x] P1-4 Photo store — relative paths; frame-vs-JPEG agreement and bytes/shot measured (`TR-42`, `TR-43`, `NFR-08`) *(2026-09-14)*
+  - [x] `referencePhoto.ts` (path, size cap without upscaling), `db/photos.ts` (save / list / delete), `captureReference` (one crop, two uses), second CPU model instance for JPEGs; tests 88 → 93 *(2026-09-14)*
+  - [x] **On the Infinix** *(2026-09-14, 10 captures, one static scene, CPU)*: frame-vs-JPEG dot min 0.9803 / median 0.9843; JPEG 17.5 KB median per shot (~88 KB per 5-shot product, `NFR-08` ≤ 200 KB); 396 px crop of a 1280×720 frame, not upscaled
+  - [x] Photos survive a force-stop *(2026-09-14)*: after `am force-stop` and relaunch, all 10 photos were on disk (175.5 KB), and each re-embedded to dot 1.000000 with its saved vector (`TR-24`)
+  - [x] Owed before the P1-8 gate: effect of JPEG-path enrollment on real decisions. Phase 0's τ/δ came from live-frame vectors; a 0.984 dot can move a score by up to 0.18 (δ = 0.075). **Addressed by the gate (2026-09-14):** all gate runs enrolled through JPEG-path vectors, and run 3 locked or chipped all 20 with 0 wrong locks. Not a controlled frame-vs-JPEG comparison; Phase 3's retune uses JPEG-path vectors.
+- [x] P1-5 Enrollment — one transaction, photos first (`SR-20`, `SR-21`, `SR-23`, `SR-24`, `TR-45`) *(2026-09-14)*
+  - [x] `domain/enrollment.ts` (form → centavos, duplicates ≥ τ), `features/enrollment/` (JPEG-path vectors, rollback deletes photos, index extended after COMMIT), `db/catalog.ts` (model_id check, launch orphan sweep); tests 93 → 107 *(2026-09-14)*
+  - [x] i18next + react-i18next pulled forward from P1-7, network-audited (`TR-51`); enrollment copy in `en` + `fil` (fil is a draft for the operator); keys typed *(2026-09-14)*
+  - [x] Release APK installed and launched on the Infinix *(2026-09-14, 4m 23s build)*: `bantay.db` schema 1 → 1, τ 0.46 / δ 0.075 read from `app_meta`, 0 products, **orphan sweep removed 10** (the P1-4 check photos), other-model shots 0; English form renders
+  - [x] **On the Infinix, release APK** *(2026-09-14)*: enrolled Reno Liver Spread, Argentina Corned Beef 260g and 100g (5 shots each). The duplicate warning fired on the second Argentina (`SR-23`). After a relaunch: 3 products / 15 shots, index 15, sweep 0. Scan (19 screenshots, 5 s apart): **LOCK Reno** ₱20.00 at 0.750 / 0.746 (margin 0.237 / 0.254); **LOCK 260g** ₱35.00 at 0.881 (margin 0.160); the 260g/100g pair gave **CHIPS** (margins 0.012–0.042) and 100g never locked; empty and in-between frames were UNKNOWN. **Zero wrong locks.** Frames were matched to products by scan order (operator-reported).
+  - [x] Frame-vs-JPEG agreement on real products *(2026-09-14, two enrollment sessions, 92 shots)*: dot **min 0.9882 / 0.9804, median 0.9960 / 0.9963**; JPEG **max 34.1 KB** per shot (≤ 170.5 KB per 5-shot product, `NFR-08` ≤ 200 KB)
+  - [x] Filipino copy reviewed by the operator before `/phase-gate` (D-4, amended 2026-09-14): **no corrections**; `fil.json` stands as drafted *(2026-09-14)*
+- [x] P1-6 Scanner — lock / chips / Unknown; KNN and policy latency timed (`SR-02`–`SR-04`, `SR-09`, `SR-12`) *(2026-09-14)*
+  - [x] `domain/confidence.ts` (Sure / Likely / Not sure from δ — operator's choice), `features/scanner/` (`useScanner`: renders only on lock change, clears on lost quorum, times KNN and policy separately; `ScanOverlay`: LOCK / CHIPS / Unknown + Add), `scan` strings in `en` + `fil`; tests 107 → 114 *(2026-09-14)*
+  - [x] **On the Infinix, release APK** *(2026-09-14, 18 screenshots 5 s apart, each checked against the product actually in the reticle)*:
+    - **Locks:** 100g ₱25.00 and 260g ₱35.00 ×2, all **correct**, all read *Likely*. **Zero wrong locks.**
+    - **Chips:** 260g | 100g on the size pair; tapping 100g showed ₱25.00. Reno held sideways gave chips 100g | Reno, and tapping Reno showed ₱20.00.
+    - **Unknown:** the un-enrolled ascorbic acid blister pack, motion blur and empty frames all read **Unknown**.
+  - [x] Timed on the Infinix *(2026-09-14, n = 200 frames, 15 shots)*: KNN **1.31 / 4.23 ms**, policy + stability **0.07 / 0.11 ms** median/p90 → `ARCHITECTURE.md` §8
+  - [ ] Not exercised: tapping **Add** on Unknown → enroll mode
+  - [ ] **Near miss to carry into Phase 3:** with Reno held sideways, **Argentina 100g ranked top-1** and only the δ margin turned it into chips instead of a wrong lock. In P1-5, Reno held upright locked at 0.750.
+- [x] P1-7 App shell — two tabs, `en` + `fil` (Claude drafts, operator corrects); spike code deleted (`TR-14`, `TR-16`, `SR-42`) *(2026-09-14)*
+  - [x] React Navigation tabs (ADR-015, `TR-14` amended), `expo-localization` + saved `ui_language`, gate check on the Products tab (`domain/gateCheck.ts`), `App.tsx` and `src/spike/` deleted; 25 packages network-audited; tests 114 → 131 *(2026-09-14)*
+  - [x] **On the Infinix, release APK** *(2026-09-14)*:
+    - Both tabs work; the tab labels were clipped by the navigation bar and are fixed.
+    - A 4th product (Clover Chips 24g) was enrolled from the Scan tab.
+    - Filipino survived a force-stop.
+    - **Gate check dry run PASS** on 4 products / 20 shots: 0 missing photos, self-match 20/20, own score min 1.000000, nearest other shot max 0.8679, in 2.4 s.
+    - The camera pausing on Products is operator-reported.
+  - [ ] The gate readout does not reach logcat in release (neither does `[catalog]`), so record P1-8 from screenshots
+- [x] P1-8 **Gate run** — 20 products, force stop, airplane mode, then `/phase-gate` *(2026-09-14, **PASS** on run 3)*
+  - [x] **Steps 1–4, first run** *(2026-09-14, Infinix X6823, release APK, CPU)*:
+    - Setup: 20 products / 100 shots, with 4 same-brand pairs plus Knorr Chicken/Pork and Datu Puti Soy Sauce/Vinegar. Force-stop confirmed (new process, 4 min old); `airplane_mode_on` 1.
+    - **Gate check PASS:** index 100, other-model 0, schema 1, 1280-d, τ 0.46, δ 0.075; photo rows 100, **0 missing**; self-match **100/100**, own score min **1.000000**; nearest other shot median 0.7512, p90 0.8254, max 0.8954; 11.7 s.
+    - The check ran after the scan step, in the same process. Scanning does not write data.
+  - [ ] **Step 5, first run: not yet passable.**
+    - **Coverage:** 57 screenshots about 6 s apart, each checked against the reticle. 19/20 products observed correct: **13 LOCK**, 6 chips containing the right product. **0 wrong locks observed.**
+    - **Piattos Cheese 18g not observed:** one screenshot, still settling on Unknown.
+    - **Sampling gap:** a wrong lock lasting under ~6 s could be missed.
+    - **Near misses:** Datu Puti Soy Sauce ranked Vinegar top-1 (chips), and Lucky Me Beef was once chipped with Pancit Canton Chilimansi.
+  - [x] Lock log added (`domain/lockLog.ts`, every lock change time-stamped and segmented at Unknown; tests 131 → 139) so step 5 is judged on the whole run, not on samples *(2026-09-14)*
+  - [ ] **Gate run 2, step 5: FAILED — 1 wrong lock** *(2026-09-14, 11:42:38–11:49:12, Infinix X6823, release APK, CPU)*:
+    - **Conditions:** force-stop confirmed (new process), airplane mode on. Lock log: 98 changes, 20 LOCK, 26 CHIPS, 25 segments.
+    - **The wrong lock:** at **11:43:56** (segment #2), with a **motion-blurred Alaska Evaporada 360ml** in the reticle (backup shot 012), the app **locked Argentina Corned Beef 260g** and showed ₱35.00 (true price ₱50.00). By §4, any wrong lock fails the gate.
+    - **Every product was otherwise correct:** 14 locked (including Piattos this time), and 6 were chips containing the product.
+    - **Likely cause, not measured:** motion blur. The sharpness gate (`TR-27`) is deferred and its floor is 0; the log has no scores.
+    - **Steps 3–4 PASS, same process** (pid 19300, airplane mode, run after the scan): index 100, other-model 0, schema 1, 1280-d, τ 0.46, δ 0.075; photo rows 100, **0 missing**; self-match **100/100**, own score min **1.000000**; nearest other shot median 0.7512, max 0.8954; 13.3 s.
+    - **Run 2 overall: FAIL.** Steps 3 and 4 pass; step 5 fails on one wrong lock.
+  - [x] **Diagnosis** *(2026-09-14, operator's call; lock log now carries score, margin, 5 voting frames and sharpness)*:
+    - **The wrong lock did not reproduce** in about 2 minutes: 7 LOCK, all correct.
+    - **Confusion in both directions:** with Argentina 260g held, Alaska 360ml ranked top-1 at 0.63–0.76, including accept-grade votes above δ (margins 0.09 and 0.12). At most 1 such vote per window was seen; the failure needed 3.
+    - **Blur does not explain it:** wrong-can votes had sharpness ×1000 of 1.7–12.6, against a frame median of 8.6 (p10 0.3, p90 20.9).
+    - **Measuring sharpness costs 20.9 ms/frame.**
+    - **Limits:** votes attributed by protocol timing, no screenshots.
+  - [x] **Fix (ADR-016, operator's call):** lock quorum 3 → 4 of 5 (`TR-36` amended); τ/δ unchanged; sharpness measurement removed from the worklet *(2026-09-14)*
+  - [x] **Gate run 3: meets §4** *(2026-09-14, Infinix X6823, release APK, CPU, airplane mode, 4-of-5 quorum)*: force-stop, steps 3–4, all 20 scanned with the lock log and backup screenshots
+    - [x] **Steps 3–4 PASS** *(2026-09-14, 12:19, new process pid 27320 after force-stop, airplane mode, 4-of-5 build)*: products 20, shots 100, index 100, other-model 0; schema 1, 1280-d, τ 0.46, δ 0.075; photo rows 100, **0 missing**; self-match **100/100**, own score min **1.000000**; nearest other shot median 0.7512, max 0.8954; 13.3 s
+    - [x] **Step 5 PASS** *(same process pid 27320 throughout, 12:20:48–12:27:16)*:
+      - **20/20 products** locked correctly or offered as chips containing the product: **15 LOCK**, 5 chips only (Alaska 360ml, Datu Puti Soy Sauce, Knorr Chicken, Knorr Pork, Pancit Canton Chilimansi).
+      - **0 wrong locks** in the full lock log: 145 changes, 24 LOCK, 26 CHIPS, 21 segments.
+      - **Attribution checked against 63 backup screenshots.** #8 was a Clover lock with the Clover bag in view. #3 was LOCK Argentina 100g with the squat 100 g can (shot 012). "260", "SPICY LABUYO", "CHILIMANSI" and "KALAMANSI" are readable where they matter.
+      - **Alaska 140/360 ml** attributed by list order plus the operator's chip taps.
+      - **Caveats:** one clean run is consistent with ADR-016 but does not prove it fixed the rare wrong lock. Chips were tapped ~10 times (a tap only shows a price). Time-to-lock under 4-of-5 is unmeasured.
+  - [x] **`/phase-gate` verdict: PASS** *(2026-09-14)*. Every §4 criterion has measured evidence meeting its target:
+    - Setup: 20 products, 4 variant pairs.
+    - Force-stop: new process, same process throughout.
+    - Airplane mode on.
+    - Step 3: counts, `app_meta`, 0 missing photos.
+    - Step 4: self-match 100/100.
+    - Step 5: 20/20, 0 wrong locks.
+
+    **Carried open, outside the gate:** `NFR-07` (~126 ms), `NFR-01` / `NFR-03` (Phase 3), `NFR-04` under 4-of-5 (unmeasured), GPU vector agreement, the Add → enroll tap, and look-alike confusion.
 
 ---
 
@@ -117,10 +198,32 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Correct accepts at τ/δ (`NFR-01`) | ≥ 90% | **74.7%** (68/91) — not met; 19 go to disambiguate, 4 to unknown | 2026-09-13 |
 | False positives at τ/δ (`NFR-02`) | ≤ 2% | **1.5%** (3/196; 95% CI 0.5–4.4%) — all three are Zonrox bottles → Datu Puti vinegar | 2026-09-13 |
 | Unknown rejection (`NFR-03`) | ≥ 85% | **49.5%** (52/105) return Unknown — not met. 97.1% (102/105) are not auto-accepted; the other 50 land in disambiguate | 2026-09-13 |
+| Un-enrolled accepts on a small catalog (**simulated**) | ≤ 2% | **7.9%** at 1 product · **15.1%** at 5 · 9.7% at 15 · 2.9% at 25 — per frame, Phase 0 data (Infinix X6823) resampled by `scripts/small-catalog.mjs`, not a store measurement (ADR-013) | 2026-09-14 |
 | Embedding dimensionality | assumed 1024 | **1280** | 2026-09-13 |
 | Per-frame worklet latency, budget Android | 25–40 ms | **140–248 ms, median ~148** — Infinix X6823 (Unisoc T616, armeabi-v7a), **debug build**; covers crop+resize+inference+L2 as one | 2026-09-13 |
 | Same, release build | 25–40 ms | **median 145.5 ms · p90 160.1 · range 126.5–339.5** — Infinix X6823, release APK, n = 226 test frames. Earlier spot readings (140.7 / 144.0 ms) agree. | 2026-09-13 |
 | Inference latency, iOS | 8–15 ms | — | — |
+| JS brute-force KNN, no sqlite-vec | must fit `NFR-07` / `NFR-09` | **100 shots: median 9.2 ms · 2,500 shots: median 234.0 ms** (inline loop, n = 10 each; 831.1 ms via `dot()` per shot) — Infinix X6823, release APK | 2026-09-14 |
+| Read 2,500 × 1280-d vector BLOBs | — | **56.3 ms**, bit-exact round trip — Infinix X6823, release APK | 2026-09-14 |
+| Per-frame worklet stages, CPU (P1-3) | ≤ 60 ms total (`NFR-07`) | crop+resize **36.9** · `runSync` **62.8** · normalize **0.9** · total **100.7** ms median (total p90 109.1), n = 40 — Infinix X6823, release APK. Not met. | 2026-09-14 |
+| Per-frame worklet stages, `android-gpu` delegate (P1-3) | ≤ 60 ms total (`NFR-07`) | crop+resize **36.6** · `runSync` **43.2** · normalize **0.9** · total **81.2** ms median (total p90 83.0), n = 40 — Infinix X6823, release APK. Not met. **Not adopted:** GPU-vs-CPU vector agreement unmeasured. | 2026-09-14 |
+| Frame-vs-JPEG vector agreement (P1-4) | no target yet; must not move decisions | dot **min 0.9803 · median 0.9843**, n = 10 captures of **one static scene** — Infinix X6823, release APK, CPU | 2026-09-14 |
+| Enroll → relaunch → scan (P1-5) | lock or chip, zero wrong locks | 3 products: Reno **LOCK** 0.750, Argentina 260g **LOCK** 0.881, 260g/100g size pair **CHIPS** (margins 0.012–0.042); **0 wrong locks** in 19 screenshots — Infinix X6823, release APK, CPU, JPEG-path vectors | 2026-09-14 |
+| Scan overlay on device (P1-6) | lock or chip, zero wrong locks | 18 screenshots, each checked against the product in the reticle: **3 correct locks** (100g, 260g ×2, all *Likely*), chips on the size pair and on Reno held sideways (100g ranked top-1 there — a near miss), un-enrolled blister pack → **Unknown**; **0 wrong locks** — Infinix X6823, release APK, CPU | 2026-09-14 |
+| JS KNN / policy + stability per frame (P1-6) | part of `NFR-07` | KNN **1.31 / 4.23 ms** · policy + stability **0.07 / 0.11 ms** median/p90, n = 200 live frames, 15 shots — Infinix X6823, release APK | 2026-09-14 |
+| Worklet stages, CPU, while charging (P1-6) | ≤ 60 ms total (`NFR-07`) | crop+resize **60.4** / 61.5 · `runSync` 63.5 / 76.3 · normalize 0.9 · total **124.7** / 142.9 ms, n = 40. **crop+resize is up from P1-3's 36.9, cause unconfirmed** (heat while charging, or the P1-4 refactor); re-measure unplugged — Infinix X6823, release APK | 2026-09-14 |
+| Gate check dry run (P1-7) — `PHASE_1_PLAN` §4 steps 3–4 | 0 missing photos; every shot self-matches | **PASS** on 4 products / 20 shots: index 20, other-model 0, schema 1, 1280-d; photo rows 20, **0 missing**; self-match **20/20**, own score min **1.000000**; nearest other shot median 0.7186, max 0.8679; 2.4 s — Infinix X6823, release APK, CPU. **A dry run, not the gate** (20 products needed) | 2026-09-14 |
+| Frame-vs-JPEG agreement, real products (P1-8 prep) | no target; must not move decisions | Session 1: dot **min 0.9882 · median 0.9960** (n = 40). Session 2: **min 0.9804 · median 0.9963** (n = 52). **Worst of 92 shots: 0.9804**, about P1-4's one static scene (0.9803), and it bounds a score shift at ≈ 0.20; typical ≈ 0.09 — Infinix X6823, release APK, CPU | 2026-09-14 |
+| Reference photo size, real products (`NFR-08`) | ≤ 200 KB per 5-shot product | Session 1: **21.9 KB median · 32.5 KB max** per shot (n = 40). Session 2: **24.2 KB median · 34.1 KB max** (n = 52). Five worst-case shots ≤ **170.5 KB** ✅ — Infinix X6823 | 2026-09-14 |
+| Worklet stages, CPU, **unplugged** (P1-8 prep) | ≤ 60 ms total (`NFR-07`) | Session 1: crop+resize **59.7** / 60.6 · `runSync` 71.6 / 82.2 · normalize 0.9 · total **132.0** / 144.2 ms. Session 2: crop+resize **59.6** / 61.2 · `runSync` 72.5 / 75.9 · total **133.2** / 138.0 ms. n = 40 each, during enrollment, unplugged (operator-reported). **Not charging heat.** A post-relaunch 6-frame reading of 35.9 ms hints at sustained-use heat; unproven — Infinix X6823, release APK | 2026-09-14 |
+| Gate §4 steps 3–4 (P1-8, first run) | 0 missing photos; every shot self-matches | **PASS** on 20 products / 100 shots after a force-stop, in airplane mode: 0 missing, self-match **100/100**, own score min **1.000000**, nearest other shot max 0.8954, 11.7 s — Infinix X6823, release APK, CPU | 2026-09-14 |
+| Gate §4 step 5 (P1-8, first run, sampled) | correct lock or chip for all 20; zero wrong locks | **19/20 observed** (13 LOCK · 6 chips), **0 wrong locks in 57 screenshots about 6 s apart**; Piattos not observed. **Not a pass:** sampled, and one product missing — Infinix X6823, release APK, CPU | 2026-09-14 |
+| JS KNN / policy per frame at 100 shots (P1-8) | part of `NFR-07` | KNN **8.52 / 13.78 ms** · policy + stability **0.08 / 0.10 ms** median/p90, n = 200 live frames (P1-2 synthetic: 9.2 ms at 100 shots) — Infinix X6823, release APK | 2026-09-14 |
+| **Gate §4 step 5 (P1-8, run 2, full lock log)** | correct lock or chip for all 20; **zero wrong locks** | **FAIL — 1 wrong lock.** A motion-blurred Alaska Evaporada 360ml locked as Argentina Corned Beef 260g (₱35.00 shown, true ₱50.00) at 11:43:56. All 20 products were otherwise locked (14) or chipped (6) correctly. 98 lock changes, 20 LOCK, 26 CHIPS — Infinix X6823, release APK, CPU, airplane mode | 2026-09-14 |
+| Alaska 360ml ↔ Argentina 260g confusion (P1-8 diagnosis) | a wrong lock needs 3 of 5 frames to rank the wrong product first by at least δ | **Not reproduced as a lock** in about 2 min (7 LOCK, all correct). Wrong-can top-1 votes at 0.63–0.76, with accept-grade margins up to **0.12** (δ 0.075); at most 1 per window. Attributed by protocol timing — Infinix X6823, release APK, CPU | 2026-09-14 |
+| Frame sharpness, ×1000 (P1-8 diagnosis, `TR-27`) | floor not yet calibrated | n = 300: **p10 0.3 · median 8.6 · p90 20.9**. Wrong-can votes 1.7–12.6, so it **does not separate** them. **Cost 20.9 / 21.3 ms per frame** (n = 40) — Infinix X6823, release APK | 2026-09-14 |
+| **Gate §4 step 5 (P1-8, run 3, full lock log, 4-of-5)** | correct lock or chip for all 20; **zero wrong locks** | **PASS — 20/20** (15 LOCK, 5 chips only), **0 wrong locks** in 145 lock changes (24 LOCK, 26 CHIPS); attribution checked against 63 backup screenshots. Steps 3–4 PASS in the same process after a force-stop — Infinix X6823, release APK, CPU, airplane mode | 2026-09-14 |
+| Reference photo size (`NFR-08`) | ≤ 200 KB per 5-shot product | **17.5 KB median, 17.6 KB max per shot** → ~88 KB per product (one scene); 396 px crop of a 1280×720 frame, JPEG q80 | 2026-09-14 |
 
 ---
 
@@ -132,6 +235,7 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Q-2 | ~~Empirical τ and δ~~ **τ 0.46, δ 0.075** (Phase 0; retune in Phase 3) | Phase 0 measurement | Resolved 2026-09-13 |
 | Q-3 | MobileCLIP vs MobileNetV3 | Phase 3 bake-off | Phase 3 |
 | Q-4 | INT8 accuracy cost | Phase 3 | Phase 3 |
+| Q-5 | `confirm_below` — catalog size at which confirm mode ends (`TR-38`, ADR-013) | Phase 3 store data | Phase 3 |
 | D-1–D-4 | ~~Phase 1 gate wording, test runner, golden fixture, Filipino copy~~ **Settled** — `PHASE_1_PLAN.md` §3, ADR-012 | Operator | Resolved 2026-09-14 |
 
 ---

@@ -3,10 +3,12 @@
   "compilerOptions": {
     "strict": true,
     "noUncheckedIndexedAccess": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
     "paths": {
       "@/*": ["./src/*"]
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "android", "ios", "scripts"]
+  "exclude": ["node_modules", "android", "ios", "scripts", "**/*.test.ts"]
 }

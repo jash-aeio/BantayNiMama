@@ -10,7 +10,7 @@ on-device image embeddings, local vector search. **No backend, ever.**
 | Document | When to read it |
 |---|---|
 | [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md) | **Every session.** Current phase, blockers, what's next. |
-| [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) | **While Phase 1 is open.** Work breakdown in order, the exact gate, what is deferred, risks carried in. |
+| [`docs/PHASE_1_PLAN.md`](docs/PHASE_1_PLAN.md) | Reference now that Phase 1 is closed (gate passed 2026-09-14). It holds the gate protocol and lock-log method (§4), what was deferred to Phase 2 and 3 (§6), and the risks carried forward (§8). |
 | [`docs/PHASE_0_RUNBOOK.md`](docs/PHASE_0_RUNBOOK.md) | Reference now that Phase 0 is closed — how the labeled datasets were captured. Phase 3 retuning reuses its method. |
 | [`docs/PROJECT_SPECS.md`](docs/PROJECT_SPECS.md) | Before implementing anything. Requirement IDs live here. |
 | [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) | Before touching the pipeline, schema, or matching policy. |
@@ -77,6 +77,8 @@ You can run `/feature-done` to walk this checklist.
   If logic can be pure, put it there — it is the only part testable without a device.
 - Native/camera/DB layers stay thin and delegate to `src/domain/`.
 - **Worklet code must carry the `'worklet'` directive** and must not touch React state or async JS.
+  Declare worklet helpers **above** the worklets that call them. A helper declared below is captured
+  as `undefined`, which typecheck and tests cannot see (`ARCHITECTURE.md` §2).
 - **Every user-facing string goes through i18n** (`en` + `fil`). No hardcoded copy in components —
   including error messages (`SR-42`).
 - Filipino retail terms (*tingi*, *buo*, *tindera*) are domain vocabulary. Use them in code and copy
@@ -104,12 +106,16 @@ You can run `/feature-done` to walk this checklist.
 - Do not start the next phase before the current phase's gate has been measured and recorded.
 - Flag honestly when something is a known limitation (`L-01`–`L-04`) rather than working around it.
   Two of them are genuinely unsolvable; pretending otherwise ships a feature that fails silently.
+- **Ask questions with the `AskUserQuestion` tool, never as plain text.** Whenever you need the
+  developer to clarify, choose, confirm, or supply an answer, call `AskUserQuestion` instead of
+  writing the question in your reply. Offer concrete options, and put your recommended one first.
+  Don't end a turn with a question that only lives in prose.
 
 ## Commands
 
 ```bash
-npm run typecheck     # tsc --noEmit
-npm test              # domain unit tests
+npm run typecheck     # tsc on the app, then on src/domain/ tests (tsconfig.test.json)
+npm test              # domain unit tests + Phase 0 golden replay (needs spike/results/ — ADR-012)
 npx expo start --dev-client   # requires a development build; Expo Go will NOT work (TR-03)
 ```
 

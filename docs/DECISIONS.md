@@ -49,7 +49,7 @@ moving inference to the JS thread gets re-evaluated then.
 
 ## ADR-003 — sqlite-vec over a dedicated vector database
 
-**Status:** Accepted · 2026-09-12
+**Status:** Accepted · 2026-09-12 · *sqlite-vec half superseded by ADR-014 (it cannot load on 32-bit ARM); op-sqlite and the one-file layout stand*
 
 **Context.** The app needs KNN over a few thousand embeddings, entirely offline.
 
@@ -66,7 +66,7 @@ Phase 4 is a zip, not a migration.
 
 ## ADR-004 — No ANN index; brute-force KNN
 
-**Status:** Accepted · Revisit above ~50,000 vectors · 2026-09-12
+**Status:** Accepted · Revisit above ~50,000 vectors · 2026-09-12 · *Where brute force runs amended by ADR-014 (JS for now; the "sub-millisecond" figure below was an estimate for native code — JS measured 234 ms at 2,500 shots)*
 
 **Context.** Vector search must return in single-digit milliseconds.
 
@@ -258,8 +258,220 @@ matching policy should be held to it. It is 9.6 MB of JSON and gitignored.
 - Domain code is limited to syntax that type stripping can erase: no `enum`, no `namespace`, no
   constructor parameter properties.
 - It imports siblings by relative path with the `.ts` extension, not through the `@/` alias.
-  `tsconfig.json` needs the matching flags (`allowImportingTsExtensions`, `erasableSyntaxOnly`);
-  confirm them in P1-1.
+  `tsconfig.json` enables the matching flags, `allowImportingTsExtensions` and
+  `erasableSyntaxOnly` — *confirmed in P1-1, 2026-09-14*.
+- *Found in P1-1:* TypeScript 6 no longer loads every installed `@types` package, so test files
+  cannot see `node:test`. Declaring `node` types globally would leak Node's types into React
+  Native code. Test files are therefore excluded from `tsconfig.json` and typechecked through
+  `tsconfig.test.json`; `npm run typecheck` runs both.
+- *Found in P1-1:* Node warns `MODULE_TYPELESS_PACKAGE_JSON` for each `.ts` test file. The fix
+  it suggests, `"type": "module"`, would break the CommonJS `babel.config.js` and
+  `metro.config.js`, so `npm test` disables that one warning instead.
 - **A fresh clone's `npm test` fails until `spike/results/` is restored from backup.** That is
   deliberate. It is also why backing up that folder is a Phase 1 prerequisite (`PHASE_1_PLAN.md`
   §2). `TR-53` is unaffected: the test reads a local file and needs no network.
+
+---
+
+## ADR-013 — On a small catalog, ask instead of quoting; learn negatives from the store's shelf
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Adds `SR-13`, `SR-14`, `TR-38`, `TR-39`;
+amends `SR-44`
+
+**Context.** In Phase 0, δ did the un-enrolled rejection, not τ (`ARCHITECTURE.md` §6). δ can only
+reject an item when an enrolled product sits close to it. Every Phase 0 number came from a
+25-product catalog, but a new store starts with five (`SR-44`). `scripts/small-catalog.mjs`
+resamples the Phase 0 data into smaller catalogs. Per frame, at τ 0.46 / δ 0.075, un-enrolled frames
+auto-accepted as a wrong product are 7.9% at 1 product, **15.1% at 5**, 9.7% at 15, and 2.9% at 25.
+`NFR-02` allows ≤ 2%. At 5 products, 8.9% of those false accepts are same-brand siblings; the rest
+are unrelated items (Ajinomoto salt → Colgate sachet). This is a simulation on one counter's data,
+not a store measurement.
+
+**Decision.**
+1. **Confirm mode (`SR-13`).** Below `app_meta.confirm_below` enrolled products (`TR-38`), an ACCEPT
+   becomes *"Is this {name}? ₱{price} — Yes / No"*. A wrong price then cannot be quoted
+   confidently. The system does not have to reject correctly for that to hold, and the cost is one
+   tap per scan while the catalog is small.
+2. **Store-local negatives (`SR-14`, `TR-39`).** *No*, or rejecting a wrong result, saves the frame as a
+   hidden negative. The items most likely to be confused are the ones on that store's shelf, and
+   only the tindera can photograph them.
+3. **No change to `match.ts`, τ or δ in Phase 1.** The golden replay stays as it is.
+
+**Rejected.**
+- *A floor for a lone candidate* (accept only ≥ 0.60 when nothing else is enrolled). N=1 falls to
+  0.4%, but correct accepts fall to 65.9%, and N ≥ 2 is unchanged — the problem is sparsity, not
+  the missing top-2.
+- *τ scaled to catalog size.* Holding ≤ 2% takes τ 0.58–0.61 between 3 and 15 products, where
+  correct accepts fall to 59.7–71.0%. The problem becomes "nothing is recognised".
+- *An enrollment prompt for sibling SKUs* ("do you also sell other flavours?"). Considered and not
+  adopted: siblings are under 9% of false accepts at 5 products.
+
+**Deferred to Phase 3, not rejected — a bundled distractor bank.** Ship embeddings of common products
+that no store enrolls, as hidden items. Simulated with half the un-enrolled brand families as the
+bank: 15.1% → 4.7% at 5 products, correct accepts 88.8% → 79.1%. That number is flattered, because
+the bank and the test frames share a counter and lighting. A fair test needs a bank photographed
+elsewhere. Shipping one also means shipping its JPEGs, so it can be re-embedded on a model swap (`TR-24`).
+
+**Consequence.**
+- `confirm_below` needs a calibration Phase 0 cannot give. On Phase 0 data even 25 products leave
+  2.9% of un-enrolled frames accepted, so the value must come from store data in Phase 3.
+- Negatives change the schema: a shot must be distinguishable as a negative. Phase 1 builds none,
+  but schema v1 should not block one (`PHASE_1_PLAN.md` §7).
+- The 3-of-5 stability gate (`TR-36`) is not modelled. How much it removes is unmeasured.
+
+---
+
+## ADR-014 — Vectors as BLOBs, searched in JavaScript, until native search works on 32-bit ARM
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Partly supersedes ADR-003 (its sqlite-vec
+half; op-sqlite stays) · Amends `TR-13`, `TR-30`, `TR-40`
+
+**Context.** P1-2's day-one checkpoint (Infinix X6823, release APK, 2026-09-14) found two things:
+
+- **op-sqlite's bundled sqlite-vec does not load on 32-bit ARM.** Its prebuilt `armeabi-v7a`
+  `libsqlite_vec.so` calls `ceil` but does not declare `libm.so`, so `open()` throws
+  `dlopen failed: cannot locate symbol "ceil"`. 18.2.1 is the latest release. Reported as
+  [op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456).
+- **32-bit matters.** The test phone is 32-bit only, and the budget phones this app targets
+  (`TR-02`) often are too.
+
+A second checkpoint build, with sqlite-vec switched off, measured on the same phone:
+
+| Measurement | Result |
+|---|---|
+| Plain SQLite | opens `bantay.db` in the document directory |
+| 1280-d `Float32Array` stored as a BLOB and read back | bit-exact |
+| Read 2,500 vector BLOBs | 56.3 ms |
+| JS brute-force search, 100 shots | median 9.2 ms |
+| JS brute-force search, 2,500 shots, inline loop | median 234.0 ms |
+| JS brute-force search, 2,500 shots, `dot()` per shot | median 831.1 ms |
+
+**Decision** (operator's call, after the measurement):
+
+1. Each shot's vector is stored as a **BLOB in `product_shots.embedding`**: little-endian Float32
+   × `embedding_dim`, L2-normalized (`TR-22`), stamped with its `model_id` (`TR-23`). The `vec0`
+   table leaves the schema.
+2. **Search is a pure inline brute-force loop** in `src/domain`. It runs over one contiguous
+   `Float32Array` matrix held in memory, rebuilt from SQLite at startup and extended after each
+   enrollment commits. It keeps the top 10 (`TR-30`) and hands them to `rankProducts` (`TR-31`).
+3. op-sqlite stays, as plain SQLite with `"sqliteVec": false`.
+
+**Rejected.**
+
+- *Building sqlite-vec ourselves now.* It keeps `vec0` and targets `NFR-09` from the start, but
+  puts a native build step, maintained across upgrades, ahead of a phase whose job is the data
+  path. Its speed on 32-bit ARM is also unmeasured.
+- *Waiting for op-sqlite#456.* That blocks Phase 1 for an unknown time.
+
+**Consequences.**
+
+- **`NFR-09` is not met by this search on the test phone.** At 500 products (2,500 shots), 234 ms
+  is nearly the whole 250 ms frame interval at 4 fps (`TR-26`). Native search is **owed before
+  Phase 4**: our own sqlite-vec build, a fixed op-sqlite, or another native path. It is tracked in
+  `PROJECT_STATUS.md` and revisited in Phase 3, where it must be measured on the same phone.
+- **Switching later needs no data migration.** A native index is rebuilt from the BLOBs, the same
+  way `TR-24` re-embeds from JPEGs.
+- **The per-frame loop must be written inline over the contiguous matrix.** Calling `dot()` per shot
+  allocates a `subarray` each time, which measured 3.5× slower on Hermes (no JIT).
+- **The matrix is a derived index, never the source of truth.** It only changes after a commit
+  succeeds, so a rolled-back enrollment is never searchable (`TR-45`).
+- **"KNN starvation" goes away** (`PHASE_1_PLAN.md` §7). Soft-deleted shots and vectors from
+  another `model_id` are simply left out when the matrix is built.
+- **Memory:** 2,500 × 1280 × 4 bytes ≈ 12.8 MB for the matrix at 500 products. That figure is
+  computed, not measured.
+- **ADR-004 stands.** There is still no approximate index; brute force is still the algorithm.
+  Only where it runs changed.
+
+---
+
+## ADR-015 — React Navigation bottom tabs instead of `expo-router`
+
+**Status:** Accepted · 2026-09-14 · Amends `TR-14`
+
+**Context.** P1-7 builds the app shell: two tabs, Scan and Products. `TR-14` named `expo-router`.
+Before installing, P1-7 measured what each option would add (dry-run installs, and source read
+2026-09-14):
+
+| | `expo-router` 57.0.21 | `@react-navigation/bottom-tabs` 7.18 |
+|---|---|---|
+| Packages added | **73** | **23** |
+| Native modules added | 11: reanimated 4.6, gesture-handler 3.3, screens, safe-area, expo-font, expo-symbols, expo-glass-effect, `@expo/ui`, `@expo/dom-webview`, expo-linking, masked-view | 2: screens, safe-area |
+| Network code in its source (`TR-51`) | Present but inert unless enabled. Data-loader `fetch`, React Server Components `fetch`, and a dev-server ping in the onboarding tutorial. | None found, in JS or native |
+
+- **Worklets conflict.** `expo-router` requires `react-native-reanimated`, and reanimated 4.x ties
+  itself to a particular `react-native-worklets` version. That library carries the camera frame
+  processor, pinned at 0.10.1 for VisionCamera (`TR-25`). It is the most fragile native piece in
+  the app, and every native change costs a rebuild cycle on the 32-bit test phone.
+- **File-based routing is the only thing lost.** `expo-router` is a file-based layer over this same
+  React Navigation. The app has two tabs and no deep links (`TR-50`), so file-based routing buys
+  nothing yet.
+
+**Decision** (operator's call, 2026-09-14): use `@react-navigation/native` +
+`@react-navigation/bottom-tabs`, with `react-native-screens` and `react-native-safe-area-context`
+at Expo SDK 57's pinned versions. `TR-14` is amended to match.
+
+**Rejected.**
+
+- *`expo-router`, as specced.* It passes `TR-51` on the source read, but 73 packages to audit and
+  keep audited, and a possible worklets clash, for routing two screens.
+- *No library, a hand-rolled two-button switcher.* Zero dependencies, but no Android back-button
+  handling or screen lifecycle (`useIsFocused` is what pauses the camera on the Products tab).
+  Phase 2 would add a navigation library anyway.
+
+**Consequences.**
+
+- **Screens are plain components registered in `src/app/Root.tsx`**, not files under `app/`.
+  `ARCHITECTURE.md` §7 is updated.
+- **Moving to `expo-router` later stays cheap.** The screens are already React Navigation screens;
+  only the registration would change. Revisit if deep links or many routes ever arrive.
+- **Every new native module is still audited before install.** The 25 packages installed here
+  (the 23, plus `expo-localization` and its `rtl-detect`) had zero network-call hits.
+
+---
+
+## ADR-016 — Lock on 4 of 5 frames instead of 3
+
+**Status:** Accepted · 2026-09-14 · Amends `TR-36` · Revisit in Phase 3 alongside the τ/δ retune
+
+**Context.**
+
+- **Gate run 2 failed step 5** (P1-8, Infinix X6823, release APK, airplane mode). With a
+  motion-blurred **Alaska Evaporada 360ml** in the reticle, the app locked **Argentina Corned Beef
+  260g** and showed ₱35.00; the true price is ₱50.00. Under `PHASE_1_PLAN.md` §4, any wrong lock fails.
+- **Diagnosis** (lock log with each lock's 5 voting frames, a ~2-minute reproduction, votes
+  attributed to cans by protocol timing):
+  - The two cans rank as each other at similarities 0.63–0.76.
+  - **Accept-grade votes for the wrong can do occur** (margins 0.09 and 0.12, above δ = 0.075),
+    but **at most one per stability window** was seen. The failure needed three.
+  - The wrong lock itself did not reproduce: 7 LOCK, all correct.
+- **Sharpness does not explain it.** Laplacian variance on wrong-can votes ranged 1.7–12.6 (×1000),
+  against a frame median of 8.6. Measuring it cost **20.9 ms per frame**.
+
+**Decision** (operator's call):
+
+1. **`STABILITY_QUORUM` goes from 3 to 4**, in the same 5-frame window. τ and δ are unchanged.
+2. **The sharpness measurement leaves the worklet.** `laplacianVariance` and its tests stay in
+   `src/domain` for `TR-27`'s Phase 3 calibration.
+3. **The Phase 1 gate is re-run in full** (run 3). This change counts only if that run passes.
+
+**Rejected.**
+
+- *Raise δ to ~0.13 in `app_meta`.* It would have blocked every wrong accept vote seen, but it is
+  tuned on one pair in one short run. It also pushes correct locks to chips, where correct accepts
+  are already 74.7% against `NFR-01`'s 90%. τ/δ are retuned in Phase 3 on labeled data (`TR-35`).
+- *A sharpness gate now (`TR-27`).* It did not separate wrong votes, and cost 20.9 ms per frame.
+- *4-of-5 plus re-enrolling both cans.* Two changes at once, so a pass could not be credited to
+  either.
+- *Repeat the reproduction first, with screenshots.* More certain attribution, at the cost of one
+  more cycle before the gate.
+
+**Consequences.**
+
+- **A wrong lock now needs 4 of 5 frames to agree on the wrong product.** Lone or paired
+  accept-grade confusions cannot lock. **The confusion itself remains:** chips can still pair
+  Alaska with Argentina, and a sustained run of 4 wrong votes would still lock.
+- **Locks take longer and drop sooner.** Nominal time-to-lock rises from ~750 ms to ~1 s at 4 fps,
+  with less headroom against `NFR-04`'s p90 of 1.2 s. Two disagreeing frames now release a lock, so
+  expect more "point the box" moments. Neither is measured yet.
+- **Phase 3:** Alaska Evaporada 360ml / Argentina Corned Beef 260g joins the look-alike cases for
+  the τ/δ retune and the model bake-off (Q-3).
