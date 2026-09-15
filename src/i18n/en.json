@@ -5,9 +5,29 @@
     "modelError": "The recognition model could not be loaded."
   },
   "camera": {
-    "permissionNeeded": "BantayNiMama needs the camera to recognise products.",
+    "why": "BantayNiMama recognises your products with the camera. The photos stay on this phone and are never sent anywhere.",
     "grant": "Allow camera",
+    "askAgain": "Scanning needs the camera. Tap Allow camera, then allow it.",
+    "blocked": "The camera is turned off for BantayNiMama. Open Settings, go to Permissions, and allow Camera. Then come back to the app.",
+    "openSettings": "Open Settings",
     "none": "No back camera was found on this phone."
+  },
+  "firstRun": {
+    "welcome": {
+      "title": "Welcome to BantayNiMama",
+      "body": "Point the camera at an item to see its price. First, add your first 5 items. Each one takes about 30 seconds.",
+      "start": "Start",
+      "later": "Finish later"
+    },
+    "language": {
+      "title": "Choose your language",
+      "next": "Next"
+    },
+    "camera": {
+      "title": "The camera"
+    },
+    "banner": "{{done}} of {{target}} items added",
+    "addNext": "Add next"
   },
   "tabs": {
     "scan": "Scan",
@@ -23,14 +43,43 @@
     "unitLabel": "Unit (optional)",
     "unitPlaceholder": "sachet, bote, piraso",
     "category": "Category (optional)",
+    "repacked": {
+      "label": "Looks like other items (repacked)",
+      "hint": "For clear bags of sugar, salt or rice. The scanner will ask which one instead of naming it."
+    },
+    "guided": {
+      "progress": "Item {{n}} of {{target}}",
+      "later": "Finish later",
+      "savedTry": "Saved: {{name}}. Now try scanning it: hold it inside the box.",
+      "tryScanning": "Try scanning it",
+      "savedNext": "Saved: {{name}}. {{done}} of {{target}} added.",
+      "complete": "All {{target}} added. You can add more items any time."
+    },
+    "coach": "Just one item inside the box.",
+    "more": {
+      "show": "More details: pack price, unit, category",
+      "hide": "Hide more details"
+    },
+    "angle": {
+      "front": "Photo {{n}}: the front, straight on",
+      "turnLeft": "Photo {{n}}: turn it a little to the left",
+      "turnRight": "Photo {{n}}: turn it a little to the right",
+      "backOrTop": "Photo {{n}}: the back or the top",
+      "otherLight": "Photo {{n}}: move it to different light"
+    },
+    "quality": {
+      "tooDark": "Photo {{n}} looks too dark. Tap it to remove it, then retake it with more light.",
+      "blownOut": "Photo {{n}} looks too bright. Tap it to remove it, then retake it away from the glare.",
+      "blurred": "Photo {{n}} looks blurry. Tap it to remove it, then hold still and retake it."
+    },
     "shotsProgress": "Photos: {{taken}} of {{max}} — take at least {{min}}",
-    "captureHint": "Fit the product inside the box. Turn it a little between photos.",
     "capture": "Take photo",
     "capturing": "Taking photo…",
     "removeShot": "Remove photo {{number}}",
     "save": "Save product",
     "discard": "Start over",
     "saved": "Saved: {{name}} — {{price}}",
+    "savedRepacked": "Saved as repacked: {{name}} — {{price}}",
     "errors": {
       "nameRequired": "Type the product name.",
       "piecePriceRequired": "Type the price per piece.",
@@ -46,7 +95,9 @@
       "title": "Already in your list?",
       "body": "These photos look like {{names}}. Save it as a new product anyway?",
       "saveAnyway": "Save anyway",
-      "cancel": "Cancel"
+      "cancel": "Cancel",
+      "markBoth": "Mark {{names}} as repacked too",
+      "markBothHint": "Only if they look the same in a clear bag. Not for two sizes of one product."
     }
   },
   "scan": {
@@ -63,12 +114,128 @@
       "sure": "Sure",
       "likely": "Likely",
       "notSure": "Not sure"
+    },
+    "wrong": "Wrong?",
+    "torchTurnOn": "Light",
+    "torchTurnOff": "Light off",
+    "editPrice": "Edit",
+    "edit": {
+      "title": "Price of {{name}}",
+      "hint": "This changes {{name}} only, wherever the camera points now.",
+      "save": "Save price",
+      "cancel": "Cancel",
+      "saveFailed": "The price was not saved. ({{message}})",
+      "gone": "This product is no longer in your list.",
+      "delete": "Delete this product"
+    },
+    "undo": {
+      "deleted": "Deleted: {{name}}",
+      "undo": "Undo",
+      "rebuildFailed": "The scanner could not reload your list. Restart the app before scanning. ({{message}})"
+    },
+    "confirm": {
+      "question": "Is this {{name}}?",
+      "yes": "Yes",
+      "no": "No",
+      "photoLabel": "Saved photo of {{name}}",
+      "whySmall": "While your list is small, the app asks before it shows a price."
+    },
+    "quickPick": {
+      "title": "Looks like a repacked item. Which one?",
+      "pinnedTitle": "Repacked items. Which one?",
+      "open": "Repacked",
+      "close": "Close"
+    },
+    "reject": {
+      "title": "Not this one?",
+      "appSaid": "The app said: {{names}}",
+      "correctHint": "Keep the item inside the box, then tap the right product. The app learns from this photo.",
+      "whichOfPair": "It is one of these:",
+      "likely": "Is it one of these?",
+      "search": "Or search your list",
+      "searchPlaceholder": "Type a product name",
+      "noResults": "No product with that name.",
+      "correctSaved": "Saved. This is {{name}}:",
+      "notInListHint": "If this item is not in your list, keep it inside the box and tap below. The app will stop naming it.",
+      "notInList": "Not in my list",
+      "cancel": "Cancel",
+      "capturing": "Keep the item still inside the box…",
+      "saving": "Saving…",
+      "saved": "Saved. Next time, this item reads as Unknown.",
+      "mismatch": "The camera moved to something else, so nothing was saved. Keep the item inside the box and try again.",
+      "retry": "Try again",
+      "failed": "It was not saved. ({{message}})",
+      "next": "Scan next"
     }
   },
   "products": {
     "title": "Products",
     "empty": "No products yet. Add one from the Scan tab.",
-    "shots": "{{n}} photos"
+    "noMatches": "No product matches that name.",
+    "shots": "{{n}} photos",
+    "repacked": "repacked",
+    "searchPlaceholder": "Search your products",
+    "count": "{{shown}} of {{total}} products",
+    "storage": "{{count}} photos, {{size}}",
+    "sort": {
+      "label": "Sort",
+      "name": "Name",
+      "recentlyAdded": "Newest",
+      "recentlyScanned": "Last scanned"
+    },
+    "edit": {
+      "title": "Edit {{name}}",
+      "photos": "Photos: {{enroll}} reference, {{extra}} of {{max}} extra",
+      "save": "Save changes",
+      "cancel": "Cancel",
+      "saveFailed": "The changes were not saved. ({{message}})",
+      "gone": "This product is no longer in your list.",
+      "teach": "Teach again: add a photo",
+      "delete": "Delete this product",
+      "deleteTitle": "Delete {{name}}?",
+      "deleteBody": "It moves to Deleted products, where you can restore it for 30 days.",
+      "deleteConfirm": "Delete",
+      "deleteFailed": "Deleted, but the scanner could not reload your list. Restart the app before scanning. ({{message}})"
+    },
+    "trash": {
+      "title": "Deleted products ({{n}})",
+      "restore": "Restore",
+      "daysLeft": "Removed for good in {{days}} days",
+      "restoreFailed": "Restored, but the scanner could not reload your list. Restart the app before scanning. ({{message}})"
+    },
+    "negatives": {
+      "title": "Not in my list ({{n}})",
+      "hint": "Items you marked Not in my list. The app never names them. Delete one if it really is in your list.",
+      "source": {
+        "confirm_no": "Marked after No",
+        "wrong_lock": "Marked after Wrong?",
+        "wrong_chip": "Marked after Wrong? on two choices"
+      },
+      "delete": "Delete",
+      "deleteTitle": "Delete this item?",
+      "deleteBody": "The app may name it again if it looks like one of your products.",
+      "deleteConfirm": "Delete",
+      "failed": "Deleted, but the scanner could not reload your list. Restart the app before scanning. ({{message}})"
+    }
+  },
+  "teach": {
+    "title": "Teach again: {{name}}",
+    "hint": "Hold {{name}} inside the box, from an angle or in light its photos do not show yet.",
+    "counts": "Photos: {{enroll}} reference, {{extra}} of {{max}} extra. When full, a new photo replaces the oldest extra.",
+    "capture": "Take photo",
+    "capturing": "Taking photo…",
+    "review": "Is this {{name}}? Save only a photo of this product.",
+    "keep": "Save this photo",
+    "retake": "Retake",
+    "saved": "Saved. The app learned this view of {{name}}.",
+    "failed": "The photo was not saved. ({{message}})",
+    "gone": "This product is no longer in your list.",
+    "done": "Done",
+    "quality": {
+      "tooDark": "This photo looks too dark. Retake it with more light.",
+      "blownOut": "This photo looks too bright. Retake it away from the glare.",
+      "blurred": "This photo looks blurry. Hold still and retake it."
+    }
   },
   "settings": {
     "language": "Language",
@@ -80,6 +247,6 @@
     "run": "Run check",
     "running": "Checking photo {{done}} of {{total}}…",
     "needsModel": "The recognition model is still loading.",
-    "clearLog": "Clear lock log"
+    "clearLog": "Clear lock and frame logs"
   }
 }

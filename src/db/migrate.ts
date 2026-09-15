@@ -2,8 +2,8 @@ import type { DB } from '@op-engineering/op-sqlite';
 
 import { META_KEYS } from '../domain/appMeta.ts';
 import { planMigrations } from '../domain/migrations.ts';
-import { MIGRATIONS } from './schema';
-import { inTransaction } from './transaction';
+import { MIGRATIONS, type Migration } from './schema.ts';
+import { inTransaction } from './transaction.ts';
 
 /**
  * Brings the database up to the latest schema (TR-44). Each version runs in its own transaction
@@ -12,18 +12,21 @@ import { inTransaction } from './transaction';
  *
  * app_meta is created up front, outside any migration, because schema_version lives in it and
  * has to be readable before we know which migrations to run.
+ *
+ * `migrations` is for tests, which stop at an older version to build a database as a previous
+ * release left it. The app always runs every migration.
  */
-export function migrate(db: DB): { from: number; to: number } {
+export function migrate(db: DB, migrations: readonly Migration[] = MIGRATIONS): { from: number; to: number } {
   db.executeSync('CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)');
 
   const from = readSchemaVersion(db);
   const plan = planMigrations(
     from,
-    MIGRATIONS.map((m) => m.version),
+    migrations.map((m) => m.version),
   );
 
   for (const version of plan) {
-    const migration = MIGRATIONS.find((m) => m.version === version)!;
+    const migration = migrations.find((m) => m.version === version)!;
     inTransaction(db, () => {
       for (const statement of migration.statements) db.executeSync(statement);
       db.executeSync(

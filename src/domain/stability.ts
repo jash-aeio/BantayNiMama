@@ -1,7 +1,8 @@
-// Temporal stability gate — TR-36, SR-12. Pure: the scanner pushes one Decision per
-// processed frame and renders only what lockedDecision returns.
+// Temporal stability gate — TR-36, SR-12. Pure: the scanner pushes one decision per processed
+// frame and renders only what lockedDecision returns. Since Phase 2 that decision has been through
+// resolveFrame (scanDisplay.ts), so the window votes on what could actually be shown (E-5).
 
-import type { Decision } from './match.ts';
+import type { FrameDecision } from './scanDisplay.ts';
 
 /**
  * TR-36, as amended by ADR-016: lock when **4** of the last 5 frame decisions agree, about 1 s at
@@ -12,19 +13,19 @@ import type { Decision } from './match.ts';
 export const STABILITY_WINDOW = 5;
 export const STABILITY_QUORUM = 4;
 
-export interface StabilityBuffer {
+export interface StabilityBuffer<D extends FrameDecision = FrameDecision> {
   /** Most recent last. Never longer than the window. */
-  readonly recent: readonly Decision[];
+  readonly recent: readonly D[];
 }
 
-export const emptyBuffer: StabilityBuffer = { recent: [] };
+export const emptyBuffer: StabilityBuffer<never> = { recent: [] };
 
 /** Returns a new buffer; the old one is untouched, so it is safe to hold in React state or a ref. */
-export function pushDecision(
-  buffer: StabilityBuffer,
-  decision: Decision,
+export function pushDecision<D extends FrameDecision>(
+  buffer: StabilityBuffer<D>,
+  decision: D,
   window: number = STABILITY_WINDOW,
-): StabilityBuffer {
+): StabilityBuffer<D> {
   if (!Number.isInteger(window) || window < 1) {
     throw new RangeError(`Stability window must be a positive integer, got ${window}`);
   }
@@ -35,8 +36,11 @@ export function pushDecision(
  * What "agree" means. ACCEPTs agree on the product. DISAMBIGUATEs agree on the pair in
  * either order — two near-tied products swap places frame to frame, and that swap is
  * exactly the flicker this gate exists to stop. UNKNOWNs agree with each other.
+ *
+ * QUICKPICKs agree with each other whichever products were involved. Clear bags swap places frame
+ * to frame too, and the grid lists every ambiguous product anyway (SR-10).
  */
-export function decisionKey(decision: Decision): string {
+export function decisionKey(decision: FrameDecision): string {
   switch (decision.kind) {
     case 'accept':
       return `accept:${decision.product.productId}`;
@@ -44,6 +48,8 @@ export function decisionKey(decision: Decision): string {
       const [a, b] = [decision.first.productId, decision.second.productId].sort();
       return `disambiguate:${a}|${b}`;
     }
+    case 'quickPick':
+      return 'quickPick';
     case 'unknown':
       return 'unknown';
   }
@@ -55,11 +61,11 @@ export function decisionKey(decision: Decision): string {
  * Returns the MOST RECENT decision with the winning key, so the confidence shown (SR-03)
  * reflects the current frame rather than the first one that voted.
  */
-export function lockedDecision(
-  buffer: StabilityBuffer,
+export function lockedDecision<D extends FrameDecision>(
+  buffer: StabilityBuffer<D>,
   quorum: number = STABILITY_QUORUM,
   window: number = STABILITY_WINDOW,
-): Decision | null {
+): D | null {
   // quorum > window / 2 means at most one key can hold it, so a lock is never a tie.
   if (!Number.isInteger(quorum) || !Number.isInteger(window) || quorum * 2 <= window || quorum > window) {
     throw new RangeError(`Quorum ${quorum} of ${window} could lock two results at once`);

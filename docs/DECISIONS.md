@@ -475,3 +475,310 @@ at Expo SDK 57's pinned versions. `TR-14` is amended to match.
   expect more "point the box" moments. Neither is measured yet.
 - **Phase 3:** Alaska Evaporada 360ml / Argentina Corned Beef 260g joins the look-alike cases for
   the τ/δ retune and the model bake-off (Q-3).
+
+---
+
+## ADR-017 — Small-catalog safety as built: confirm until calibrated, negatives with no name
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Refines ADR-013 · Amends `TR-38`, `TR-39`
+
+**Context.** ADR-013 adopted confirm mode below `app_meta.confirm_below`, plus store-local
+negatives. It left two things open, and Phase 2 builds both (`PHASE_2_PLAN.md` D-1, E-1, E-5):
+
+- **What the app does before `confirm_below` has a value.** No value is known to be safe. In the
+  simulation on Phase 0 data, 25 products still leave **2.9%** of un-enrolled frames accepted, above
+  `NFR-02`'s 2%, and nothing above 25 was simulated.
+- **How a negative is stored.** As a hidden `products` row, it would have to be filtered out of
+  every query that names a product: `getProduct`, `listProducts`, `catalogCounts` and the `SR-23`
+  duplicate warning. One missed filter names a negative.
+
+**Decision.**
+
+1. **No `confirm_below` row means confirm every ACCEPT** (operator's call, D-1). A malformed row is
+   refused, as a malformed τ is. The cutoff logic is built and unit-tested with numbers, and Phase 3
+   writes the row.
+2. **Negatives live in their own table, `negative_shots`, which has no name or price column**
+   (E-1, adopted at plan approval). Each row keeps its JPEG and `model_id` (`TR-23`, `TR-24`). Its
+   vector is the JPEG's, as at enrollment.
+3. **Negatives and ambiguity are resolved per frame, after `match()` and before stability. Confirm
+   or quote is decided after the lock** (E-5). `match.ts` does not change, so the Phase 0 golden
+   replay stays a valid regression test (ADR-012).
+
+**Rejected.**
+
+- *Seed a provisional cutoff of 15 or 25.* Simulated false accepts: 9.7% and 2.9%.
+- *Negatives as `products` rows with a kind column*, which was `TR-39` as first written. Safe only
+  while every naming query remembers the filter.
+- *Negatives as `product_shots` rows with no product.* SQLite cannot drop `product_id`'s `NOT NULL`
+  without rebuilding the table.
+
+**Consequences.**
+
+- **Every ACCEPT costs a tap until Phase 3.** Acceptable before ship, not at ship.
+- **Three places must read `negative_shots`:** the index loader, the launch orphan sweep, and the
+  gate check. **If the sweep misses it, every negative's JPEG is deleted at the next launch.** Each
+  gets a test.
+- **A negative that captures a real product silences that product.** The guards are a capture check
+  (the next frame must still show the rejected lock) and a negatives list with delete
+  (`PHASE_2_PLAN.md` P2-3, P2-7).
+
+---
+
+## ADR-018 — Ambiguous products are recognised only to open the quick-pick grid
+
+**Status:** Accepted · 2026-09-14 · Amends `SR-10`
+
+**Context.** Repacked clear-bag goods look identical (`L-01`). `SR-10` said `is_ambiguous`
+products "bypass recognition", and `PHASE_1_PLAN.md` §6 left open whether they get vectors at all.
+
+**Decision** (operator's call, `PHASE_2_PLAN.md` D-2):
+
+1. **Ambiguous products keep their 3–5 shots.** A frame whose decision involves an ambiguous
+   product, whether as an ACCEPT or in a chip pair, becomes `quickPick` and opens the grid.
+2. **The scanner never names or prices an ambiguous product on its own.** A price appears only when
+   a tile is tapped.
+3. **The grid is also a pinned button** on the Scan tab whenever an ambiguous product exists.
+
+**Rejected.** *No vectors, grid button only.* A clear bag in the reticle would then have only other
+products to match, so it could lock as one of them and show a wrong price (`NFR-02`).
+
+**Consequences.**
+
+- `SR-10`'s "bypass recognition" now reads "bypass naming".
+- **The flag has to be right.** A product wrongly flagged costs the helper a tap. A clear-bag product
+  left unflagged can lock as its twin. The `SR-23` duplicate warning suggests flagging when a new
+  product clears τ against an existing one.
+
+---
+
+## ADR-019 — Corrections teach up to three extra shots, in two taps
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Amends `SR-07`, `TR-42` · Amended by ADR-022 (chip pairs)
+
+**Context.** `SR-07` asks that a wrong match be corrected by reassigning the frame to the right
+product. `TR-42` capped a product at 5 shots, and enrollment normally uses all 5, so a correction
+had nowhere to go. In Phase 1 a chip tap shows a price and teaches nothing.
+
+**Decision** (operator's calls, `PHASE_2_PLAN.md` D-3 and D-4):
+
+1. **A correction saves a `correction` shot on the chosen product.** The shot comes from the next
+   frame, which must still show the rejected lock.
+   - **At most 3 per product.** The oldest correction is replaced: its row is removed in the same
+     transaction, and its JPEG is deleted after COMMIT.
+   - **Enrollment shots are never replaced.** A product can hold 8 shots.
+2. **Correcting takes two taps:** *Wrong?*, then the right product.
+3. **A chip tap still teaches nothing.**
+
+**Rejected.**
+
+- *Log the correction, learn nothing.* The same wrong lock recurs.
+- *Replace the product's weakest enrollment shot.* It deletes an enrollment JPEG, and "weakest" is
+  a guess.
+- *Literal one tap.* It needs a second product's name on every confident card, which the helper
+  reads at arm's length.
+
+**Consequences.**
+
+- **`KNN_LIMIT` = 10 stays exact while a product has ≤ 9 shots.** The best shot of the second-best
+  product ranks at most shots(top-1) + 1. A domain test proves it. A cap above 9 must raise the
+  limit with it.
+- **Storage.** 8 shots take **193.6 KB** at the higher session median (24.2 KB per shot) and
+  **272.8 KB** at the largest measured shot (34.1 KB), on the Infinix X6823. `NFR-08` is worded for
+  5 reference photos, so it is not formally broken, but the worst case exceeds its intent.
+- **Calibration.** More shots raise a corrected product's best-shot score. Phase 0 calibrated τ/δ
+  at 6 shots per product, so the Phase 3 retune must include corrected products.
+- **Corrections are not a fix for true look-alikes.** Alaska 360ml and Argentina 260g already score
+  each other 0.63–0.76 (ADR-016).
+
+---
+
+## ADR-020 — Reanimated and zustand stay out until a measured need
+
+**Status:** Accepted · Revisit on measured overlay jank or state sprawl · 2026-09-14 · Defers
+`TR-15`, `TR-18`
+
+**Context.**
+
+- **The specs.** `TR-18` specified Reanimated shared values for the overlay, and `TR-15` specified
+  zustand for UI state. Phase 1 deferred both to Phase 2.
+- **What exists now.** Since P1-6 the overlay re-renders only when the locked decision changes,
+  never per frame. App-wide state is one React context, `AppServicesContext`.
+
+**Decision** (`PHASE_2_PLAN.md` E-3, adopted at plan approval): add neither in Phase 2.
+
+**Rejected.** *Adding them as specced.*
+
+- **Reanimated** has no hot path to take over. Reanimated 4 also ties itself to a
+  `react-native-worklets` version, and that library carries the camera frame processor, pinned at
+  0.10.1 for VisionCamera (ADR-015).
+- **zustand** would replace a context that works. SQLite stays the source of truth either way.
+
+**Consequences.**
+
+- `TR-15` and `TR-18` are marked deferred, not dropped.
+- Card animation, if wanted, uses React Native's built-in `Animated` with the native driver. That
+  adds no dependency.
+
+---
+
+## ADR-021 — A `price_history` row holds the prices it replaced
+
+**Status:** Accepted · 2026-09-14 · Refines `SR-06`, `SR-31`
+
+**Context.** Schema v1 created `price_history (product_id, price_piece, price_pack, changed_at)`
+without saying whose prices a row holds. P2-2 had to decide when it built `updatePrice`:
+
+- **The Phase 1 products have no history.** The 20 gate products were enrolled before any history
+  was written, and enrollment writes no row.
+- **The audit is the only safeguard against price edits.** Anyone holding the phone can change a
+  price (`PHASE_2_PLAN.md` §8), so the history must keep every earlier price.
+
+**Decision.** Each price edit inserts one row with the prices **in force before** `changed_at`. The
+current prices live only in `products`. An edit that changes nothing writes no row. It is tested in
+`src/db/repositories.test.ts`.
+
+**Rejected.**
+
+- ***Rows hold the new prices.*** Each product's enrollment price would be lost at its first edit
+  unless enrollment also wrote a row and a data migration backfilled the 20 existing products. That
+  is a migration for a record nothing reads yet.
+- ***Both old and new columns.*** A schema change to store what the previous row already implies.
+
+**Consequences.**
+
+- **Reading the full history:** the rows oldest first, then the current prices in `products`.
+- **A row is not "the price set at `changed_at`".** Code that reads it that way shows every change one
+  step late.
+- **Changing this meaning later needs a migration that rewrites every existing row.** Switching
+  semantics without one silently mixes the two meanings in one table and corrupts the audit.
+
+---
+
+## ADR-022 — A chip pair can be corrected to one of its own two products
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-14 · Amends ADR-019
+
+**Context.** Gate A3 (`PHASE_2_PLAN.md` §4) corrects a chip pair: Knorr Chicken/Pork or Datu Puti
+Soy Sauce/Vinegar. As first built in P2-4, that could not be done on the Infinix (2026-09-14,
+~19:50):
+
+- **The Knorr pair only ever showed chips**, never a single name, so there was no quote or question
+  to reject.
+- **A chip tap shows a price and teaches nothing** (ADR-019, point 3).
+- ***Neither* opened the sheet**, but the sheet left both chip products out of the likely list and the
+  search, and the reducer refused a correction to either.
+
+So the pairs `SR-07` most needs to teach apart were the ones it could not teach.
+
+**Decision** (operator's call):
+
+1. **The chip card's link is *Wrong?*, as on a quote.** Its sheet lists both chip products first,
+   then the likely products, search and *Not in my list*.
+2. **Picking one of the two saves a correction shot on it**, through the same capture guard: the next
+   frame must still show the same chip pair.
+3. **A question or a quote still refuses a correction to the product it named.** No on "Is this X?"
+   followed by X contradicts the tap.
+4. **A chip tap still teaches nothing.** Teaching stays a deliberate act on the sheet.
+
+**Rejected.**
+
+- ***Allow it only on pairs that are not size pairs.*** Safer for `L-02`, but no column marks a size
+  pair, so it needs a schema change or a name heuristic.
+- ***Keep chips unteachable and amend A3 to a wrong lock.*** Under the 4-of-5 quorum these variant
+  pairs chip rather than lock, so A3 could not be run on demand, and a store would have no way to
+  teach the pairs it confuses.
+
+**Consequences.**
+
+- **Risk on `L-02` size pairs.** A correction on Argentina 260g/100g adds a shot of a frame that is
+  nearly identical to the other size. It can turn future chips into a lock: an `NFR-02` exposure.
+  It is bounded. It is never automatic, a product holds at most 3 correction shots (ADR-019), and
+  the Phase 2 gate's zero-wrong-locks rule still judges it. The Phase 3 retune must include corrected
+  products.
+- **The interaction log kind `neither` is renamed `wrongChip`.** Earlier logs were never persisted.
+- *Not in my list* from chips is unchanged: it still saves a negative.
+
+---
+
+## ADR-023 — Enrollment time is recorded, not gate-blocking, in Phase 2
+
+**Status:** Accepted · Revisit at Phase 4 · 2026-09-15 · Defers `SR-25` · Amends `PHASE_2_PLAN.md` §4 B2
+
+**Context.** Gate B2 asks each of 5 products to take ≤ 30 s from *Add* to saved (`SR-25`). P2-6
+measured it on the guided add, on the Infinix X6823's side-by-side copy, in airplane mode, from the
+interaction log. Attempt 1's times were lost when the app was swiped away.
+
+| Run | Form | Photos per product | Median | Max | Within 30 s |
+|---|---|---|---|---|---|
+| Attempt 2 | full | 5 | 42.6 s | 55.7 s | 0 of 6 |
+| Attempt 3 | name and price, the rest behind *More details* | 5 | 40.8 s | 64.6 s | 0 of 6 |
+| Attempt 4 | same as attempt 3 | 3 | 27.5 s | 41.8 s | 3 of 5 |
+
+- **Where the time goes** (attempt 4 medians): *Add* → first photo 19.5 s, 3 photos in 4.1 s, last
+  photo → saved 5.0 s. Typing the name and price is the largest block. It came before the photos on
+  3 of 5 products.
+- **The misses are not all the app.** One was 1.6 s over. The other had 17.3 s before its first
+  photo.
+- **Enrollment time never changes a quoted price.** `NFR-02`, confirm mode and negatives do not
+  depend on how long an add takes.
+
+**Decision** (operator's call): in Phase 2, enrollment time is **recorded against `SR-25`, not
+gate-blocking**, as time-to-lock is recorded against `NFR-04` (E-2). Gate B2 passes on its other
+checks: products saved through the guided flow, at least one started from an Unknown card's *Add*,
+and each locking afterwards.
+
+**Rejected.**
+
+- ***A faster keyboard flow and a fifth run now.*** *Next* to the price, *Save* from the price field,
+  and the name focused after the 3rd photo would likely fix the 1.6 s miss, but not a pause before
+  the first photo. Each run costs the operator a full guided add.
+- ***Amend `SR-25` to a median.*** Attempt 4 would pass as measured, but the requirement would then
+  allow one product in five to take over 40 s. Changing the promise to fit one run is the wrong way
+  round.
+
+**Consequences.**
+
+- **`SR-25` stays a MUST**, marked not met in Phase 2 with these numbers. It is not dropped.
+- **Phase 4 owns it:** the keyboard flow above, then a re-measure with a store's own operator, who
+  may type slower than the developer.
+- **The gate panel keeps the split** (`enrollmentTimes`), so the Phase 4 re-measure uses the same
+  instrument.
+- **For scale** (arithmetic, not measured): enrolling 500 products (`NFR-09`) takes about 3.8 h at
+  attempt 4's median, 4.2 h at 30 s, and 5.9 h at attempt 2's median.
+
+---
+
+## ADR-024 — Taught photos share the correction slots
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-15 · Amends ADR-019, `TR-42`
+
+**Context.** *Teach again* (`SR-33`, P2-7) adds photos to an existing product.
+- **The cap.** `TR-42`, as amended by ADR-019, allows 5 enrollment photos plus 3 correction photos:
+  8 per product. Search stays exact up to 9 (`knn.ts`).
+- **Most products are already full.** Every product in the 20-product gate catalog was enrolled with
+  5 photos, and so were all 6 products on each guided-add run. A taught photo that could only fill
+  enrollment's allowance could not be added to them at all.
+
+**Decision** (operator's call):
+- **Corrections and taught photos share the 3 extra slots.** When all 3 are used, the oldest extra of
+  either kind is replaced first (`extraShotsToReplace`, which replaces `correctionsToReplace`).
+- **Enrollment photos are never replaced.** Their JPEGs are the product's reference photos (`TR-24`).
+
+**Rejected.**
+
+- ***Teach fills only empty enrollment slots.*** It needs no change, but it cannot teach the products
+  that need it most, which are the ones already enrolled.
+- ***Taught photos get their own 3 slots.*** Up to 11 photos per product. Search would no longer be
+  exact at 10 or more, so its depth must grow, which costs time on every frame while `NFR-07` is
+  already over budget.
+
+**Consequences.**
+
+- **A taught photo can push out a correction, and a correction a taught photo.** A correction that
+  fixed a confusion can be replaced by three later extras. That is bounded: the newest 3 extras
+  always stay, and the teach panel shows the count and says the oldest goes when full.
+- **Storage is unchanged from ADR-019:** at most 8 photos per product.
+- **Nothing guards the frame a taught photo is cut from.** A correction's capture guard checks the
+  frame still shows the locked product, but *Teach again* has no lock to compare with. So the photo is
+  saved only after the tindera sees it and taps *Save this photo*. A taught photo of the wrong item
+  would attach that item's look to this product's price, which is an `NFR-02` exposure.

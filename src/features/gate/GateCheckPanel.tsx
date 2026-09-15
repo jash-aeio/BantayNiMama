@@ -3,13 +3,19 @@ import { useTranslation } from 'react-i18next';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 
 import { useAppServices } from '../../app/services';
-import { getProduct } from '../../db/products';
+import { priceHistorySummary, productNameIncludingTrash } from '../../db/products';
 import {
   describeEnrollmentMeasurements,
+  describeEnrollmentTimes,
   describeGateCheck,
+  describeIndexRebuilds,
+  describeInteractions,
+  describePriceHistory,
+  describeLaunch,
   describeLockDetails,
   describeLockLog,
   describeScanTimings,
+  describeTimeToLock,
   describeWorkletTimings,
 } from './describe';
 import { runGateCheck } from './runGateCheck';
@@ -53,12 +59,16 @@ export function GateCheckPanel() {
       .finally(() => setProgress(null));
   };
 
-  const clearLockLog = () => {
+  // Both logs together: an episode needs its Unknown lock and its frames, so clearing only one would
+  // leave every open episode truncated or inconsistent (timeToLock.ts).
+  const clearLogs = () => {
     diagnostics.lockLog.current = [];
+    diagnostics.frameLog.current = [];
     setLogVersion((n) => n + 1);
   };
 
-  const nameOf = (id: string) => getProduct(catalog.db, id)?.name ?? id;
+  // Trashed products keep their names here, so a delete and its undo read by name in the logs (gate A4).
+  const nameOf = (id: string) => productNameIncludingTrash(catalog.db, id) ?? id;
 
   return (
     <View style={styles.root}>
@@ -69,6 +79,7 @@ export function GateCheckPanel() {
       </Pressable>
       {open && (
         <View style={styles.body}>
+          <Text style={styles.line}>{describeLaunch(catalog)}</Text>
           <Pressable onPress={run} disabled={progress !== null} style={[styles.button, progress !== null && styles.disabled]}>
             <Text style={styles.buttonText}>
               {progress !== null ? t('gate.running', { done: progress.done, total: progress.total }) : t('gate.run')}
@@ -81,11 +92,38 @@ export function GateCheckPanel() {
           ))}
           <Text style={styles.line}>{describeWorkletTimings(diagnostics.workletTimings.current)}</Text>
           <Text style={styles.line}>{describeScanTimings(diagnostics.scanTimings.current)}</Text>
-          <Text style={styles.line}>{describeEnrollmentMeasurements(diagnostics.enrollmentMeasurements.current)}</Text>
+          {describeEnrollmentMeasurements(diagnostics.enrollmentMeasurements.current).map((line, i) => (
+            <Text key={`shot-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
+          {describeEnrollmentTimes(diagnostics.interactionLog.current, nameOf).map((line, i) => (
+            <Text key={`enroll-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
+          <Text style={styles.line}>{describeIndexRebuilds(diagnostics.indexRebuilds.current)}</Text>
+          {describePriceHistory(priceHistorySummary(catalog.db)).map((line, i) => (
+            <Text key={`price-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
+          {describeInteractions(diagnostics.interactionLog.current, nameOf).map((line, i) => (
+            <Text key={`tap-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
 
-          <Pressable onPress={clearLockLog} style={styles.button}>
+          <Pressable onPress={clearLogs} style={styles.button}>
             <Text style={styles.buttonText}>{t('gate.clearLog')}</Text>
           </Pressable>
+          {describeTimeToLock(diagnostics.frameLog.current, diagnostics.lockLog.current, diagnostics.interactionLog.current, nameOf).map(
+            (line, i) => (
+              <Text key={`ttl-${i}`} style={styles.line}>
+                {line}
+              </Text>
+            ),
+          )}
           {describeLockLog(diagnostics.lockLog.current, nameOf).map((line, i) => (
             <Text key={`log-${i}`} style={styles.line}>
               {line}

@@ -73,6 +73,30 @@ output, and committing them means merge conflicts in code nobody edits.
 APK builds (66 MB) and installs, and the app runs on an Infinix X6823 with the TFLite model
 loading successfully.
 
+**A side-by-side test install** (P2-6, operator's call, 2026-09-15). First-run checks (gate B1–B2)
+need an empty catalog and a never-asked camera permission, but clearing the app's data would delete
+the 20-product gate catalog. So a second copy is built under its own package name, with its own data
+and its own permission:
+
+```powershell
+cd android
+.\gradlew.bat assembleRelease "-PbantayAppIdSuffix=.fresh" # com.jash.bantaynimama.fresh, "BantayNiMama fresh"
+copy app\build\outputs\apk\release\app-release.apk <scratch>\app-release-fresh.apk
+adb install -r <scratch>\app-release-fresh.apk
+.\gradlew.bat assembleRelease                              # rebuild the gate app before installing over it
+```
+
+- **Both builds write the same `app-release.apk`**, so copy the fresh one away before the next build.
+- **The switch lives in `android/app/build.gradle` and `AndroidManifest.xml`** (`applicationId` suffix
+  and an `appLabel` placeholder). Both files are prebuild output and gitignored, so
+  `npx expo prebuild --clean` drops it and it must be re-applied.
+- **To reset the fresh copy for another first run:** `adb shell pm clear com.jash.bantaynimama.fresh`,
+  which also resets its camera permission. Never run this on `com.jash.bantaynimama`.
+
+**Video frames for P2-8's calibration** (2026-09-15): ffmpeg 9.0.1, installed on the laptop with
+`winget install Gyan.FFmpeg`. Recordings come from `adb shell screenrecord --bugreport` over USB, which
+stamps the phone's clock on every frame and stops after 180 s. Nothing here ships in the APK.
+
 One trap worth recording: `babel-preset-expo` shipped nested at
 `node_modules/expo/node_modules/babel-preset-expo` rather than hoisted, so Babel could not resolve
 it from the project root and Metro failed with `Cannot find module 'babel-preset-expo'` while the

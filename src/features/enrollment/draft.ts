@@ -7,9 +7,10 @@ import { insertProductWithShots } from '../../db/products';
 import type { AppMeta } from '../../domain/appMeta.ts';
 import type { NewProduct } from '../../domain/enrollment.ts';
 import type { IndexedShot } from '../../domain/knn.ts';
+import { qualityWarnings, type QualityWarning, type ShotQuality } from '../../domain/shotQuality.ts';
 import { dot } from '../../domain/vector.ts';
 import type { ReferenceCapture } from '../../ml/frameEmbedder';
-import { embedImageFile } from '../../ml/stillEmbedder';
+import { embedAndMeasureImageFile } from '../../ml/stillEmbedder';
 
 // The enrollment write path — TR-45. Files first, rows last:
 //   capture → JPEG on disk → (repeat 3–5×) → one transaction → search index.
@@ -26,10 +27,13 @@ export interface DraftShot {
   readonly bytes: number;
   /** dot(live-frame vector, JPEG vector) for the same crop — measurement only (ARCHITECTURE.md §4). */
   readonly frameAgreement: number;
+  /** SR-22: exposure and sharpness of the saved JPEG, and the warnings they raise (placeholder limits). */
+  readonly quality: ShotQuality;
+  readonly warnings: readonly QualityWarning[];
 }
 
 /**
- * Saves one capture as a reference JPEG and embeds it.
+ * Saves one capture as a reference JPEG, embeds it and measures its quality.
  *
  * The stored vector comes from the JPEG, not the live frame. That way enrollment produces exactly
  * what re-embedding after a model swap would produce (TR-24), and the P1-8 gate tests the input
@@ -41,8 +45,16 @@ export async function captureShot(capture: ReferenceCapture, stillModel: Tensorf
   const id = newId();
   const { relativePath, bytes } = await saveReferencePhoto(id, capture.crop);
   try {
-    const vector = embedImageFile(resolvePhotoPath(relativePath), stillModel);
-    return { id, photoPath: relativePath, vector, bytes, frameAgreement: dot(capture.embedding.vector, vector) };
+    const { vector, quality } = embedAndMeasureImageFile(resolvePhotoPath(relativePath), stillModel);
+    return {
+      id,
+      photoPath: relativePath,
+      vector,
+      bytes,
+      frameAgreement: dot(capture.embedding.vector, vector),
+      quality,
+      warnings: qualityWarnings(quality),
+    };
   } catch (e) {
     deleteReferencePhoto(relativePath);
     throw e;
@@ -64,12 +76,14 @@ export function discardShots(shots: readonly DraftShot[]): void {
  * Writes product + shots + vectors in one transaction (TR-45). If that throws, the draft's photos
  * are deleted too, so a failed enrollment leaves nothing behind. Returns the shots to add to the
  * search index. The caller adds them only after this returns, which is after COMMIT.
+ * `markAmbiguous` flags existing look-alikes as repacked inside that same transaction (P2-5).
  */
 export function commitEnrollment(
   db: DB,
   meta: Pick<AppMeta, 'modelId' | 'embeddingDim'>,
   product: NewProduct,
   shots: readonly DraftShot[],
+  markAmbiguous: readonly string[] = [],
 ): { productId: string; indexed: IndexedShot[] } {
   try {
     const written = insertProductWithShots(
@@ -77,6 +91,8 @@ export function commitEnrollment(
       product,
       shots.map(({ id, photoPath, vector }) => ({ id, photoPath, vector })),
       meta,
+      Date.now(),
+      markAmbiguous,
     );
     return { productId: written.productId, indexed: written.shots };
   } catch (e) {

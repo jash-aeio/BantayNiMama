@@ -10,5 +10,5 @@
     }
   },
   "include": ["**/*.ts", "**/*.tsx"],
-  "exclude": ["node_modules", "android", "ios", "scripts", "**/*.test.ts"]
+  "exclude": ["node_modules", "android", "ios", "scripts", "**/*.test.ts", "**/*.testing.ts"]
 }

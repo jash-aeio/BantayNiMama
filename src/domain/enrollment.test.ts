@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
-import { likelyDuplicates, parseEnrollmentForm, type EnrollmentForm } from './enrollment.ts';
+import { likelyDuplicates, parseEnrollmentForm, repackedPlan, type EnrollmentForm } from './enrollment.ts';
 
 const form = (overrides: Partial<EnrollmentForm> = {}): EnrollmentForm => ({
   name: 'Lucky Me Pancit Canton Kalamansi',
@@ -88,5 +88,25 @@ describe('likelyDuplicates (SR-23)', () => {
 
   test('refuses a NaN τ rather than warning about nothing (TR-35)', () => {
     assert.throws(() => likelyDuplicates([[{ productId: 'a', similarity: 0.9 }]], { tau: NaN, delta: 0.075 }), RangeError);
+  });
+});
+
+describe('repackedPlan (SR-10, SR-23, P2-5)', () => {
+  test('the toggle alone flags only the new product', () => {
+    assert.deepEqual(repackedPlan(true, false, ['a']), { isAmbiguous: true, markAmbiguous: [] });
+    assert.deepEqual(repackedPlan(false, false, ['a']), { isAmbiguous: false, markAmbiguous: [] });
+  });
+
+  test('marking the look-alikes flags both sides, even with the toggle off', () => {
+    assert.deepEqual(repackedPlan(false, true, ['a', 'b', 'a']), { isAmbiguous: true, markAmbiguous: ['a', 'b'] });
+  });
+
+  test('with no duplicates left, the offer is ignored and only the toggle counts', () => {
+    assert.deepEqual(repackedPlan(false, true, []), { isAmbiguous: false, markAmbiguous: [] });
+  });
+
+  test('the form never sets the flag; the toggle does', () => {
+    const parsed = parseEnrollmentForm(form());
+    assert.equal(parsed.ok && parsed.product.isAmbiguous, undefined);
   });
 });

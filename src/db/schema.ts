@@ -58,6 +58,28 @@ export const MIGRATIONS: readonly Migration[] = [
         ('delta', '0.075')`,
     ],
   },
+  {
+    version: 2,
+    // P2-2. The CHECK lists are literals, not built from SHOT_SOURCES / NEGATIVE_SOURCES: a shipped
+    // migration must never change because a constant did. schema.test.ts checks the two agree.
+    // confirm_below is still absent: no row means confirm every ACCEPT (TR-38, ADR-017).
+    statements: [
+      // SR-14, TR-39, ADR-017: store-local negatives. No name or price column, so no query can name
+      // or price one. Same vector, model stamp and photo rules as product_shots (TR-23, TR-24, TR-43).
+      `CREATE TABLE negative_shots (
+        id         TEXT PRIMARY KEY,
+        photo_path TEXT NOT NULL,
+        model_id   TEXT NOT NULL,
+        embedding  BLOB NOT NULL CHECK (typeof(embedding) = 'blob'),
+        source     TEXT NOT NULL CHECK (source IN ('confirm_no', 'wrong_lock', 'wrong_chip')),
+        created_at INTEGER NOT NULL
+      )`,
+      // SR-07, TR-42, ADR-019. Every shot written before this migration came from enrollment, so the
+      // default labels the existing rows correctly.
+      `ALTER TABLE product_shots ADD COLUMN source TEXT NOT NULL DEFAULT 'enroll'
+        CHECK (source IN ('enroll', 'correction', 'teach'))`,
+    ],
+  },
 ];
 
 /** The version migrate() brings every database to. */

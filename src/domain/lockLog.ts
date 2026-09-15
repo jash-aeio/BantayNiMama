@@ -9,6 +9,7 @@
 // carried by the stability quorum (TR-36, 4 of 5 since ADR-016).
 
 import type { Decision } from './match.ts';
+import type { FrameDecision } from './scanDisplay.ts';
 
 /** Enough for a 20-product run many times over; the oldest events are dropped beyond it. */
 export const LOCK_LOG_LIMIT = 5000;
@@ -62,17 +63,17 @@ export function frameVote(decision: Decision, sharpness: number | null): FrameVo
 export interface LockEvent {
   readonly atMs: number;
   /** 'none' means no decision has quorum, and the overlay shows "point the box at a product". */
-  readonly kind: 'accept' | 'disambiguate' | 'unknown' | 'none';
-  /** accept: [product]. disambiguate: [first, second], best first. Otherwise empty. */
+  readonly kind: 'accept' | 'disambiguate' | 'quickPick' | 'unknown' | 'none';
+  /** accept: [product]. disambiguate: [first, second], best first. quickPick: its products, best first. Otherwise empty. */
   readonly productIds: readonly string[];
-  /** The locked decision's top score (accept, disambiguate) or best score (unknown). */
+  /** The locked decision's top score (accept, disambiguate, quickPick) or best score (unknown). */
   readonly score: number | null;
   readonly margin: number | null;
   /** The stability window's frames when the lock changed, oldest first. */
   readonly votes: readonly FrameVote[];
 }
 
-export function lockEvent(decision: Decision | null, atMs: number, votes: readonly FrameVote[] = []): LockEvent {
+export function lockEvent(decision: FrameDecision | null, atMs: number, votes: readonly FrameVote[] = []): LockEvent {
   if (decision === null) return { atMs, kind: 'none', productIds: [], score: null, margin: null, votes };
   switch (decision.kind) {
     case 'accept':
@@ -93,6 +94,8 @@ export function lockEvent(decision: Decision | null, atMs: number, votes: readon
         margin: decision.margin,
         votes,
       };
+    case 'quickPick':
+      return { atMs, kind: 'quickPick', productIds: decision.productIds, score: decision.score, margin: null, votes };
     case 'unknown':
       return { atMs, kind: 'unknown', productIds: [], score: decision.best?.score ?? null, margin: null, votes };
   }
@@ -103,7 +106,7 @@ export function appendLockEvent(log: readonly LockEvent[], event: LockEvent, lim
 }
 
 export interface SegmentItem {
-  readonly kind: 'accept' | 'disambiguate';
+  readonly kind: 'accept' | 'disambiguate' | 'quickPick';
   /** As first seen. For chips, the first id was top-1 at that moment. */
   readonly productIds: readonly string[];
   /** How many times this lock was entered within the segment. */
@@ -130,7 +133,7 @@ export interface LockSegment {
  */
 export function segmentLockLog(events: readonly LockEvent[]): LockSegment[] {
   const segments: LockSegment[] = [];
-  let items: { key: string; kind: 'accept' | 'disambiguate'; productIds: readonly string[]; count: number; firstMs: number }[] = [];
+  let items: { key: string; kind: SegmentItem['kind']; productIds: readonly string[]; count: number; firstMs: number }[] = [];
   let startMs: number | null = null;
   let lastMs = 0;
 

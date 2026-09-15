@@ -2,8 +2,10 @@ import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 import { appendToIndex, buildIndex, KNN_LIMIT, nearestShots, type IndexedShot } from './knn.ts';
+import { rankProducts } from './match.ts';
 
 const shot = (shotId: string, productId: string, vector: number[]): IndexedShot => ({ shotId, productId, vector });
+const negative = (id: string, vector: number[]): IndexedShot => ({ shotId: id, productId: id, vector, negative: true });
 
 /** Deterministic pseudo-random vectors, so the brute-force comparison is repeatable. */
 function randomShots(count: number, dim: number, seed: number): IndexedShot[] {
@@ -87,5 +89,74 @@ describe('buildIndex / appendToIndex', () => {
     assert.equal(nearestShots(after, [1, 0], 1)[0]?.shotId, 'b1');
     assert.equal(before.size, 1);
     assert.equal(before.matrix.length, 2);
+  });
+});
+
+describe('negatives in the index (TR-39)', () => {
+  test('flags negative rows by id, and appending keeps the old flags', () => {
+    const before = buildIndex(2, [shot('a1', 'a', [1, 0]), negative('n1', [0, 1])]);
+    assert.deepEqual([...before.negativeIds], ['n1']);
+
+    const after = appendToIndex(before, [negative('n2', [1, 1]), shot('a2', 'a', [0, 1])]);
+    assert.deepEqual([...after.negativeIds].sort(), ['n1', 'n2']);
+    assert.deepEqual([...before.negativeIds], ['n1']);
+  });
+
+  test('refuses an id used by both a product and a negative, in either order and across an append', () => {
+    const asNegative = negative('x', [0, 1]);
+    assert.throws(() => buildIndex(2, [shot('a1', 'x', [1, 0]), asNegative]), RangeError);
+    assert.throws(() => buildIndex(2, [asNegative, shot('a1', 'x', [1, 0])]), RangeError);
+    assert.throws(() => appendToIndex(buildIndex(2, [shot('a1', 'x', [1, 0])]), [asNegative]), RangeError);
+    assert.throws(() => appendToIndex(buildIndex(2, [asNegative]), [shot('a1', 'x', [1, 0])]), RangeError);
+  });
+
+  test('refuses a second row for one negative: KNN_LIMIT assumes one', () => {
+    assert.throws(() => buildIndex(2, [negative('n', [1, 0]), negative('n', [0, 1])]), RangeError);
+    assert.throws(() => appendToIndex(buildIndex(2, [negative('n', [1, 0])]), [negative('n', [0, 1])]), RangeError);
+  });
+});
+
+describe('KNN_LIMIT stays exact up to 9 shots per product (ADR-019, D-3)', () => {
+  test('top-1 / top-2 from the 10 nearest shots equal the full ranking, with any number of negatives', () => {
+    // Clustered, so a product's own shots crowd the top of the ranking, as they do on a real shelf.
+    const dim = 16;
+    const noise = randomShots(4000, dim, 3).map((s) => s.vector);
+    let next = 0;
+    const near = (centre: ArrayLike<number>, spread: number) => Array.from(centre, (x, d) => x + spread * noise[next++ % noise.length]![d]!);
+    const centres = randomShots(30, dim, 11).map((s) => s.vector);
+
+    for (const negativeCount of [0, 5, 200]) {
+      const shots = [
+        ...centres.flatMap((c, p) => Array.from({ length: 9 }, (_, i) => shot(`p${p}-${i}`, `p${p}`, near(c, 0.15)))),
+        ...Array.from({ length: negativeCount }, (_, n) => negative(`n${n}`, near(centres[n % centres.length]!, 0.15))),
+      ];
+      const index = buildIndex(dim, shots);
+
+      for (let q = 0; q < 200; q++) {
+        const query = Float32Array.from(near(centres[q % centres.length]!, 0.25));
+        const full = rankProducts(
+          index.productIds.map((productId, row) => ({
+            productId,
+            similarity: index.matrix.subarray(row * dim, (row + 1) * dim).reduce((sum, x, d) => sum + x * query[d]!, 0),
+          })),
+        );
+        const top = rankProducts(nearestShots(index, query));
+        assert.deepEqual(
+          top.slice(0, 2).map((p) => p.productId),
+          full.slice(0, 2).map((p) => p.productId),
+          `${negativeCount} negatives, query ${q}`,
+        );
+      }
+    }
+  });
+
+  test('the bound is tight: a 10th shot on the top product pushes the runner-up out of the 10 nearest', () => {
+    const at = (similarity: number) => [similarity, Math.sqrt(1 - similarity * similarity)];
+    const top = (n: number) => Array.from({ length: n }, (_, i) => shot(`a${i}`, 'a', at(0.99 - i * 0.005)));
+    const rest = [shot('b1', 'b', at(0.9)), ...Array.from({ length: 20 }, (_, i) => negative(`n${i}`, at(0.5)))];
+    const topTwo = (shots: IndexedShot[]) => rankProducts(nearestShots(buildIndex(2, shots), [1, 0])).slice(0, 2).map((p) => p.productId);
+
+    assert.deepEqual(topTwo([...top(9), ...rest]), ['a', 'b']);
+    assert.deepEqual(topTwo([...top(10), ...rest]), ['a']);
   });
 });

@@ -1,6 +1,12 @@
+import type { IndexRebuild } from '../../app/services';
+import type { Catalog } from '../../db/catalog';
+import type { PriceChange } from '../../db/products';
 import type { PersistenceProblem } from '../../domain/gateCheck.ts';
+import { formatCentavos } from '../../domain/money.ts';
+import { countInteractions, enrollmentTimes, type Interaction } from '../../domain/interactionLog.ts';
 import { segmentLockLog, type LockEvent } from '../../domain/lockLog.ts';
-import { summarize } from '../../domain/stats.ts';
+import { summarize, type Summary } from '../../domain/stats.ts';
+import { clockCheck, confirmDelays, lockEpisodes, timeToLockReport, type FrameLogEntry } from '../../domain/timeToLock.ts';
 import type { StageTimings } from '../../ml/frameEmbedder';
 import type { ShotMeasurement } from '../enrollment/useEnrollment';
 import type { ScanTiming } from '../scanner/useScanner';
@@ -10,12 +16,26 @@ import type { GateCheckResult } from './runGateCheck';
 // (PHASE_1_PLAN.md §4), not tindera copy, so they are not translated. Record a run from the screen:
 // console output did not reach logcat in the release build on the Infinix (P1-7).
 
+/**
+ * What openCatalog did at this launch. It is the P2-2 device checkpoint's evidence that migration 2
+ * ran on the real catalog ("schema 1 → 2"), and it reads "2 → 2" on every launch after that.
+ */
+export function describeLaunch(c: Catalog): string {
+  return (
+    // ASCII "->": the Infinix's font drew "→" as a stray glyph in this line (P2-2 checkpoint screenshot).
+    `launch · schema ${c.migratedFrom} -> ${c.meta.schemaVersion} · trash purged ${c.purgedProducts} · orphan photos removed ${c.orphanPhotosRemoved} · ` +
+    `index ${c.index.size} (negatives ${c.index.negativeIds.size}) · other-model ${c.otherModelShots}`
+  );
+}
+
 export function describeGateCheck(r: GateCheckResult): string[] {
   const s = r.selfMatch;
   const passed = r.problems.length === 0 && s.passed;
   return [
     `${passed ? 'PASS' : 'FAIL'} — PHASE_1_PLAN §4 steps 3 and 4`,
-    `step 3 · products ${r.counts.products} · shots ${r.counts.shots} · index ${r.indexSize} · other-model ${r.otherModelShots}`,
+    `step 3 · products ${r.counts.products} · shots ${r.counts.shots} (corrections ${r.counts.correctionShots}) · ` +
+      `negatives ${r.counts.negatives} · index ${r.indexSize} (negatives ${r.indexNegatives}) · other-model ${r.otherModelShots} · ` +
+      `trashed products ${r.counts.trashedProducts} (${r.trashedShots} shots)`,
     `step 3 · app_meta schema ${r.meta.schemaVersion} · ${r.meta.modelId} · ${r.meta.embeddingDim}-d · τ ${r.meta.thresholds.tau} · δ ${r.meta.thresholds.delta}`,
     `step 3 · photo rows ${r.photoRows} · missing ${r.missingPhotos.length}`,
     ...r.problems.map((p) => `step 3 PROBLEM · ${describeProblem(p)}`),
@@ -37,10 +57,21 @@ function describeProblem(p: PersistenceProblem): string {
     case 'modelId':
       return `model_id is ${p.found}, expected ${p.expected}`;
     case 'indexMismatch':
-      return `index ${p.indexSize} + other-model ${p.otherModelShots} ≠ ${p.shots} shot rows`;
+      return `index ${p.indexSize} + other-model ${p.otherModelShots} + trashed ${p.trashedShots} ≠ ${p.rows} vector rows`;
     case 'missingPhotos':
       return `missing photos: ${p.paths.slice(0, 3).join(', ')}${p.paths.length > 3 ? ` (+${p.paths.length - 3} more)` : ''}`;
   }
+}
+
+/** The interaction log as counts per kind (PHASE_2_PLAN §4), then the most recent taps with names. */
+export function describeInteractions(log: readonly Interaction[], nameOf: (id: string) => string, limit = 20): string[] {
+  if (log.length === 0) return ['interactions: none yet (lost on relaunch)'];
+  return [
+    `interactions n=${log.length}: ${countInteractions(log)
+      .map(([kind, n]) => `${kind} ${n}`)
+      .join(' · ')}`,
+    ...log.slice(-limit).map((e) => `${clock(e.atMs)} ${e.kind}${e.productIds.length > 0 ? ` · ${e.productIds.map(nameOf).join(' | ')}` : ''}`),
+  ];
 }
 
 /** Worklet per-stage median / p90 (P1-3). */
@@ -72,15 +103,87 @@ export function describeScanTimings(samples: readonly ScanTiming[]): string {
   );
 }
 
-/** Frame-vs-JPEG agreement and JPEG size over the shots captured since launch (ARCHITECTURE.md §4, NFR-08). */
-export function describeEnrollmentMeasurements(measurements: readonly ShotMeasurement[]): string {
+/**
+ * Frame-vs-JPEG agreement and JPEG size over the shots captured since launch (ARCHITECTURE.md §4,
+ * NFR-08), then the SR-22 quality inputs. Those are recorded so Phase 3 can set the warning limits
+ * from real shots; today's limits are placeholders.
+ */
+export function describeEnrollmentMeasurements(measurements: readonly ShotMeasurement[]): string[] {
   const agreement = summarize(measurements.map((m) => m.agreement));
   const bytes = summarize(measurements.map((m) => m.bytes));
-  if (agreement === null || bytes === null) return 'enrollment shots this session: none yet (enroll first; lost on relaunch)';
-  const min = Math.min(...measurements.map((m) => m.agreement));
+  const luminance = summarize(measurements.map((m) => m.luminance));
+  const sharpness = summarize(measurements.map((m) => m.sharpness * 1000));
+  if (agreement === null || bytes === null || luminance === null || sharpness === null) {
+    return ['enrollment shots this session: none yet (enroll first; lost on relaunch)'];
+  }
+  const min = (values: number[]) => Math.min(...values);
+  return [
+    `enrollment shots this session n=${agreement.n}: frame-vs-JPEG dot min ${min(measurements.map((m) => m.agreement)).toFixed(4)} · ` +
+      `median ${agreement.median.toFixed(4)} · JPEG median ${(bytes.median / 1024).toFixed(1)} KB, max ${(bytes.max / 1024).toFixed(1)} KB`,
+    `photo quality (SR-22, placeholder limits): luminance min ${min(measurements.map((m) => m.luminance)).toFixed(3)} · ` +
+      `median ${luminance.median.toFixed(3)} · max ${luminance.max.toFixed(3)} · sharpness ×1000 min ` +
+      `${min(measurements.map((m) => m.sharpness * 1000)).toFixed(2)} · median ${sharpness.median.toFixed(2)} · ` +
+      `warned ${measurements.filter((m) => m.warned).length}`,
+  ];
+}
+
+/** SR-25's limit, from *Add* to saved. */
+const ENROLLMENT_LIMIT_MS = 30_000;
+
+/**
+ * Gate B2's evidence: time from *Add* to saved for each product since launch (SR-25), and how many
+ * were started from an Unknown card's *Add*.
+ */
+export function describeEnrollmentTimes(log: readonly Interaction[], nameOf: (id: string) => string, limit = 10): string[] {
+  const times = enrollmentTimes(log);
+  const s = summarize(times.map((e) => e.ms));
+  if (s === null) return ['enrollment times: none yet (Add → saved; lost on relaunch)'];
+  const over = times.filter((e) => e.ms > ENROLLMENT_LIMIT_MS).length;
+  const fromUnknown = times.filter((e) => e.source === 'unknown').length;
+  // Where the time went (added after gate B2 attempt 2): medians over the products that logged each step.
+  const median = (pick: (e: (typeof times)[number]) => number | null) => {
+    const m = summarize(times.map(pick).filter((x): x is number => x !== null));
+    return m === null ? '—' : seconds(m.median);
+  };
+  return [
+    `enrollment times n=${s.n} (SR-25 ≤ 30 s): median ${seconds(s.median)} · p90 ${seconds(s.p90)} · max ${seconds(s.max)} · ` +
+      `over 30 s ${over} · from Unknown's Add ${fromUnknown}`,
+    `enrollment split, medians: Add → 1st photo ${median((e) => e.firstPhotoMs)} · 1st → last photo ` +
+      `${median((e) => (e.firstPhotoMs === null || e.lastPhotoMs === null ? null : e.lastPhotoMs - e.firstPhotoMs))} · ` +
+      `last photo → saved ${median((e) => (e.lastPhotoMs === null ? null : e.ms - e.lastPhotoMs))} · ` +
+      `1st key → saved ${median((e) => (e.firstKeyMs === null ? null : e.ms - e.firstKeyMs))}`,
+    ...times.slice(-limit).map((e) => {
+      const photos = e.firstPhotoMs === null ? '' : ` +${seconds(e.firstPhotoMs)}…+${seconds(e.lastPhotoMs ?? e.firstPhotoMs)}`;
+      const typing = e.firstKeyMs === null ? '' : ` · typing from +${seconds(e.firstKeyMs)}`;
+      return `${clock(e.savedMs)} ${nameOf(e.productId)} · ${seconds(e.ms)} · ${e.photos} photos${photos}${typing} · from ${e.source}`;
+    }),
+  ];
+}
+
+function seconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)} s`;
+}
+
+/** Gate A2's persistence evidence: price_history survives a force-stop, so this reads the same after a relaunch. */
+export function describePriceHistory(summary: { rows: number; recent: readonly PriceChange[] }): string[] {
+  const price = (centavos: number | null) => (centavos === null ? '—' : formatCentavos(centavos));
+  return [
+    `price_history rows ${summary.rows}${summary.rows > 0 ? ' (newest first; each row is the price BEFORE the change)' : ''}`,
+    ...summary.recent.map(
+      (c) => `${clock(c.changedAt)} ${c.name} · was ${price(c.pricePiece)}${c.pricePack === null ? '' : ` · pack ${price(c.pricePack)}`}`,
+    ),
+  ];
+}
+
+/** Index rebuilds since launch (E-4): PHASE_2_PLAN §9 records their cost after delete and restore. */
+export function describeIndexRebuilds(rebuilds: readonly IndexRebuild[]): string {
+  const ms = summarize(rebuilds.map((r) => r.ms));
+  const last = rebuilds[rebuilds.length - 1];
+  if (ms === null || last === undefined) return 'index rebuilds: none yet (delete, undo, restore; lost on relaunch)';
+  const reasons = [...new Set(rebuilds.map((r) => r.reason))].map((reason) => `${reason} ${rebuilds.filter((r) => r.reason === reason).length}`);
   return (
-    `enrollment shots this session n=${agreement.n}: frame-vs-JPEG dot min ${min.toFixed(4)} · ` +
-    `median ${agreement.median.toFixed(4)} · JPEG median ${(bytes.median / 1024).toFixed(1)} KB, max ${(bytes.max / 1024).toFixed(1)} KB`
+    `index rebuilds n=${ms.n} (${reasons.join(' · ')}): ms median ${ms.median.toFixed(1)} · p90 ${ms.p90.toFixed(1)} · max ${ms.max.toFixed(1)} · ` +
+    `last ${last.reason} ${last.ms.toFixed(1)} ms at ${clock(last.atMs)}, ${last.size} rows`
   );
 }
 
@@ -103,7 +206,9 @@ export function describeLockLog(events: readonly LockEvent[], nameOf: (id: strin
         const times = item.count > 1 ? ` ×${item.count}` : '';
         return item.kind === 'accept'
           ? `LOCK ${nameOf(item.productIds[0] ?? '')}${times}`
-          : `CHIPS ${item.productIds.map(nameOf).join(' | ')}${times}`;
+          : item.kind === 'quickPick'
+            ? `GRID ${item.productIds.map(nameOf).join(' | ')}${times}`
+            : `CHIPS ${item.productIds.map(nameOf).join(' | ')}${times}`;
       });
       return `#${i + 1} ${clock(segment.startMs)} · ${parts.join(' · ')}`;
     }),
@@ -126,7 +231,9 @@ export function describeLockDetails(events: readonly LockEvent[], nameOf: (id: s
           ? `LOCK ${shortName(nameOf(e.productIds[0] ?? ''))}`
           : e.kind === 'disambiguate'
             ? `CHIPS ${e.productIds.map((id) => shortName(nameOf(id))).join(' | ')}`
-            : 'UNKNOWN';
+            : e.kind === 'quickPick'
+              ? `GRID ${e.productIds.map((id) => shortName(nameOf(id))).join(' | ')}`
+              : 'UNKNOWN';
       const votes = e.votes
         .map((v) => {
           const who = v.topId === null ? '—' : shortName(nameOf(v.topId));
@@ -140,6 +247,41 @@ export function describeLockDetails(events: readonly LockEvent[], nameOf: (id: s
   ];
 }
 
+/**
+ * NFR-04 (P2-8): the time-to-lock proxy from the lock log and the frame log, the clock check that
+ * makes subtracting their times valid, and in confirm mode the time from a lock to its *Yes*. Every
+ * episode is listed to the millisecond, so it can be matched to a screen recording's timestamp
+ * overlay (`screenrecord --bugreport`) for the calibration.
+ */
+export function describeTimeToLock(
+  frames: readonly FrameLogEntry[],
+  locks: readonly LockEvent[],
+  interactions: readonly Interaction[],
+  nameOf: (id: string) => string,
+): string[] {
+  const oldest = frames[0];
+  if (oldest === undefined) return ['time-to-lock: frame log empty (clear the logs, then empty table -> product; lost on relaunch)'];
+  const report = lockEpisodes(frames, locks);
+  const { proxy } = timeToLockReport(report.episodes);
+  const clocks = clockCheck(frames);
+  const yes = summarize(confirmDelays(locks, interactions));
+  const resets = frames.filter((f) => f.kind === 'reset').length;
+  const spread = (s: Summary | null) => (s === null ? '—' : `median ${s.median} · p90 ${s.p90} · max ${s.max} ms`);
+  // ASCII "->" throughout, as in describeLaunch: the Infinix drew "→" as a stray glyph.
+  return [
+    `time-to-lock proxy, t_seen -> t_lock (NFR-04 p90 <= 1200 ms; uncalibrated) n=${report.episodes.length}: ${spread(proxy)} · ` +
+      `left out: truncated ${report.truncated} · interrupted ${report.interrupted} · inconsistent ${report.inconsistent}`,
+    `frame log: ${frames.length - resets} frames, ${resets} resets since ${clockMs(oldest.arrivedAtMs)} · clock check, arrived - captured - worklet: ` +
+      `median ${fixed(clocks.transit?.median, 1)} · p90 ${fixed(clocks.transit?.p90, 1)} · min ${fixed(clocks.transitMinMs, 1)} ms · impossible ${clocks.impossible}`,
+    `lock -> Yes (informational, not NFR-04) n=${yes?.n ?? 0}: ${spread(yes)}`,
+    ...report.episodes.map((e, i) => {
+      const names = e.productIds.map((id) => shortName(nameOf(id))).join(' | ');
+      const kind = e.lockKind === 'accept' ? 'LOCK' : e.lockKind === 'disambiguate' ? 'CHIPS' : 'GRID';
+      return `ttl #${i + 1} seen ${clockMs(e.seenMs)} -> lock ${clockMs(e.lockMs)} · ${e.proxyMs} ms · ${kind} ${names}`;
+    }),
+  ];
+}
+
 /** "Alaska Evaporada 360ml" → "Alaska…360ml": keeps the brand and the size or flavour that tells siblings apart. */
 function shortName(name: string): string {
   const words = name.split(' ');
@@ -149,6 +291,11 @@ function shortName(name: string): string {
 function clock(ms: number): string {
   const d = new Date(ms);
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+/** HH:MM:SS.mmm, to line up with a screen recording's timestamp overlay. */
+function clockMs(ms: number): string {
+  return `${clock(ms)}.${String(new Date(ms).getMilliseconds()).padStart(3, '0')}`;
 }
 
 function fixed(value: number | null | undefined, digits = 4): string {

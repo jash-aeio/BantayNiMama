@@ -4,6 +4,7 @@ import type { TensorflowModel } from 'react-native-fast-tflite';
 import type { Catalog } from '../../db/catalog';
 import { getProduct } from '../../db/products';
 import { likelyDuplicates, MAX_SHOTS, type NewProduct } from '../../domain/enrollment.ts';
+import type { InteractionKind } from '../../domain/interactionLog.ts';
 import { appendToIndex, nearestShots, type VectorIndex } from '../../domain/knn.ts';
 import type { ReferenceCapture } from '../../ml/frameEmbedder';
 import { captureShot, commitEnrollment, discardShots, type DraftShot } from './draft';
@@ -14,18 +15,22 @@ export type EnrollmentError =
 
 export type SaveResult = { readonly ok: true; readonly productId: string } | { readonly ok: false; readonly message: string };
 
-/** One captured shot's measurements, kept for the dev readout (ARCHITECTURE.md §4, NFR-08). */
+/** One captured shot's measurements, kept for the dev readout (ARCHITECTURE.md §4, NFR-08, SR-22). */
 export interface ShotMeasurement {
   readonly agreement: number;
   readonly bytes: number;
+  /** SR-22 inputs, recorded so Phase 3 can replace the placeholder limits with measured ones. */
+  readonly luminance: number;
+  readonly sharpness: number;
+  readonly warned: boolean;
 }
 
 export interface EnrollmentState {
   readonly shots: readonly DraftShot[];
   readonly capturing: boolean;
   readonly error: EnrollmentError | null;
-  /** SR-23: names of catalog products the draft's shots already clear τ against, best first. */
-  readonly duplicateNames: readonly string[];
+  /** SR-23: catalog products the draft's shots already clear τ against, best first. */
+  readonly duplicates: readonly { readonly id: string; readonly name: string }[];
   /** Every shot captured this session, including ones later removed or discarded. */
   readonly measurements: readonly ShotMeasurement[];
   /** Goes up by one per committed product. Lets readouts refresh their counts. */
@@ -35,7 +40,10 @@ export interface EnrollmentState {
   receiveCapture(capture: ReferenceCapture): void;
   removeShot(id: string): void;
   discard(): void;
-  save(product: NewProduct): SaveResult;
+  /** `markAmbiguous`: existing look-alikes flagged repacked in the same transaction (P2-5, repackedPlan). */
+  save(product: NewProduct, markAmbiguous?: readonly string[]): SaveResult;
+  /** SR-25's split: logs the first keystroke of each product, once. Call from every form field. */
+  noteTyping(): void;
 }
 
 interface Options {
@@ -46,6 +54,8 @@ interface Options {
   readonly stillModel: TensorflowModel | undefined;
   /** Asks the camera worklet to cut a reference crop from its next processed frame. */
   readonly requestFrameCapture: () => void;
+  /** The interaction log. Photos, the first keystroke and the save go there, and SR-25 is timed from them. */
+  readonly log: (kind: InteractionKind, productIds: readonly string[]) => void;
 }
 
 /**
@@ -54,7 +64,7 @@ interface Options {
  * Draft shots live in a ref as well as in state. Captures arrive asynchronously, and checking the
  * count against React state, which may be a render behind, could let a sixth shot in (TR-42).
  */
-export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCapture }: Options): EnrollmentState {
+export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCapture, log }: Options): EnrollmentState {
   const [shots, setShotsState] = useState<readonly DraftShot[]>([]);
   const shotsRef = useRef<readonly DraftShot[]>([]);
   const [capturing, setCapturing] = useState(false);
@@ -62,6 +72,8 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
   const [error, setError] = useState<EnrollmentError | null>(null);
   const [measurements, setMeasurements] = useState<readonly ShotMeasurement[]>([]);
   const [savedCount, setSavedCount] = useState(0);
+  /** Whether this product's first keystroke is already logged. Reset by a save. */
+  const typedRef = useRef(false);
 
   const setShots = useCallback((next: readonly DraftShot[]) => {
     shotsRef.current = next;
@@ -97,7 +109,18 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
             discardShots([shot]);
           } else {
             setShots([...shotsRef.current, shot]);
-            setMeasurements((previous) => [...previous, { agreement: shot.frameAgreement, bytes: shot.bytes }]);
+            // Logged when the photo is on disk and embedded, which is when she can take the next one.
+            log('enrollPhoto', []);
+            setMeasurements((previous) => [
+              ...previous,
+              {
+                agreement: shot.frameAgreement,
+                bytes: shot.bytes,
+                luminance: shot.quality.luminance,
+                sharpness: shot.quality.sharpness,
+                warned: shot.warnings.length > 0,
+              },
+            ]);
           }
           setCapturingBoth(false);
         },
@@ -107,7 +130,7 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
         },
       );
     },
-    [stillModel, setShots, setCapturingBoth],
+    [stillModel, setShots, setCapturingBoth, log],
   );
 
   const removeShot = useCallback(
@@ -127,10 +150,10 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
   }, [setShots]);
 
   const save = useCallback(
-    (product: NewProduct): SaveResult => {
+    (product: NewProduct, markAmbiguous: readonly string[] = []): SaveResult => {
       let committed: ReturnType<typeof commitEnrollment>;
       try {
-        committed = commitEnrollment(catalog.db, catalog.meta, product, shotsRef.current);
+        committed = commitEnrollment(catalog.db, catalog.meta, product, shotsRef.current, markAmbiguous);
       } catch (e) {
         // commitEnrollment already deleted the photos, so the draft is gone as well.
         setShots([]);
@@ -139,27 +162,39 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
       // Only now, after COMMIT, can the shots become searchable (ARCHITECTURE.md §5, invariant 6).
       // The scanner reads indexRef on its next frame, with no reload (SR-24).
       indexRef.current = appendToIndex(indexRef.current, committed.indexed);
+      log('enrollSaved', [committed.productId]);
+      typedRef.current = false;
       setShots([]);
       setSavedCount((n) => n + 1);
       return { ok: true, productId: committed.productId };
     },
-    [catalog, indexRef, setShots],
+    [catalog, indexRef, setShots, log],
   );
 
+  const noteTyping = useCallback(() => {
+    if (typedRef.current) return;
+    typedRef.current = true;
+    log('enrollTyping', []);
+  }, [log]);
+
   // SR-23. Recomputed whenever a shot is added or removed; the catalog is searched once per shot.
-  const duplicateNames = useMemo(() => {
+  // The index holds no trashed product and flags negatives, so a negative is skipped rather than
+  // named by its id: it has no product row, and offering to mark it repacked would mean nothing.
+  const duplicates = useMemo(() => {
     if (shots.length === 0) return [];
-    const hitsPerShot = shots.map((shot) => nearestShots(indexRef.current, shot.vector));
-    return likelyDuplicates(hitsPerShot, catalog.meta.thresholds).map(
-      (p) => getProduct(catalog.db, p.productId)?.name ?? p.productId,
-    );
+    const index = indexRef.current;
+    const hitsPerShot = shots.map((shot) => nearestShots(index, shot.vector));
+    return likelyDuplicates(hitsPerShot, catalog.meta.thresholds).flatMap((p) => {
+      const product = index.negativeIds.has(p.productId) ? null : getProduct(catalog.db, p.productId);
+      return product === null ? [] : [{ id: product.id, name: product.name }];
+    });
   }, [shots, catalog, indexRef]);
 
   return {
     shots,
     capturing,
     error,
-    duplicateNames,
+    duplicates,
     measurements,
     savedCount,
     requestCapture,
@@ -167,6 +202,7 @@ export function useEnrollment({ catalog, indexRef, stillModel, requestFrameCaptu
     removeShot,
     discard,
     save,
+    noteTyping,
   };
 }
 

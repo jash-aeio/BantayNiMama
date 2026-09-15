@@ -8,7 +8,7 @@
     "android": "expo run:android",
     "ios": "expo run:ios",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --test \"src/domain/**/*.test.ts\"",
+    "test": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON --disable-warning=ExperimentalWarning --test \"src/domain/**/*.test.ts\" \"src/db/**/*.test.ts\"",
     "fetch-model": "node scripts/fetch-model.mjs",
     "analyze": "node scripts/analyze.mjs"
   },

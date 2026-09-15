@@ -6,13 +6,23 @@
 
 import type { ShotMatch } from './match.ts';
 
-/** TR-30: how many shots the policy sees. Safe while a product has ≤ 6 shots (golden replay). */
+/**
+ * TR-30: how many shots the policy sees.
+ *
+ * Top-1 and top-2 from the 10 nearest shots equal the full ranking while every product has ≤ 9
+ * shots: only top-1's own shots can rank above the second product's best shot, so that shot is at
+ * most 10th. TR-42 allows 8 since ADR-019 (5 enrollment + 3 correction). A negative is a product of
+ * one shot, so any number of them keeps the bound. A cap above 9 must raise this limit with it.
+ */
 export const KNN_LIMIT = 10;
 
 export interface IndexedShot {
   readonly shotId: string;
+  /** For a negative, the negative's own id: each negative is a one-shot product that is never named. */
   readonly productId: string;
   readonly vector: ArrayLike<number>;
+  /** A store-local negative from `negative_shots` (SR-14, TR-39). Absent for a product shot. */
+  readonly negative?: boolean;
 }
 
 /**
@@ -26,6 +36,8 @@ export interface VectorIndex {
   readonly matrix: Float32Array;
   readonly shotIds: readonly string[];
   readonly productIds: readonly string[];
+  /** The productIds that are negatives. resolveFrame turns any decision naming one into UNKNOWN (TR-39). */
+  readonly negativeIds: ReadonlySet<string>;
 }
 
 export interface ShotHit extends ShotMatch {
@@ -36,6 +48,7 @@ export function buildIndex(dim: number, shots: readonly IndexedShot[]): VectorIn
   if (!Number.isInteger(dim) || dim < 1) {
     throw new RangeError(`Index dimension must be a positive integer, got ${dim}`);
   }
+  const negativeIds = negativesAfter([], new Set(), shots);
   const matrix = new Float32Array(shots.length * dim);
   shots.forEach((shot, row) => {
     assertDim(shot, dim);
@@ -47,15 +60,17 @@ export function buildIndex(dim: number, shots: readonly IndexedShot[]): VectorIn
     matrix,
     shotIds: shots.map((s) => s.shotId),
     productIds: shots.map((s) => s.productId),
+    negativeIds,
   };
 }
 
 /**
- * A new index with `shots` added — for after an enrollment commits (TR-45). Copies the matrix,
- * which is ~12.8 MB at 500 products (computed, not measured); acceptable because enrollment is
- * rare and per-frame search never copies.
+ * A new index with `shots` added — for after an enrollment, correction or negative commits (TR-45).
+ * Copies the matrix, which is ~12.8 MB at 500 products (computed, not measured); acceptable because
+ * these are rare taps and per-frame search never copies.
  */
 export function appendToIndex(index: VectorIndex, shots: readonly IndexedShot[]): VectorIndex {
+  const negativeIds = negativesAfter(index.productIds, index.negativeIds, shots);
   const matrix = new Float32Array((index.size + shots.length) * index.dim);
   matrix.set(index.matrix);
   shots.forEach((shot, i) => {
@@ -68,6 +83,7 @@ export function appendToIndex(index: VectorIndex, shots: readonly IndexedShot[])
     matrix,
     shotIds: [...index.shotIds, ...shots.map((s) => s.shotId)],
     productIds: [...index.productIds, ...shots.map((s) => s.productId)],
+    negativeIds,
   };
 }
 
@@ -118,4 +134,28 @@ function assertDim(shot: IndexedShot, dim: number): void {
     // A vector of the wrong size came from a different model (TR-23) and must never be searched.
     throw new RangeError(`Shot ${shot.shotId} has ${shot.vector.length} dimensions, index expects ${dim}`);
   }
+}
+
+/**
+ * The negative ids once `shots` join rows that already carry `productIds`. Refuses two mistakes that
+ * would break TR-39 without any visible error:
+ * - an id used by both a product and a negative, which silences part of a product or names a negative;
+ * - a second row for one negative, which KNN_LIMIT's bound does not cover.
+ */
+function negativesAfter(
+  productIds: readonly string[],
+  negativeIds: ReadonlySet<string>,
+  shots: readonly IndexedShot[],
+): ReadonlySet<string> {
+  const negatives = new Set(negativeIds);
+  const products = new Set(productIds.filter((id) => !negativeIds.has(id)));
+  for (const { shotId, productId, negative } of shots) {
+    if (negatives.has(productId) || (negative === true && products.has(productId))) {
+      const owner = negatives.has(productId) ? 'a negative' : 'a product';
+      throw new RangeError(`Shot ${shotId}: id ${productId} already belongs to ${owner} (TR-39)`);
+    }
+    if (negative === true) negatives.add(productId);
+    else products.add(productId);
+  }
+  return negatives;
 }

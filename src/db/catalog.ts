@@ -8,6 +8,7 @@ import { readAppMeta } from './meta';
 import { migrate } from './migrate';
 import { openDatabase } from './open';
 import { deleteReferencePhoto, listReferencePhotos } from './photos';
+import { purgeExpiredTrash } from './products';
 import { loadVectorIndex, referencedPhotoPaths } from './shots';
 
 export interface Catalog {
@@ -19,12 +20,14 @@ export interface Catalog {
   readonly migratedFrom: number;
   /** Shots stamped with another model_id, left out of the index until re-embedded (TR-23, TR-24). */
   readonly otherModelShots: number;
+  /** SR-32: trashed products older than 30 days, removed for good at this launch. */
+  readonly purgedProducts: number;
   readonly orphanPhotosRemoved: number;
 }
 
 /**
- * Opens bantay.db once, at launch: migrate (TR-44), read app_meta (TR-35), remove orphan photos,
- * then build the search index from the shot BLOBs (ADR-014).
+ * Opens bantay.db once, at launch: migrate (TR-44), read app_meta (TR-35), purge the expired trash,
+ * remove orphan photos, then build the search index from the shot BLOBs (ADR-014).
  *
  * Refuses a database whose model_id is not the bundled model. Every stored vector would then be
  * compared with frames from a different model and score meaninglessly (TR-23), so failing loudly
@@ -40,10 +43,13 @@ export function openCatalog(): Catalog {
         `bantay.db was enrolled with ${meta.modelId}, but this app runs ${MODEL_ID}; its shots must be re-embedded (TR-23, TR-24)`,
       );
     }
+    // SR-32. Before the sweep, so a purged product's photo that fails to delete is swept as an orphan.
+    // Known limit (trash.ts): a clock set forwards purges early, and there is no trusted time to check.
+    const purgedProducts = purgeExpiredTrash(db, Date.now(), deleteReferencePhoto);
     // Before the index and before the camera exists: no enrollment draft can have photos on disk yet.
     const orphanPhotosRemoved = removeOrphanPhotos(db);
     const { index, otherModelShots } = loadVectorIndex(db, meta);
-    return { db, meta, index, migratedFrom: from, otherModelShots, orphanPhotosRemoved };
+    return { db, meta, index, migratedFrom: from, otherModelShots, purgedProducts, orphanPhotosRemoved };
   } catch (e) {
     db.close();
     throw e;
