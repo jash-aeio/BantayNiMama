@@ -3,7 +3,7 @@
 > **Claude: update this file at the end of any session that changes what is built, blocked, or
 > decided.** Keep it short — it is a dashboard, not a journal. The journal is `CHANGELOG.md`.
 
-**Last updated:** 2026-09-14
+**Last updated:** 2026-09-15
 **Current phase:** Phase 2 — UI / UX *(Phase 1 gate passed and verified with `/phase-gate` 2026-09-14; Phase 0 gate 2026-09-13)*
 **Overall health:** 🟢 The real data path holds: 20 products survive a force-stop and scan with zero wrong locks. Latency (`NFR-07`), un-enrolled handling (`NFR-03`) and look-alike confusion are open.
 
@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-4 done and pushed** (`5bacbd7`; P2-4's gate A2–A4 passed on the Infinix). **P2-5 is built but not yet run on a device.** A *repacked* toggle at enrollment, plus an offer to mark look-alikes when the duplicate warning shows. A grid lock and a pinned *Repacked* button open tiles with photo and name, in a fixed name order, with a price only after a tap. Tests **277**, typecheck clean. **The gate catalog now holds 2 negatives, 1 correction shot (Knorr Chicken) and 2 price edits (Clover)** (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
-| **Next action** | **Gate B5 on the Infinix** (P2-5's done-when). Build the release APK. Enroll 3 repacked clear-bag products with the toggle, then scan each. **Pass:** the grid opens and names nothing; a tile tap shows that product's price; the pinned *Repacked* button opens the same grid. Also exercise the look-alike offer. **Where (operator's call):** in the 20-product gate catalog, then delete the 3 bags, so A5 scans the same 20. Do not accept the look-alike offer for a gate product. Then **P2-6**. **Still owed before `/phase-gate`:** the operator reviews the Filipino copy for P2-3 to P2-5. |
+| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-5 done** (P2-4's gate A2–A4 and P2-5's early gate B5 passed on the Infinix). P2-5: a *repacked* toggle at enrollment, an offer to mark look-alikes, and a grid (lock or pinned *Repacked* button) of photo + name tiles with a price only after a tap. Tests **277**, typecheck clean. **The gate catalog now holds 20 live products, 2 negatives, 1 correction shot (Knorr Chicken), 2 price edits (Clover) and 3 trashed repacked bags (15 shots, 15 photos)** until P2-7's purge (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
+| **Next action** | **P2-6** — first run, permission recovery, guided enrollment. Filipino copy for P2-3 to P2-5 reviewed, no corrections (2026-09-15). **Gate check after B5 PASS** in airplane mode on a fresh process: self-match 103/103, 0 missing of **118 photo rows** (the trashed bags count until P2-7). |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
@@ -30,7 +30,7 @@
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
 | **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-4 done (schema v2, confirm mode, negatives, edit / correct / delete on device); P2-5 built, gate B5 on device next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
+| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-5 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid on device; gate B5 early run passed); P2-6 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
@@ -57,7 +57,7 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
   - [x] Built: confirm / quote / chips / interim quick pick; reject flow as a reducer with the capture guard; torch; interaction log. Tests 231 → 245.
   - [x] **On the Infinix, release APK:** 3 Yes taps on locks; 2 negatives saved via the flow; after a relaunch, chip votes with a negative locked **UNKNOWN** ×3; after a force-stop, **gate check PASS** (negatives 2, self-match 102/102, 0 missing); Kalamansi, Chilimansi and Lucky Me Beef still **LOCK** with both negatives loaded; torch lit.
   - [x] Capture guard's refusal seen on device *(P2-4 gate A3, 20:07:27)*: a correction's capture frame no longer showed the Knorr pair → `correctMismatch`, nothing saved; the retry saved. The P2-3 negatives' items were not named.
-  - [ ] Filipino copy for the card and sheet: operator review before `/phase-gate`
+  - [x] Filipino copy for the card and sheet: reviewed by the operator, **no corrections** *(2026-09-15)*
 - [x] P2-4 Edit / correct / delete from the scan card, with undo (`SR-06`–`SR-08`, `SR-32`) *(2026-09-14; gate A2–A4 passed on the Infinix)*
   - [x] Built *(2026-09-14)*: price editor bound at tap time (settled cards only); *Wrong?* sheet with likely products, search and *Not in my list*; correction shots through the capture guard; soft delete, 10 s undo and index rebuild; trash list with Restore (pulled forward from P2-7); gate panel shows rebuild timings and `price_history`. Tests 245 → 264.
   - [x] **Gate A2 on the Infinix, release APK** *(2026-09-14, not in airplane mode)*: Clover Chips 24g repriced from the scan card at 19:36:13 and 19:42:16; the second edit was the binding check (opened on Clover 19:41:44, phone moved to another product before Save — operator-reported, since voting pauses while the editor is open), and it landed on Clover with no other product's `price_history` row. After `am force-stop` → new pid 16551 (launch `schema 2 -> 2`, index 102, negatives 2): Clover shows the new price on Yes (operator-reported, 19:45:44) and the gate panel still reads `price_history rows 2` (was ₱12.00, was ₱20.00).
@@ -66,16 +66,22 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
   - [x] **Gate A4, delete and undo** *(pid 21337, 20:16–20:17)*: Sponge Scouring Pad deleted from the editor at 20:16:58, undo lapsed 20:17:08, listed in *Deleted products (1)*. Kopiko: LOCK 20:17:35 → delete → **Undo** (20:17:46, inside the window) → LOCK Kopiko 20:17:47. Index rebuilds **n = 3, median 9.2 ms, max 17.0** (103 → 98 → 93 → 98 rows); 58 frames then searched 98 shots. The sponge never locked while deleted.
   - [ ] **Possible wrong lock, unattributed:** at 20:17:04, 6 s after deleting the sponge, **LOCK Knorr Broth Cube Pork** (s 0.536, m 0.088, 4 accept votes 0.51–0.55), then CHIPS Knorr Pork \| Clover to 20:17:17. The operator is not sure what was in the box. If it was the sponge, a deleted product fell through to its neighbour (the un-enrolled soft spot below). Confirm mode showed it as a question, not a price.
   - [x] **Gate A4, after force-stop** *(pid 23604, 20:25–20:29)*: launch `index 98 (negatives 2)`, so the sponge stayed out of the index; restored from the trash at 20:29:03 (rebuild **23.2 ms**, 103 rows); **LOCK Sponge Scouring Pad** at 20:29:25, Yes at 20:29:27. Lock log since the relaunch: 1 LOCK (the sponge, after restore), 0 CHIPS. **Gate A4 passed.**
-  - [ ] Filipino copy for the editor, sheet, undo bar and trash: operator review before `/phase-gate`
-- [ ] P2-5 Quick-pick grid (`SR-10`)
+  - [x] Filipino copy for the editor, sheet, undo bar and trash: reviewed by the operator, **no corrections** *(2026-09-15)*
+- [x] P2-5 Quick-pick grid (`SR-10`) *(2026-09-15; gate B5 early run passed on the 20-product catalog)*
   - [x] Built *(2026-09-14)*:
     - **Domain:** `quickPickTiles` gives a fixed name order; operator's call: tiles show photo and name, and a price only after a tap. `repackedPlan` decides what the toggle and the offer write.
     - **Enrollment:** the *repacked* toggle; the look-alike offer on the duplicate warning, written in the enrollment transaction.
     - **Scan tab:** the grid on a `quickPick` lock; the pinned *Repacked* button; no reject on the grid.
     - **Products tab:** the repacked label.
     - Tests 264 → 277.
-  - [ ] **Gate B5 on the Infinix, release APK:** not yet run
-  - [ ] Filipino copy for the toggle, offer and grid: operator review before `/phase-gate`
+  - [x] **Gate B5 early run on the Infinix, release APK** *(2026-09-15, APK built 09:58 from `b875d1f`, installed over the gate catalog)*:
+    - **Enrolled with the toggle on:** Sugar White 5g, Sugar Brown 10g, Sili 20p (5 shots each, 10:39–10:42).
+    - **Scan (operator-reported, all 3 bags):** the grid opened and named nothing; a tile tap showed that product's price; the pinned *Repacked* button opened the same grid.
+    - **Database, read off the phone afterwards** (debug APK + `run-as`, SHA-256 match, release APK reinstalled): all 3 `is_ambiguous = 1`, deleted 10:43:18–10:43:40. **20 live products, 0 of the 20 gate products flagged repacked, 0 deleted**; no negatives and no `price_history` rows written that day; 118 photos on disk = 118 referenced rows, 0 missing, 0 orphans; all paths relative, all vectors `mobilenet_v3_large_embedder_v1`.
+    - **Not recorded:** whether the look-alike offer appeared or was accepted between bags; airplane mode during the scan.
+    - [x] **Gate check after B5, airplane mode on** *(10:55:35, pid 27266 after `am force-stop` from 24308, cold start)*: **PASS** — products 20, shots 116 (corrections 1), negatives 2, index 103, trashed 3 (15 shots), other-model 0; schema 2, 1280-d, τ 0.46, δ 0.075; photo rows 118, **0 missing**; self-match **103/103**, own min 1.000000; nearest other median 0.7512 · p90 0.8254 · max 0.8954 (unchanged since Phase 1 run 3); 14.3 s. No *Repacked* button on Scan.
+    - Gate part B runs B5 again on the fresh install.
+  - [x] Filipino copy for the toggle, offer and grid: reviewed by the operator, **no corrections** *(2026-09-15)*
 - [ ] P2-6 First run, permission recovery, guided enrollment (`SR-44`, `SR-43`, `SR-20`, `SR-22`, `SR-25`)
 - [ ] P2-7 Directory (`SR-30`–`SR-35`) and the negatives list
 - [ ] P2-8 Time-to-lock measured and calibrated (`NFR-04`)
@@ -274,6 +280,8 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | Crop + resize swing within one session (P2-3) | ≤ 60 ms total (`NFR-07`) | n = 40 each, CPU: **35.8** / 36.6 (14:47) · 59.7 / 62.6 (14:55) · 59.4 / 60.5 (14:58) · 43.6 / 61.3 (15:01) ms median/p90. The heat explanation is still unproven: temperature was not recorded — Infinix X6823, release APK | 2026-09-14 |
 | **Correction on a chip pair (P2-4, gate A3)** | saved on the right product; survives a force-stop; 0 missing photos | **Met.** CHIPS Knorr Chicken \| Pork → *Wrong?* → Chicken: guard refused once (`correctMismatch`), saved on retry; the pair then locked Chicken. After force-stop: gate check PASS, shots 101 (corrections 1), photo rows 103, missing 0, self-match **103/103**, nearest other max 0.8954 (unchanged), 13.9 s — Infinix X6823, release APK, CPU, not in airplane mode | 2026-09-14 |
 | **Price edit, delete, undo, restore (P2-4, gates A2 and A4)** | price lands on the tapped product and survives a force-stop; a deleted product never locks; undo inside 10 s; trash survives a force-stop; restore locks | **Met.** A2: Clover repriced twice, binding check landed on Clover, `price_history rows 2` after force-stop. A4: sponge deleted, undo lapsed, out of the index after force-stop (index 98), restored (23.2 ms rebuild), LOCK sponge; Kopiko delete → Undo → LOCK. Index rebuilds: delete/undo **median 9.2 ms, max 17.0** (n = 3), restore **23.2 ms** (n = 1). **One unattributed possible wrong lock:** LOCK Knorr Pork 6 s after deleting the sponge (shown as a question) — Infinix X6823, release APK, CPU, not in airplane mode | 2026-09-14 |
+| **Quick-pick grid on clear bags (P2-5, gate B5 early run)** | the grid names nothing; a tile tap shows that product's price; the *Repacked* button opens the same grid | **Met for 3/3 bags** (Sugar White 5g, Sugar Brown 10g, Sili 20p; operator-reported). Database afterwards: 20 live products, 0 gate products flagged repacked or deleted, 0 new negatives or price edits, 118 photos = 118 rows, 0 missing. Look-alike offer and airplane mode not recorded — Infinix X6823, release APK, CPU, 20-product gate catalog | 2026-09-15 |
+| **Gate check after B5 (`PHASE_1_PLAN` §4 steps 3–4)** | 0 missing photos; every live shot and negative self-matches | **PASS** after `am force-stop` (cold start, pid 27266), **airplane mode on**: products 20, shots 116 (15 of them trashed), index 103 (negatives 2); photo rows 118, **0 missing**; self-match **103/103**, own min 1.000000; nearest other median 0.7512 · p90 0.8254 · max 0.8954, unchanged since Phase 1 run 3; 14.3 s — Infinix X6823, release APK, CPU | 2026-09-15 |
 
 ---
 

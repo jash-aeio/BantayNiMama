@@ -905,9 +905,8 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       - The lock log since the relaunch held 1 LOCK (the sponge, after restore) and 0 CHIPS. That does
         not settle the 20:17:04 lock: whether the sponge was held before the restore was not recorded.
       - **Gate A4 passed.**
-- **P2-5: quick-pick grid — built, not yet run on a device** (2026-09-14; `SR-10`, `SR-23`, `L-01`,
-  `TR-45`, ADR-018). Tests went from 264 to **277**, and typecheck is clean. P2-5 is done when gate B5
-  passes on the Infinix, which has not been run.
+- **P2-5: quick-pick grid — built 2026-09-14; gate B5 early run passed 2026-09-15** (`SR-10`, `SR-23`,
+  `L-01`, `TR-45`, ADR-018). Tests went from 264 to **277**, and typecheck is clean.
   - **Domain (pure, tested):**
     - `quickPick.ts` `quickPickTiles`: every live repacked product, plus a non-repacked product that a
       grid lock involved. Each appears once, ordered by name ignoring case, then by id. The order never
@@ -937,6 +936,38 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - The undo bar moved down to make room for the button.
   - **Products tab:** repacked products read "· repacked".
   - Filipino copy is Claude's draft, for the operator's review before `/phase-gate`.
+  - **Gate B5, early run, on the 20-product gate catalog** (2026-09-15, Infinix X6823, release APK
+    built 09:58 from `b875d1f` and installed with `adb install -r`, operator's call per `PHASE_2_PLAN.md`
+    P2-5):
+    - **Setup:** 3 repacked clear bags enrolled with the toggle on: Sugar White 5g, Sugar Brown 10g
+      and Sili 20p, 5 shots each.
+    - **Scan (operator-reported):** for each bag, the grid opened and named nothing, a tile tap showed
+      that product's price, and the pinned *Repacked* button opened the same grid. **Pass.**
+    - **Cleanup:** all 3 bags deleted (10:43:18–10:43:40).
+    - **Checked in the database afterwards:** `bantay.db` was copied with the debug APK and `run-as`
+      (SHA-256 match), then the release APK was reinstalled.
+      - The catalog still has 20 live products, and none of the 20 gate products is flagged repacked
+        or deleted, so gate A5 scans the same 20.
+      - No negatives and no price changes were written.
+      - 118 photos on disk match 118 referenced rows, with 0 missing and 0 orphans. That is 100
+        enrollment shots, 1 correction, 2 negatives and the bags' 15.
+    - **Not recorded:** whether the look-alike offer appeared, and airplane mode.
+- **Gate check after B5, in airplane mode** (2026-09-15, Infinix X6823, release APK, CPU): **PASS.**
+  - **Conditions:** `am force-stop` at 10:54:19 moved the app from pid 24308 to 27266 on a cold start.
+    `airplane_mode_on` was 1 and Wi-Fi was off. The check ran at 10:55:35 in the same process.
+  - **Launch:** `schema 2 -> 2`, orphan sweep 0, index 103 (negatives 2), other-model 0. The Scan tab
+    showed no *Repacked* button, since no live repacked product is left.
+  - **Step 3:** 20 products and 116 shots (corrections 1), 2 negatives, index 103, other-model 0, and
+    3 trashed products (15 shots). `app_meta` reads schema 2, `mobilenet_v3_large_embedder_v1`,
+    1280-d, τ 0.46 and δ 0.075. There are 118 photo rows, and **0 are missing**.
+  - **Step 4:** self-match **103/103**, and own score min 1.000000. Nearest other shot is median
+    0.7512, p90 0.8254 and max 0.8954, identical to Phase 1 run 3. Checked in 14.3 s.
+  - **So:** the trashed bags stay out of search and do not change the 20-product catalog's
+    geometry. Claude drove the check by adb taps and read it from the screen layout, since the
+    readout does not reach logcat in release.
+- **Filipino copy for P2-3 to P2-5 reviewed by the operator** (2026-09-15, `SR-42`): **no corrections**,
+  so `fil.json` stands as drafted. This covers the scan card and reject sheet, the price editor,
+  *Wrong?* sheet, undo bar and trash, and the repacked toggle, look-alike offer and grid.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2
