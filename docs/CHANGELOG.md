@@ -1107,7 +1107,7 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       first and the unscanned three by name.
     - **Survived a force-stop:** the rename, the price, the restore, the scan order and the history
       row. Launch line `index 16 (negatives 0) · orphan photos removed 0`.
-- **P2-8: time-to-lock proxy — built; device calibration pending** (2026-09-15; `NFR-04`, `TR-25`).
+- **P2-8: time-to-lock proxy — built and calibrated on device** (2026-09-15; `NFR-04`, `TR-25`).
   Tests went from 350 to **360**, and typecheck is clean.
   - **Worklet:** `embedFrame` and `captureReference` stamp each frame with `Date.now()` when processing
     begins. No other per-frame work (`NFR-07`).
@@ -1126,11 +1126,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - Each episode's seen and lock times to the millisecond, to match against
       `screenrecord --bugreport`'s clock overlay.
     - *Clear lock log* now clears the frame log too, relabelled in `en` and `fil`.
-  - **Device:** release APK installed over the gate app at 13:51:32 (data kept), launched and
-    scanning, airplane mode on. Calibration not yet run.
+  - **Device:** release APK installed over the gate app at 13:51:32 (data kept).
+  - **Calibration on the Infinix** (21:02–21:16, one process pid 4396, airplane mode on, 28.1–33.7 °C):
+    - **Protocol:** recording 1 (10 gate products) · 20 plain episodes (all 20) · recording 2 (the
+      other 10), with `screenrecord --bugreport`. Calibration episodes do not count toward gate A5
+      (operator's call).
+    - **Proxy (gate panel):** n = 41, median 1152 ms, p90 2007, max 3010; 0 left out; clock check 0
+      impossible of 2,809 frames.
+    - **t_enter read by eye** from frame sheets (every 2nd frame, median 101 ms apart), after a
+      frame-difference rule failed on the handheld reticle.
+    - **Bias** t_seen − t_enter, n = 19: median 496 ms, p90 849. **True time-to-lock**, n = 19:
+      median **1690 ms**, p90 **2879 ms**, max 3288. **`NFR-04` (p90 ≤ 1.2 s) not met**: recorded, not
+      blocking (E-2), and the quorum is unchanged (ADR-016).
+    - **Recording did not slow scanning:** proxy p90 1661 ms recorded vs 2007 ms plain.
+    - **Left out:** #34, which opened with the product already in view (9.8 s from entry to chips).
+    - **Plain block, no video:** #20 LOCKed Argentina Corned Beef 100g, and the operator is not sure
+      what was held. A possible wrong lock, unattributed, never confirmed with *Yes*. Reno Liver Spread
+      and the Sponge were scanned but formed no episode.
+    - **Against the protocol:** chip and *Yes* taps on many episodes (lock → *Yes* n = 12), all after
+      the lock; 0 episodes interrupted.
+    - **Evidence:** `C:\BantayNiMamaBackups\p2-8-calibration`, 71 files, SHA-256 checked against source.
   - **Laptop tooling:** ffmpeg 9.0.1 (`winget`, Gyan.FFmpeg) to read calibration video frames. It never
     ships in the APK (`TR-51` unaffected).
-  - **Copy review:** the operator reviewed P2-6's and P2-7's Filipino copy, with no corrections.
+  - **Copy review:** the operator reviewed P2-6's and P2-7's Filipino copy and the relabelled clear
+    button, with no corrections. All Phase 2 Filipino copy is now reviewed.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

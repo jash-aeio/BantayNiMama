@@ -99,17 +99,19 @@ from `tsc` and from `node --test`, so it only shows on the device, as every fram
 Stage times above are budgets. Measured values are in §8 (Infinix: 100.7 ms per frame on CPU).
 Per processed frame:  30–50 ms budget Android · 15–25 ms iOS
 CPU duty cycle:       12–20% at 4 fps
-Perceived lock:       ~1 s (4 agreeing frames at 4 fps; was ~750 ms at 3 — ADR-016)
+Perceived lock:       ~1 s computed (4 agreeing frames at 4 fps; was ~750 ms at 3 — ADR-016)
+Measured lock:        median 1.69 s · p90 2.88 s from entering the reticle (P2-8, n = 19)
 ```
 
 ### Why 4 fps
 
 `runAtTargetFps(4)` is the single biggest battery and thermal lever in the app (NFR-06). At 30 fps
 a budget Android thermally throttles within minutes. At 4 fps, with a 4-of-5 stability gate
-(ADR-016), a result locks in ~1 s nominal. That is still below the 1.2 s p90 target (NFR-04), with
-less headroom than the original 3-of-5's ~750 ms; time-to-lock is not yet measured on device.
+(ADR-016), a result locks in ~1 s nominal, a computed figure. **Measured on the Infinix it takes
+longer:** median 1.69 s and p90 2.88 s from the product entering the reticle (P2-8, n = 19), against
+the 1.2 s p90 target (NFR-04, not met). Recorded, not changed in Phase 2 (E-2, ADR-016).
 
-### Time-to-lock proxy (P2-8, built 2026-09-15; not yet measured)
+### Time-to-lock proxy (P2-8, built and calibrated on the Infinix 2026-09-15)
 
 The app cannot see a product enter the reticle, so `domain/timeToLock.ts` measures a proxy.
 - **Frame log:** every processed frame's kind after `resolveFrame`, with two `Date.now()` stamps:
@@ -130,6 +132,31 @@ The app cannot see a product enter the reticle, so `domain/timeToLock.ts` measur
   log.
 - **Added cost per frame:** one `Date.now()` in the worklet; on the JS thread, one more `Date.now()`
   and an in-place append, outside the timed KNN and policy span.
+
+#### Calibration, measured 2026-09-15
+
+Infinix X6823, release APK, gate app, one process, airplane mode on, 28.1–33.7 °C. The per-episode
+table and all evidence: `C:\BantayNiMamaBackups\p2-8-calibration` (README, SHA-256 checked).
+- **Protocol:** recording 1 (10 gate products, `screenrecord --bugreport`) · 20 plain episodes (all 20
+  products) · recording 2 (the other 10). The overlay clock maps to video time with 0 ms residual
+  (5 samples per video).
+- **t_enter is read by eye:** the first frame with the product itself inside the reticle, from
+  sheets of every 2nd frame (median 101 ms apart, so a reading can be one tile late). A
+  frame-difference rule was tried first and rejected: with the phone handheld, the reticle is never
+  still.
+- **Proxy bias (t_seen − t_enter), n = 19: median 496 ms, p90 849, range 206–850.** The proxy starts
+  about half a second after the product is in view.
+- **True time-to-lock (t_lock − t_enter), n = 19: median 1690 ms, p90 2879, min 1107, max 3288.** No
+  episode reached the computed ≈ 0.9–1.0 s.
+- **Proxy as the gate panel reads it:** n = 41, median 1152 ms, p90 2007. By condition: recording 1
+  1152 / 1649, plain 1193 / 2007, recording 2 1116 / 1661 (median / p90, n = 10 / 21 / 10).
+  **Screen recording did not slow scanning.** The plain block's corrected p90 is an **estimate**:
+  2007 + 496 = 2503 ms.
+- **Clock check:** 0 impossible frames of 2,809; arrival − capture − worklet median 1.6 ms.
+- **Left out:** an episode that opens at an Unknown lock with the product already in view has no entry
+  to read. One did (#34, Spicy Labuyo Beef): **9.8 s** from entry to chips. With it, the median and
+  p90 are unchanged and the max is 9.8 s.
+- **Lock → *Yes* (informational):** n = 12, median 1440 ms, p90 2084, max 3056.
 
 ---
 
@@ -762,7 +789,7 @@ a `require()` that works throughout development fails on the first release build
 | JS brute-force KNN, in the scanner | — | **15 shots: median 1.31 ms, p90 4.23** (P1-6). **100 shots: median 8.52 ms, p90 13.78** (P1-8 gate catalog). n = 200 live frames each, `useScanner`. The 100-shot figure agrees with P1-2's synthetic 9.2 ms. **102 rows (100 shots + 2 negatives): median 8.94 ms, p90 12.30**, n = 60 (P2-3). Infinix X6823, release APK, 2026-09-14. |
 | Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, 15 shots) · **0.08 / 0.10** (P1-8, 100 shots). n = 200 live frames each: `match` + `pushDecision` + `lockedDecision`. Same device and date. **With `resolveFrame` added (P2-3), 102 rows: median 0.09 ms, p90 0.12**, n = 60. |
 | **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms at 15 shots, ~135 ms at 100 shots — not met.** These are **sums of medians**, not one timed span: P1-6 worklet 124.7 + KNN 1.31 + policy 0.07; P1-8 worklet 126.9 + KNN 8.52 + policy 0.08. The JS side is 1–7% of it; the worklet is the problem. |
-| **Time-to-lock, p90** | **≤ 1.2 s** (NFR-04) | **Not yet measured.** The proxy and its readout are built (P2-8, §3), and the P2-8 release APK is on the gate app. Expected ≈ 0.9–1.0 s for a clean 4-of-5 lock, a **computed** figure (`PHASE_2_PLAN.md` P2-8). |
+| **Time-to-lock, p90** | **≤ 1.2 s** (NFR-04) | **Not met: median 1.69 s, p90 2.88 s, max 3.29 s** from the product entering the reticle (n = 19, read off `screenrecord` video; P2-8, Infinix X6823, release APK, 2026-09-15). The app's proxy reads **median 1.15 s, p90 2.01 s** (n = 41) and starts a median **496 ms** late (§3). No episode reached the computed ≈ 0.9–1.0 s for a clean 4-of-5 lock; the fastest took 1.11 s. Recorded, not gate-blocking (E-2); the quorum is not changed in Phase 2 (ADR-016). |
 
 **Measurement, 2026-09-13.** 7 samples read off the spike's on-screen counter (`elapsedMs`, timed
 inside the worklet around crop → resize → `runSync` → L2-normalize): 140.5, 142.4, 147.5, 148.2,

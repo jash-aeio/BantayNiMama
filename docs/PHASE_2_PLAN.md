@@ -468,6 +468,18 @@ start-time proxy, calibrated once against video.
   the recordings, so phone heat bears on both conditions alike.
 - **The gate panel's clear button now clears the frame log too**, since an episode needs both logs.
 
+*Amended 2026-09-15 (P2-8 calibration on the Infinix):*
+- **t_enter is read by eye, not by a rule.** A frame-difference trace over the reticle was tried first
+  and rejected: with the phone handheld the reticle is never still, and 5 of 20 candidates ran into
+  the search limit. The reading is the first frame with the product itself inside the reticle, on
+  sheets of every 2nd frame (median 101 ms apart).
+- **An episode that opens with the product already in view has no entry.** It is left out of the bias
+  and reported on its own (#34: 9.8 s from entry to chips).
+- **Measured:** bias median 496 ms (n = 19); true time-to-lock median 1690 ms, p90 2879 ms. The p90 is
+  over 1.2 s, so it is recorded and the quorum is not changed (E-2, ADR-016).
+- **Calibration episodes do not count toward gate A5** (operator's call); A5 runs its own 60
+  episodes.
+
 ### P2-9 · Gate run
 
 1. The operator reviews the new Filipino copy.
