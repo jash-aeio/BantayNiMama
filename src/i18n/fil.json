@@ -171,12 +171,70 @@
   "products": {
     "title": "Mga paninda",
     "empty": "Walang paninda. Magdagdag mula sa I-scan.",
+    "noMatches": "Walang paninda na tugma sa pangalang iyon.",
     "shots": "{{n}} litrato",
     "repacked": "repack",
+    "searchPlaceholder": "Hanapin ang paninda",
+    "count": "{{shown}} ng {{total}} paninda",
+    "storage": "{{count}} litrato, {{size}}",
+    "sort": {
+      "label": "Ayos",
+      "name": "Pangalan",
+      "recentlyAdded": "Pinakabago",
+      "recentlyScanned": "Huling na-scan"
+    },
+    "edit": {
+      "title": "I-edit ang {{name}}",
+      "photos": "Litrato: {{enroll}} reference, {{extra}} ng {{max}} dagdag",
+      "save": "I-save ang mga pagbabago",
+      "cancel": "Kanselahin",
+      "saveFailed": "Hindi na-save ang mga pagbabago. ({{message}})",
+      "gone": "Ang panindang ito ay hindi na nasa listahan.",
+      "teach": "Turuan mo ulit: magdagdag ng litrato",
+      "delete": "Burahin ang paninda",
+      "deleteTitle": "Burahin ang {{name}}?",
+      "deleteBody": "Mapupunta sa Mga binurang paninda, kung saan maibabalik ito sa loob ng 30 araw.",
+      "deleteConfirm": "Burahin",
+      "deleteFailed": "Binura, pero hindi na-reload ng scanner ang listahan. I-restart ang app bago mag-scan. ({{message}})"
+    },
     "trash": {
       "title": "Mga binurang paninda ({{n}})",
       "restore": "Ibalik",
+      "daysLeft": "Permanenteng mabubura sa {{days}} araw",
       "restoreFailed": "Naibalik, pero hindi na-reload ng scanner ang listahan. I-restart ang app bago mag-scan. ({{message}})"
+    },
+    "negatives": {
+      "title": "Hindi nasa listahan ko ({{n}})",
+      "hint": "Mga item na minarkahang Hindi nasa listahan ko. Hindi pinangangalanan ng app ang mga ito. Burahin ang isa kung ito ay nasa listahan.",
+      "source": {
+        "confirm_no": "Minarkahan pagkatapos ng Hindi",
+        "wrong_lock": "Minarkahan pagkatapos ng Mali?",
+        "wrong_chip": "Minarkahan pagkatapos ng Mali? sa dalawang pagpipilian"
+      },
+      "delete": "Burahin",
+      "deleteTitle": "Burahin ang item na ito?",
+      "deleteBody": "Maaaring pangalanan itong muli ng app kung mukhang isa sa iyong paninda.",
+      "deleteConfirm": "Burahin",
+      "failed": "Binura, pero hindi na-reload ng scanner ang listahan. I-restart ang app bago mag-scan. ({{message}})"
+    }
+  },
+  "teach": {
+    "title": "Turuan mo ulit: {{name}}",
+    "hint": "Ilagay ang {{name}} sa loob ng kahon, mula sa anggulo o liwanag na hindi pa nasa mga litrato nito.",
+    "counts": "Litrato: {{enroll}} reference, {{extra}} ng {{max}} dagdag. Kapag puno, papalitan ng bagong litrato ang pinakalumang dagdag.",
+    "capture": "Kumuha ng litrato",
+    "capturing": "Kumukuha ng litrato…",
+    "review": "Ito ba ay {{name}}? I-save lamang ang litrato ng panindang ito.",
+    "keep": "I-save ang litrato",
+    "retake": "Kumuha muli",
+    "saved": "Na-save. Natuto ang app ng bagong anggulo ng {{name}}.",
+    "failed": "Hindi na-save ang litrato. ({{message}})",
+    "gone": "Ang panindang ito ay hindi na nasa listahan.",
+    "done": "Tapos",
+    "quality": {
+      "tooDark": "Madilim ang litratong ito. Kumuha muli sa maliwanag.",
+      "blownOut": "Masyadong maliwanag ang litratong ito. Kumuha muli nang walang silaw.",
+      "blurred": "Malabo ang litratong ito. Kumuha muli nang hindi gumagalaw."
     }
   },
   "settings": {

@@ -15,8 +15,11 @@ import type { ModelState } from '../ml/useEmbeddingModel';
 // two model instances for the life of the app: opening any of them per screen would duplicate
 // ~10 MB models and split the index that SR-24 depends on.
 
+/** The two bottom tabs (TR-14, ADR-015). */
+export type TabParams = { Scan: undefined; Products: undefined };
+
 /** Why the index was rebuilt from SQLite rather than appended to (E-4). */
-export type IndexRebuildReason = 'delete' | 'undo' | 'restore' | 'correction';
+export type IndexRebuildReason = 'delete' | 'undo' | 'restore' | 'correction' | 'teach' | 'negative';
 
 /** One rebuild, timed: PHASE_2_PLAN.md §9 records its cost after delete and restore. */
 export interface IndexRebuild {
@@ -54,13 +57,13 @@ export interface AppServices {
   readonly language: Language;
   /** Switches the UI language now and saves it in app_meta (SR-42). */
   setLanguage(language: Language): void;
-  /** Goes up after every catalog write: enrollment, price edit, delete, restore, negative, correction. */
+  /** Goes up after every catalog write: enrollment, edit, delete, restore, negative, correction, taught photo. */
   readonly catalogVersion: number;
   bumpCatalogVersion(): void;
   /**
    * Replaces the live index with one read from SQLite, after a write that removed rows from the
-   * search: delete, undo, restore, a replaced correction (E-4). Throws if the read fails, leaving the
-   * old index in place.
+   * search: delete, undo, restore, a replaced extra shot, a deleted negative (E-4). Throws if the read
+   * fails, leaving the old index in place.
    */
   rebuildIndex(reason: IndexRebuildReason): IndexRebuild;
   /** Appends one tap to the interaction log, stamped now. */
@@ -71,6 +74,15 @@ export interface AppServices {
   finishFirstRunLater(): void;
   /** True once, right after the first-run intro hands over: the Scan tab then opens the guided add. */
   consumeGuidedStart(): boolean;
+  /**
+   * SR-33: *Teach again* from the Directory. The camera lives on the Scan tab, so the request is handed
+   * over: the Directory calls requestTeach and switches tabs, and the Scan tab takes the id once.
+   */
+  requestTeach(productId: string): void;
+  /** The pending *Teach again* product, or null. Clears it, so a re-render never opens it twice. */
+  consumeTeachRequest(): string | null;
+  /** Goes up with every requestTeach, so the Scan tab knows to look. */
+  readonly teachVersion: number;
   readonly diagnostics: Diagnostics;
 }
 

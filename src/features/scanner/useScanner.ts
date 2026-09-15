@@ -1,7 +1,8 @@
 import { useCallback, useMemo, useRef, useState, type RefObject } from 'react';
 
 import type { Catalog } from '../../db/catalog';
-import { ambiguousProductIds, firstEnrollPhotoPath, getProduct, type Product } from '../../db/products';
+import { ambiguousProductIds, firstEnrollPhotoPath, getProduct, markScanned, type Product } from '../../db/products';
+import { scannedProductIds } from '../../domain/directory.ts';
 import { nearestShots, type VectorIndex } from '../../domain/knn.ts';
 import { appendLockEvent, frameVote, lockEvent, type FrameVote, type LockEvent } from '../../domain/lockLog.ts';
 import { match, rankProducts, type ProductScore } from '../../domain/match.ts';
@@ -128,6 +129,16 @@ export function useScanner({
         setLocked(next);
         if (lockLogRef !== undefined) {
           lockLogRef.current = appendLockEvent(lockLogRef.current, lockEvent(next, Date.now(), votes.current));
+        }
+        // SR-34: one UPDATE per lock change that names a product, never per frame. The stamp only
+        // orders the Directory, so a failed write is dropped rather than stopping the scan.
+        const scanned = scannedProductIds(next);
+        if (scanned.length > 0) {
+          try {
+            markScanned(catalog.db, scanned);
+          } catch {
+            // A sort hint; the next lock stamps it again.
+          }
         }
       }
     },

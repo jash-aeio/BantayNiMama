@@ -26,15 +26,19 @@ import type { StageTimings } from '../ml/frameEmbedder';
 import { useEmbeddingModel } from '../ml/useEmbeddingModel';
 import { ProductsScreen } from './ProductsScreen';
 import { ScanScreen } from './ScanScreen';
-import { AppServicesContext, type AppServices, type IndexRebuild, type IndexRebuildReason } from './services';
+import {
+  AppServicesContext,
+  type AppServices,
+  type IndexRebuild,
+  type IndexRebuildReason,
+  type TabParams,
+} from './services';
 
-// App shell — TR-14 as amended by ADR-015: two bottom tabs on React Navigation, Scan and Products,
-// behind the first-run intro on an empty catalog (SR-44, P2-6).
+// App shell — TR-14 as amended by ADR-015: two bottom tabs on React Navigation, Scan and Products
+// (the Directory, P2-7), behind the first-run intro on an empty catalog (SR-44, P2-6).
 
 /** Rebuilds kept for the gate panel. Deletes and restores are rare taps. */
 const INDEX_REBUILD_LOG = 50;
-
-type TabParams = { Scan: undefined; Products: undefined };
 
 const Tab = createBottomTabNavigator<TabParams>();
 
@@ -158,6 +162,20 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
     setIntroDone(true);
   }, [finishFirstRunLater]);
 
+  // SR-33: *Teach again* is asked for on the Directory and runs on the Scan tab, which owns the camera.
+  // The same one-shot handoff as the guided start; the version tells the Scan tab, already mounted, to look.
+  const teachPending = useRef<string | null>(null);
+  const [teachVersion, setTeachVersion] = useState(0);
+  const requestTeach = useCallback((productId: string) => {
+    teachPending.current = productId;
+    setTeachVersion((n) => n + 1);
+  }, []);
+  const consumeTeachRequest = useCallback(() => {
+    const pending = teachPending.current;
+    teachPending.current = null;
+    return pending;
+  }, []);
+
   const services = useMemo<AppServices>(
     () => ({
       catalog,
@@ -173,6 +191,9 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
       firstRun,
       finishFirstRunLater,
       consumeGuidedStart,
+      requestTeach,
+      consumeTeachRequest,
+      teachVersion,
       diagnostics,
     }),
     [
@@ -188,6 +209,9 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
       firstRun,
       finishFirstRunLater,
       consumeGuidedStart,
+      requestTeach,
+      consumeTeachRequest,
+      teachVersion,
       diagnostics,
     ],
   );

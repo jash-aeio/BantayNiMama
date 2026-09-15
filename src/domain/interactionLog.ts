@@ -41,6 +41,19 @@ export type InteractionKind =
   | 'torchOn'
   | 'torchOff'
   /**
+   * P2-7, SR-31, SR-14: the Directory's editor saved a change or saved nothing, and a *Not in my list*
+   * item was deleted. Deletes and restores from the Directory reuse `delete` and `restore`.
+   */
+  | 'productSaved'
+  | 'productUnchanged'
+  | 'negativeDeleted'
+  /** P2-7, SR-33: *Teach again* opened, a photo kept, retaken or failed, and the panel closed. */
+  | 'teachStart'
+  | 'teachSaved'
+  | 'teachRetake'
+  | 'teachFailed'
+  | 'teachClosed'
+  /**
    * P2-6, SR-25: the enrollment panel opened from *+ Add product*, an Unknown card's *Add*, the
    * *n of 5* banner, or by the first-run flow itself. Gate B2 needs one from an Unknown card.
    */

@@ -299,12 +299,15 @@ CREATE INDEX idx_shots_product     ON product_shots(product_id);
     correction, a purged product or a deleted negative.
   - **A kill between COMMIT and a file delete** leaves orphans for the launch sweep, never a row
     without its JPEG.
-  - **Missing or trashed product:** `updatePrice` and `insertCorrectionShot` throw and write nothing,
-    because a price or shot must never land on another product.
+  - **Missing or trashed product:** `updatePrice`, `updateProduct` and `insertExtraShot` (corrections
+    and taught photos) throw and write nothing, because a price or shot must never land on another
+    product.
   - **Rebuild or append:**
-    - *Rebuild* the index when a write removes vectors: delete, restore, a replaced correction, or a
-      deleted negative (E-4).
+    - *Rebuild* the index when a write removes or re-includes vectors: delete, restore, a replaced
+      extra shot (a correction or taught photo, ADR-024), or a deleted negative (E-4).
     - *Append* when it only adds them.
+    - *Neither* for an edit (`SR-31`): names, prices and the repacked flag are not in the index, and
+      the scanner re-reads them through `catalogVersion`.
 
 ### Invariants
 
@@ -656,11 +659,13 @@ BantayNiMama/
 │   │   ├── lockLog.ts         ← every lock change with its voting frames; segments at Unknown
 │   │   ├── scanDisplay.ts     ← per frame: negative → Unknown, ambiguous → grid; after lock: quote or confirm (P2-1)
 │   │   ├── quickPick.ts       ← grid tiles: repacked products by name, never by rank (SR-10, P2-5)
-│   │   ├── correction.ts      ← ≤ 3 correction shots, oldest replaced; the capture guard; likely products (SR-07, SR-14)
+│   │   ├── correction.ts      ← ≤ 3 extra shots, corrections and taught photos together, oldest replaced (ADR-024); the capture guard; likely products (SR-07, SR-14, SR-33)
 │   │   ├── rejection.ts       ← the reject sheet as a reducer: negative or correction, guard, late events ignored (P2-3, P2-4)
 │   │   ├── priceEdit.ts       ← typed prices → centavos, shared with enrollment; no-op edits write nothing; editor text (SR-06)
-│   │   ├── productSearch.ts   ← name search, case and accents ignored (SR-07; SR-30 in P2-7)
-│   │   ├── trash.ts           ← 10 s undo, 30-day purge (SR-32)
+│   │   ├── productEdit.ts     ← every field of a product: enrollment's parsing, no-op edits write nothing, prices only when changed (SR-31)
+│   │   ├── productSearch.ts   ← name search, case and accents ignored (SR-07)
+│   │   ├── directory.ts       ← name filter, three sorts, which lock counts as scanned, photo storage (SR-30, SR-34, SR-35)
+│   │   ├── trash.ts           ← 10 s undo, 30-day purge, days left (SR-32)
 │   │   ├── firstRun.ts        ← welcome / "n of 5" banner / complete; angle per photo; after-save step (SR-44, SR-20)
 │   │   ├── cameraAccess.ts    ← permission status → ask / ask again / open settings; what to log (SR-43)
 │   │   ├── shotQuality.ts     ← mean luminance; too dark / blown out / blurred, placeholder limits (SR-22)
@@ -700,9 +705,12 @@ BantayNiMama/
 │   │   │   ├── useEnrollment.ts ← draft state; extends the index after COMMIT (SR-24)
 │   │   │   └── EnrollmentPanel.tsx ← form, thumbnails, duplicate warning (SR-20, SR-21, SR-23)
 │   │   ├── gate/              ← P1-7: runGateCheck (re-embed every JPEG, KNN), readout, panel
-│   │   └── directory/         ← TrashList.tsx: deleted products + Restore (P2-4); the Directory in P2-7
+│   │   ├── firstRun/          ← P2-6: FirstRunIntro (welcome → language → camera, resumes at the camera step), useCameraAccess, CameraAccessPanel (SR-43, SR-44)
+│   │   ├── teach/             ← P2-7: useTeach + TeachPanel — capture, review, keep or retake; insertTeachShot; index append or rebuild (SR-33, ADR-024)
+│   │   └── directory/         ← P2-7: ProductEditPanel (every field, teach, delete), TrashList (thumbnails, days left, restore), NegativesList (photo, delete) (SR-14, SR-30–SR-32)
+│   ├── app/                   ← Root (tabs, first-run and teach handoffs), ScanScreen, ProductsScreen = the Directory (search, sort, storage), services
 │   ├── i18n/                  ← i18next init, en.json, fil.json, typed keys (TR-16, SR-42)
-│   └── ui/                    ← shared components, theme (Phase 2)
+│   └── ui/                    ← FormControls: Field, Toggle, Button for the Directory and Teach again (P2-7)
 ```
 
 **The `src/domain/` boundary matters.** Anything that can be a pure function goes there and gets
@@ -728,7 +736,7 @@ a `require()` that works throughout development fails on the first release build
 | **Crop + resize + inference + L2, measured as one** | **9–43 ms** | **Release: median 145.5 ms, p90 160.1 ms, range 126.5–339.5 ms** (n = 226 test frames). Debug: 140–248 ms, median ~148 ms (7 spot readings). See note. |
 | sqlite-vec KNN | 0.5–3 ms | **Could not run** — sqlite-vec does not load on 32-bit ARM (§5). Measured as a substitute: **JS brute force, 100 shots median 9.2 ms; 2,500 shots median 234.0 ms** (inline loop over one `Float32Array`, n = 10), and 831.1 ms at 2,500 when calling `dot()` per shot. Infinix X6823, release APK, 2026-09-14. |
 | Read vectors from SQLite | — | **56.3 ms** for 2,500 × 1280-d BLOBs, bit-exact round trip. Same device and date. |
-| Index rebuild after delete / undo / restore (E-4) | rare taps; no budget | **n = 3 (2 delete, 1 undo): median 9.2 ms, p90 17.0, max 17.0**; the last, an undo, took 6.2 ms and left 98 rows. `loadVectorIndex` over 93–98 rows (≤ 96 product shots + 2 negatives) — gate A4, Infinix X6823, release APK, 2026-09-14. Far below a tap's latency; at 2,500 rows the BLOB read alone measured 56.3 ms (above), so a rebuild there is still a rare-tap cost, not per-frame. **Restore, after a relaunch: 23.2 ms** to 103 rows (n = 1, 20:29:03). |
+| Index rebuild after delete / undo / restore (E-4) | rare taps; no budget | **n = 3 (2 delete, 1 undo): median 9.2 ms, p90 17.0, max 17.0**; the last, an undo, took 6.2 ms and left 98 rows. `loadVectorIndex` over 93–98 rows (≤ 96 product shots + 2 negatives) — gate A4, Infinix X6823, release APK, 2026-09-14. Far below a tap's latency; at 2,500 rows the BLOB read alone measured 56.3 ms (above), so a rebuild there is still a rare-tap cost, not per-frame. **Restore, after a relaunch: 23.2 ms** to 103 rows (n = 1, 20:29:03). **P2-7, Directory, small catalog** (side-by-side copy, 2026-09-15): negative delete **2.6 ms**, delete **1.5 ms** to 13 rows, restore **4.8 ms** to 16 rows (n = 1 each). |
 | JS brute-force KNN, in the scanner | — | **15 shots: median 1.31 ms, p90 4.23** (P1-6). **100 shots: median 8.52 ms, p90 13.78** (P1-8 gate catalog). n = 200 live frames each, `useScanner`. The 100-shot figure agrees with P1-2's synthetic 9.2 ms. **102 rows (100 shots + 2 negatives): median 8.94 ms, p90 12.30**, n = 60 (P2-3). Infinix X6823, release APK, 2026-09-14. |
 | Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, 15 shots) · **0.08 / 0.10** (P1-8, 100 shots). n = 200 live frames each: `match` + `pushDecision` + `lockedDecision`. Same device and date. **With `resolveFrame` added (P2-3), 102 rows: median 0.09 ms, p90 0.12**, n = 60. |
 | **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms at 15 shots, ~135 ms at 100 shots — not met.** These are **sums of medians**, not one timed span: P1-6 worklet 124.7 + KNN 1.31 + policy 0.07; P1-8 worklet 126.9 + KNN 8.52 + policy 0.08. The JS side is 1–7% of it; the worklet is the problem. |

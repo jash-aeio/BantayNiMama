@@ -6,7 +6,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Camera, useCameraDevice, useFrameOutput, usePreviewOutput } from 'react-native-vision-camera';
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
-import { catalogCounts, listProducts, listQuickPickProducts } from '../db/products';
+import { catalogCounts, listProducts, listQuickPickProducts, markScanned } from '../db/products';
 import { FIRST_RUN_TARGET } from '../domain/firstRun.ts';
 import type { AddSource, InteractionKind } from '../domain/interactionLog.ts';
 import { EnrollmentPanel } from '../features/enrollment/EnrollmentPanel';
@@ -19,6 +19,8 @@ import { ScanOverlay } from '../features/scanner/ScanOverlay';
 import { useRejection } from '../features/scanner/useRejection';
 import { useScanner } from '../features/scanner/useScanner';
 import { useUndoDelete } from '../features/scanner/useUndoDelete';
+import { TeachPanel } from '../features/teach/TeachPanel';
+import { useTeach } from '../features/teach/useTeach';
 import { captureReference, embedFrame, type FrameEmbedding, type ReferenceCapture } from '../ml/frameEmbedder';
 import { RETICLE_FRACTION, TARGET_FPS } from '../ml/model';
 import { useAppServices } from './services';
@@ -35,7 +37,8 @@ const ADD_KINDS = {
 } as const satisfies Record<AddSource, InteractionKind>;
 
 /**
- * The Scan tab: one camera for scanning, enrollment, the reject sheet and the price editor.
+ * The Scan tab: one camera for scanning, enrollment, the reject sheet, the price editor and *Teach
+ * again*.
  *
  * Each of those opens in a panel under the live preview rather than on a second screen. A second
  * camera with its own frame processor would need the scanner's stopped first, and SR-05 asks that
@@ -65,6 +68,8 @@ export function ScanScreen() {
     firstRun,
     finishFirstRunLater,
     consumeGuidedStart,
+    consumeTeachRequest,
+    teachVersion,
   } = useAppServices();
   const focused = useIsFocused();
   // SR-43: never asks on mount. The OS prompt comes from a tap after the reason is on screen, and a
@@ -86,16 +91,20 @@ export function ScanScreen() {
   /** SR-44: the guided flow is on until five live products exist. */
   const guided = firstRun.kind !== 'complete';
 
-  // One capture channel, set from JS and read by the worklet on its next processed frame. Enrollment
-  // and a rejection are never open together, so the owner says where the capture goes.
+  // One capture channel, set from JS and read by the worklet on its next processed frame. Only one
+  // panel is open at a time, so the owner says where the capture goes.
   const captureRequest = useMemo(() => createSynchronizable(false), []);
-  const captureOwner = useRef<'enroll' | 'reject'>('enroll');
+  const captureOwner = useRef<'enroll' | 'reject' | 'teach'>('enroll');
   const requestEnrollCapture = useCallback(() => {
     captureOwner.current = 'enroll';
     captureRequest.setBlocking(true);
   }, [captureRequest]);
   const requestRejectCapture = useCallback(() => {
     captureOwner.current = 'reject';
+    captureRequest.setBlocking(true);
+  }, [captureRequest]);
+  const requestTeachCapture = useCallback(() => {
+    captureOwner.current = 'teach';
     captureRequest.setBlocking(true);
   }, [captureRequest]);
 
@@ -131,19 +140,30 @@ export function ScanScreen() {
   });
   const rejecting = rejection.state.stage !== 'idle';
 
+  const teach = useTeach({
+    catalog,
+    indexRef,
+    stillModel: jpegModel,
+    requestFrameCapture: requestTeachCapture,
+    rebuildIndex,
+    onCatalogChanged: bumpCatalogVersion,
+    log,
+  });
+  const teaching = teach.productId !== null;
+
   const undoDelete = useUndoDelete({ catalog, rebuildIndex, onCatalogChanged: bumpCatalogVersion, log });
 
   const pausedRef = useRef(false);
-  pausedRef.current = enrolling || rejecting || editing || gridOpen;
-  const receivers = useRef({ enroll: enrollment.receiveCapture, reject: rejection.receiveCapture });
-  receivers.current = { enroll: enrollment.receiveCapture, reject: rejection.receiveCapture };
+  pausedRef.current = enrolling || rejecting || editing || gridOpen || teaching;
+  const receivers = useRef({ enroll: enrollment.receiveCapture, reject: rejection.receiveCapture, teach: teach.receiveCapture });
+  receivers.current = { enroll: enrollment.receiveCapture, reject: rejection.receiveCapture, teach: teach.receiveCapture };
 
   // A fresh stability window whenever scanning pauses or resumes, and after every catalog write
-  // (enrollment, price edit, delete, restore, negative, correction). A lock must never mix votes from
-  // before a pause, or from two different indexes (P2-4).
+  // (enrollment, price edit, delete, restore, negative, correction, taught photo). A lock must never
+  // mix votes from before a pause, or from two different indexes (P2-4).
   useEffect(() => {
     resetScanner();
-  }, [enrolling, rejecting, editing, gridOpen, focused, catalogVersion, resetScanner]);
+  }, [enrolling, rejecting, editing, gridOpen, teaching, focused, catalogVersion, resetScanner]);
 
   // SR-11. Off whenever the tab loses focus: a torch left on in a pocket drains the battery (NFR-06).
   useEffect(() => {
@@ -207,6 +227,36 @@ export function ScanScreen() {
   useEffect(() => {
     if (consumeGuidedStart()) openEnrollment('firstRun');
   }, [consumeGuidedStart, openEnrollment]);
+
+  // SR-33: *Teach again* asked for on the Directory. It takes over the panel: an enrollment draft
+  // stays in its hook for when Add is tapped again, and an open reject sheet or price editor closes,
+  // since both were pinned to a lock that is no longer on screen.
+  const closeRejection = rejection.close;
+  const startTeach = teach.start;
+  useEffect(() => {
+    const productId = consumeTeachRequest();
+    if (productId === null) return;
+    setEnrolling(false);
+    setEditingId(null);
+    setGridOpen(false);
+    closeRejection();
+    startTeach(productId);
+  }, [teachVersion, consumeTeachRequest, closeRejection, startTeach]);
+
+  // SR-34: a chip or tile the tindera picks counts as scanned, once per tap. Locks are stamped in useScanner.
+  const logOverlay = useCallback(
+    (kind: InteractionKind, productIds: readonly string[]) => {
+      log(kind, productIds);
+      if (kind === 'chipPick' || kind === 'tilePick') {
+        try {
+          markScanned(catalog.db, productIds);
+        } catch {
+          // A sort hint; never worth failing the tap.
+        }
+      }
+    },
+    [catalog, log],
+  );
 
   const toggleTorch = useCallback(() => {
     log(torch ? 'torchOff' : 'torchOn', []);
@@ -305,7 +355,7 @@ export function ScanScreen() {
     );
   }
 
-  const panelOpen = enrolling || rejecting || editing;
+  const panelOpen = enrolling || rejecting || editing || teaching;
 
   return (
     <View style={styles.root}>
@@ -320,7 +370,7 @@ export function ScanScreen() {
         <View pointerEvents="none" style={styles.reticleLayer}>
           <View style={styles.reticle} />
         </View>
-        {!enrolling && device.hasTorch && (
+        {!enrolling && !teaching && device.hasTorch && (
           <Pressable onPress={toggleTorch} style={[styles.topButton, styles.torchButton, torch && styles.torchOn, { top: insets.top + 12 }]}>
             <Text style={[styles.topButtonText, torch && styles.torchOnText]}>{t(torch ? 'scan.torchTurnOff' : 'scan.torchTurnOn')}</Text>
           </Pressable>
@@ -354,7 +404,7 @@ export function ScanScreen() {
               onAdd={openFromUnknown}
               onReject={rejection.reject}
               onEditPrice={openPriceEditor}
-              onLog={log}
+              onLog={logOverlay}
             />
           </>
         )}
@@ -391,7 +441,8 @@ export function ScanScreen() {
               <EnrollmentPanel enrollment={enrollment} guidedDone={guided ? liveProductCount : null} onTryScanning={tryScanning} />
             </>
           )}
-          {!enrolling && editingId !== null && (
+          {!enrolling && teaching && <TeachPanel teach={teach} />}
+          {!enrolling && !teaching && editingId !== null && (
             <PriceEditPanel
               key={editingId}
               catalog={catalog}
@@ -402,7 +453,9 @@ export function ScanScreen() {
               log={log}
             />
           )}
-          {!enrolling && !editing && rejecting && <RejectPanel rejection={rejection} productOf={scanner.productOf} products={searchable} />}
+          {!enrolling && !teaching && !editing && rejecting && (
+            <RejectPanel rejection={rejection} productOf={scanner.productOf} products={searchable} />
+          )}
         </ScrollView>
       )}
     </View>

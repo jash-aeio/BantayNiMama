@@ -1,4 +1,5 @@
-// Corrections and the capture guard — SR-07, SR-14, TR-42; ADR-017, ADR-019. Pure.
+// Corrections, taught photos and the capture guard — SR-07, SR-14, SR-33, TR-42; ADR-017, ADR-019,
+// ADR-024. Pure.
 
 import { MAX_SHOTS } from './enrollment.ts';
 import type { ProductScore } from './match.ts';
@@ -9,15 +10,22 @@ import { decisionKey } from './stability.ts';
 export const SHOT_SOURCES = ['enroll', 'correction', 'teach'] as const;
 export type ShotSource = (typeof SHOT_SOURCES)[number];
 
+/** The shots added after enrollment: a correction from the reject sheet (SR-07), or *Teach again* (SR-33). */
+export type ExtraShotSource = Exclude<ShotSource, 'enroll'>;
+
 /** `negative_shots.source` from schema v2 (P2-2): what the tindera rejected when she marked it (SR-14). */
 export const NEGATIVE_SOURCES = ['confirm_no', 'wrong_lock', 'wrong_chip'] as const;
 export type NegativeSource = (typeof NEGATIVE_SOURCES)[number];
 
-/** TR-42 as amended by ADR-019: up to 3 correction shots on top of enrollment's 5. */
-export const MAX_CORRECTION_SHOTS = 3;
+/**
+ * TR-42 as amended by ADR-019 and ADR-024: up to 3 extra shots on top of enrollment's 5. Corrections
+ * and taught photos share them, because most products are enrolled with all 5 and a separate teach
+ * allowance would push a product past what search keeps exact.
+ */
+export const MAX_EXTRA_SHOTS = 3;
 
 /** 8. KNN_LIMIT is exact up to 9 shots per product (knn.ts), so raising this past 9 must raise it too. */
-export const MAX_PRODUCT_SHOTS = MAX_SHOTS + MAX_CORRECTION_SHOTS;
+export const MAX_PRODUCT_SHOTS = MAX_SHOTS + MAX_EXTRA_SHOTS;
 
 export interface ExistingShot {
   readonly id: string;
@@ -27,22 +35,22 @@ export interface ExistingShot {
 }
 
 /**
- * The correction shots to remove, in the same transaction, before a new correction goes in: the
- * oldest first (D-3). Enrollment and teach shots are never on the list, because their JPEGs are the
- * product's reference photos (TR-24).
+ * The extra shots to remove, in the same transaction, before a new correction or taught photo goes
+ * in: the oldest first, whichever kind it is (D-3, ADR-024). Enrollment shots are never on the list,
+ * because their JPEGs are the product's reference photos (TR-24).
  *
- * Normally empty, or one id once the product holds 3. If a product somehow holds more, every
- * correction beyond the newest 2 is returned, so the next correction brings it back under the cap
- * instead of leaving it over.
+ * Normally empty, or one id once the product holds 3. If a product somehow holds more, every extra
+ * beyond the newest 2 is returned, so the next one brings it back under the cap instead of leaving
+ * it over.
  */
-export function correctionsToReplace(shots: readonly ExistingShot[]): string[] {
-  const corrections = shots.filter((s) => s.source === 'correction');
-  for (const { id, createdAt } of corrections) {
+export function extraShotsToReplace(shots: readonly ExistingShot[]): string[] {
+  const extras = shots.filter((s) => s.source !== 'enroll');
+  for (const { id, createdAt } of extras) {
     if (!Number.isFinite(createdAt)) throw new RangeError(`Shot ${id} has no usable created_at: ${createdAt}`);
   }
-  const excess = corrections.length - (MAX_CORRECTION_SHOTS - 1);
+  const excess = extras.length - (MAX_EXTRA_SHOTS - 1);
   if (excess <= 0) return [];
-  return [...corrections]
+  return [...extras]
     .sort((a, b) => a.createdAt - b.createdAt || compareIds(a.id, b.id))
     .slice(0, excess)
     .map((s) => s.id);

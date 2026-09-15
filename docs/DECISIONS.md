@@ -745,3 +745,40 @@ and each locking afterwards.
   instrument.
 - **For scale** (arithmetic, not measured): enrolling 500 products (`NFR-09`) takes about 3.8 h at
   attempt 4's median, 4.2 h at 30 s, and 5.9 h at attempt 2's median.
+
+---
+
+## ADR-024 — Taught photos share the correction slots
+
+**Status:** Accepted · Revisit at Phase 3 · 2026-09-15 · Amends ADR-019, `TR-42`
+
+**Context.** *Teach again* (`SR-33`, P2-7) adds photos to an existing product.
+- **The cap.** `TR-42`, as amended by ADR-019, allows 5 enrollment photos plus 3 correction photos:
+  8 per product. Search stays exact up to 9 (`knn.ts`).
+- **Most products are already full.** Every product in the 20-product gate catalog was enrolled with
+  5 photos, and so were all 6 products on each guided-add run. A taught photo that could only fill
+  enrollment's allowance could not be added to them at all.
+
+**Decision** (operator's call):
+- **Corrections and taught photos share the 3 extra slots.** When all 3 are used, the oldest extra of
+  either kind is replaced first (`extraShotsToReplace`, which replaces `correctionsToReplace`).
+- **Enrollment photos are never replaced.** Their JPEGs are the product's reference photos (`TR-24`).
+
+**Rejected.**
+
+- ***Teach fills only empty enrollment slots.*** It needs no change, but it cannot teach the products
+  that need it most, which are the ones already enrolled.
+- ***Taught photos get their own 3 slots.*** Up to 11 photos per product. Search would no longer be
+  exact at 10 or more, so its depth must grow, which costs time on every frame while `NFR-07` is
+  already over budget.
+
+**Consequences.**
+
+- **A taught photo can push out a correction, and a correction a taught photo.** A correction that
+  fixed a confusion can be replaced by three later extras. That is bounded: the newest 3 extras
+  always stay, and the teach panel shows the count and says the oldest goes when full.
+- **Storage is unchanged from ADR-019:** at most 8 photos per product.
+- **Nothing guards the frame a taught photo is cut from.** A correction's capture guard checks the
+  frame still shows the locked product, but *Teach again* has no lock to compare with. So the photo is
+  saved only after the tindera sees it and taps *Save this photo*. A taught photo of the wrong item
+  would attach that item's look to this product's price, which is an `NFR-02` exposure.

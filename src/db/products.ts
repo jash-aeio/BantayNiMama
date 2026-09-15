@@ -4,6 +4,8 @@ import type { AppMeta } from '../domain/appMeta.ts';
 import { MAX_SHOTS, MIN_SHOTS, type NewProduct } from '../domain/enrollment.ts';
 import type { IndexedShot } from '../domain/knn.ts';
 import { isCentavos } from '../domain/money.ts';
+import type { ProductDetails } from '../domain/productEdit.ts';
+import { purgeableIds } from '../domain/trash.ts';
 import { vectorToBlob } from '../domain/vector.ts';
 import { newId } from './ids.ts';
 import { assertNewShot, type NewShot } from './shots.ts';
@@ -143,7 +145,7 @@ export interface ProductListItem extends Product {
   readonly shots: number;
 }
 
-/** Live products with their shot counts, by name — the Products tab (P1-7). Not SR-30's search. */
+/** Live products with their shot counts, by name — the reject sheet's search (SR-07). The Directory reads listDirectory. */
 export function listProducts(db: DB): ProductListItem[] {
   return db
     .executeSync(
@@ -152,6 +154,30 @@ export function listProducts(db: DB): ProductListItem[] {
         'FROM products p WHERE p.deleted_at IS NULL ORDER BY p.name COLLATE NOCASE, p.id',
     )
     .rows.map((row) => ({ ...rowToProduct(row), shots: Number(row.shots) }));
+}
+
+export interface DirectoryItem extends ProductListItem {
+  /** SR-34: stamped once per lock change or chip / tile tap, never per frame; null until first scanned. */
+  readonly lastScannedAt: number | null;
+  /** The first enrollment photo, for the row's thumbnail (SR-30); null if the product somehow has none. */
+  readonly photoPath: string | null;
+}
+
+/** SR-30: every live product for the Directory, by name. Search and the SR-34 sorts are directory.ts's. */
+export function listDirectory(db: DB): DirectoryItem[] {
+  return db
+    .executeSync(
+      'SELECT p.id, p.name, p.price_piece, p.price_pack, p.unit_label, p.category, p.is_ambiguous, p.created_at, p.updated_at, ' +
+        'p.last_scanned_at, (SELECT count(*) FROM product_shots s WHERE s.product_id = p.id) AS shots, ' +
+        "(SELECT s.photo_path FROM product_shots s WHERE s.product_id = p.id AND s.source = 'enroll' ORDER BY s.created_at, s.id LIMIT 1) AS photo_path " +
+        'FROM products p WHERE p.deleted_at IS NULL ORDER BY p.name COLLATE NOCASE, p.id',
+    )
+    .rows.map((row) => ({
+      ...rowToProduct(row),
+      shots: Number(row.shots),
+      lastScannedAt: row.last_scanned_at === null || row.last_scanned_at === undefined ? null : Number(row.last_scanned_at),
+      photoPath: textOrNull(row.photo_path),
+    }));
 }
 
 /**
@@ -194,6 +220,93 @@ export function updatePrice(
     ]);
     return true;
   });
+}
+
+/**
+ * SR-31: every field of a live product, in ONE transaction. When the prices change they follow
+ * updatePrice's rule, and a price_history row keeps the prices they replaced (ADR-021). `prices`
+ * null leaves them untouched. An edit that changes nothing writes nothing, not even `updated_at`.
+ *
+ * Throws, writing nothing, when the product is missing or in the trash, so an editor opened before a
+ * delete can never write to a trashed row.
+ */
+export function updateProduct(
+  db: DB,
+  productId: string,
+  details: ProductDetails,
+  prices: { readonly pricePiece: number; readonly pricePack: number | null } | null,
+  now: number = Date.now(),
+): { readonly detailsChanged: boolean; readonly pricesChanged: boolean } {
+  const name = details.name.trim();
+  if (name === '') throw new Error('A product needs a name (SR-21)');
+  if (prices !== null) assertPrices(prices.pricePiece, prices.pricePack);
+
+  return inTransaction(db, () => {
+    const row = db.executeSync(
+      'SELECT name, unit_label, category, is_ambiguous, price_piece, price_pack FROM products WHERE id = ? AND deleted_at IS NULL',
+      [productId],
+    ).rows[0];
+    if (row === undefined) throw new Error(`No live product ${productId} to edit (SR-31)`);
+
+    const before = { pricePiece: storedCentavos(row.price_piece), pricePack: storedCentavos(row.price_pack) };
+    const detailsChanged =
+      String(row.name) !== name ||
+      textOrNull(row.unit_label) !== details.unitLabel ||
+      textOrNull(row.category) !== details.category ||
+      (row.is_ambiguous === 1) !== details.isAmbiguous;
+    const newPrices = prices !== null && (prices.pricePiece !== before.pricePiece || prices.pricePack !== before.pricePack) ? prices : null;
+    if (!detailsChanged && newPrices === null) return { detailsChanged: false, pricesChanged: false };
+
+    db.executeSync('UPDATE products SET name = ?, unit_label = ?, category = ?, is_ambiguous = ?, updated_at = ? WHERE id = ?', [
+      name,
+      details.unitLabel,
+      details.category,
+      details.isAmbiguous ? 1 : 0,
+      now,
+      productId,
+    ]);
+    if (newPrices !== null) {
+      db.executeSync('UPDATE products SET price_piece = ?, price_pack = ? WHERE id = ?', [newPrices.pricePiece, newPrices.pricePack, productId]);
+      db.executeSync('INSERT INTO price_history (id, product_id, price_piece, price_pack, changed_at) VALUES (?, ?, ?, ?, ?)', [
+        newId(),
+        productId,
+        before.pricePiece,
+        before.pricePack,
+        now,
+      ]);
+    }
+    return { detailsChanged, pricesChanged: newPrices !== null };
+  });
+}
+
+/**
+ * SR-34: stamps `last_scanned_at` on the live products a lock named or the tindera picked. Called once
+ * per lock change or tap, never per frame: at 4 fps a write per frame would be ~14,000 writes an hour.
+ * Returns how many rows changed.
+ */
+export function markScanned(db: DB, productIds: readonly string[], now: number = Date.now()): number {
+  const ids = [...new Set(productIds)].filter((id) => id !== '');
+  if (ids.length === 0) return 0;
+  return db.executeSync(
+    `UPDATE products SET last_scanned_at = ? WHERE deleted_at IS NULL AND id IN (${ids.map(() => '?').join(', ')})`,
+    [now, ...ids],
+  ).rowsAffected;
+}
+
+export interface ShotCounts {
+  readonly enroll: number;
+  readonly correction: number;
+  readonly teach: number;
+}
+
+/** SR-33: a product's photos by source, for *Teach again*'s slot readout. */
+export function shotCounts(db: DB, productId: string): ShotCounts {
+  const counts = { enroll: 0, correction: 0, teach: 0 };
+  for (const row of db.executeSync('SELECT source, count(*) AS n FROM product_shots WHERE product_id = ? GROUP BY source', [productId]).rows) {
+    const source = String(row.source);
+    if (source === 'enroll' || source === 'correction' || source === 'teach') counts[source] = Number(row.n);
+  }
+  return counts;
 }
 
 export interface PriceHistoryRow {
@@ -323,6 +436,26 @@ export function purgeProducts(db: DB, ids: readonly string[]): string[] {
     }
     return photoPaths;
   });
+}
+
+/**
+ * SR-32, P2-7: the launch purge. Trashed products past the 30-day retention (trash.ts) are removed for
+ * good: rows first, in one transaction, then their photos. A photo that fails to delete is left for
+ * the orphan sweep, which runs straight after this at launch. Returns how many products were purged.
+ *
+ * Takes the photo delete as an argument, so this file stays free of native file I/O and its tests run
+ * under node:sqlite.
+ */
+export function purgeExpiredTrash(db: DB, now: number, deletePhoto: (relativePath: string) => void): number {
+  const ids = purgeableIds(listTrash(db), now);
+  for (const path of purgeProducts(db, ids)) {
+    try {
+      deletePhoto(path);
+    } catch {
+      // Left for the orphan sweep.
+    }
+  }
+  return ids.length;
 }
 
 export interface CatalogCounts {

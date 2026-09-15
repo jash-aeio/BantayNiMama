@@ -392,6 +392,25 @@ Picking one saves a correction shot on it, through the same capture guard.
 
 *Done when:* each requirement is exercised on the Infinix, and changes survive a force-stop.
 
+*Amended 2026-09-15 (P2-7 build, operator's calls):*
+- **Taught photos share the 3 extra slots with corrections** (ADR-024). Products are almost always
+  enrolled with all 5 photos, so a teach allowance inside enrollment's would teach nothing.
+- ***Teach again* runs on the Scan tab**, which owns the camera. The Directory hands the product id
+  over once, as the first run hands over the guided add.
+  - **Nothing is saved until the tindera sees the photo and keeps it.** No lock exists to guard the
+    frame, so she is the guard.
+  - The panel shows the photo count and says the oldest extra is replaced when full.
+- **`SR-34` and `SR-35` are built**, not cut:
+  - **Sort:** `last_scanned_at` is stamped once per lock change that names a product, and once per
+    chip or tile tap, never per frame.
+  - **Storage:** adds up every JPEG in `photos/` when the tab gains focus.
+- **The 30-day purge runs in `openCatalog`, before the orphan sweep.** A photo that fails to delete is
+  swept as an orphan, and the launch readout shows `trash purged n`.
+- **Delete from the Directory asks first and has no undo bar.** The trash is its undo, with a
+  countdown of the days left.
+- **Edits happen in a full-screen panel.** The Directory has no camera, so the keyboard has room.
+- **Checked on the side-by-side copy** (operator's call), so the gate catalog stays as A5 needs it.
+
 ### P2-8 · Time-to-lock, measured (`NFR-04`)
 
 **The problem:** the app cannot see the moment a product enters the reticle, so it needs a

@@ -1,7 +1,7 @@
 import type { DB } from '@op-engineering/op-sqlite';
 
 import type { AppMeta } from '../domain/appMeta.ts';
-import { correctionsToReplace, SHOT_SOURCES, type ShotSource } from '../domain/correction.ts';
+import { extraShotsToReplace, SHOT_SOURCES, type ExtraShotSource, type ShotSource } from '../domain/correction.ts';
 import { buildIndex, type IndexedShot, type VectorIndex } from '../domain/knn.ts';
 import { referencePhotoPath } from '../domain/referencePhoto.ts';
 import { blobToVector, dot, vectorToBlob } from '../domain/vector.ts';
@@ -141,12 +141,15 @@ export interface ReplacedShot {
   readonly photoPath: string;
 }
 
+const EXTRA_SHOT_REQUIREMENT = { correction: 'SR-07', teach: 'SR-33' } as const satisfies Record<ExtraShotSource, string>;
+
 /**
- * SR-07, D-3: saves a frame as a correction shot on the product the tindera picked, in ONE
- * transaction. If the product already holds 3 corrections, the oldest row is removed in the same
- * transaction (correctionsToReplace), so a kill can never leave it with 4, or with 2 and no new one.
+ * Saves a frame as an extra shot on a live product, in ONE transaction: a correction (SR-07, D-3) or
+ * a taught photo (SR-33). The two share 3 slots (ADR-024). If the product already holds 3, the oldest
+ * extra row of either kind is removed in the same transaction (extraShotsToReplace), so a kill can
+ * never leave it with 4, or with 2 and no new one.
  *
- * Throws, writing nothing, when the product is missing or in the trash: a correction must land on a
+ * Throws, writing nothing, when the product is missing or in the trash: the shot must land on a
  * product that exists (TR-45).
  *
  * After it returns, which is after COMMIT, the caller:
@@ -154,21 +157,23 @@ export interface ReplacedShot {
  * - **rebuilds** the index when anything was replaced, because the old vector is still in it.
  *   Otherwise it appends `indexed`.
  */
-export function insertCorrectionShot(
+export function insertExtraShot(
   db: DB,
   productId: string,
   shot: NewShot,
+  source: ExtraShotSource,
   meta: ShotMeta,
   now: number = Date.now(),
 ): { indexed: IndexedShot; replaced: readonly ReplacedShot[] } {
   assertNewShot(shot, meta);
+  if (source !== 'correction' && source !== 'teach') throw new Error(`Not an extra shot source: ${String(source)}`);
   return inTransaction(db, () => {
     const live = db.executeSync('SELECT 1 FROM products WHERE id = ? AND deleted_at IS NULL', [productId]).rows.length > 0;
-    if (!live) throw new Error(`No live product ${productId} to add a correction shot to (SR-07)`);
+    if (!live) throw new Error(`No live product ${productId} to add a ${source} shot to (${EXTRA_SHOT_REQUIREMENT[source]})`);
 
     const existing = db.executeSync('SELECT id, source, photo_path, created_at FROM product_shots WHERE product_id = ?', [productId]).rows;
     const toReplace = new Set(
-      correctionsToReplace(existing.map((row) => ({ id: String(row.id), source: shotSource(row.source), createdAt: Number(row.created_at) }))),
+      extraShotsToReplace(existing.map((row) => ({ id: String(row.id), source: shotSource(row.source), createdAt: Number(row.created_at) }))),
     );
     const replaced = existing
       .filter((row) => toReplace.has(String(row.id)))
@@ -177,10 +182,32 @@ export function insertCorrectionShot(
     for (const { shotId } of replaced) db.executeSync('DELETE FROM product_shots WHERE id = ?', [shotId]);
     db.executeSync(
       'INSERT INTO product_shots (id, product_id, photo_path, model_id, embedding, source, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [shot.id, productId, shot.photoPath, meta.modelId, vectorToBlob(shot.vector), 'correction', now],
+      [shot.id, productId, shot.photoPath, meta.modelId, vectorToBlob(shot.vector), source, now],
     );
     return { indexed: { shotId: shot.id, productId, vector: shot.vector }, replaced };
   });
+}
+
+/** SR-07: a correction from the reject sheet. See insertExtraShot. */
+export function insertCorrectionShot(
+  db: DB,
+  productId: string,
+  shot: NewShot,
+  meta: ShotMeta,
+  now: number = Date.now(),
+): { indexed: IndexedShot; replaced: readonly ReplacedShot[] } {
+  return insertExtraShot(db, productId, shot, 'correction', meta, now);
+}
+
+/** SR-33: a photo from *Teach again*. See insertExtraShot. */
+export function insertTeachShot(
+  db: DB,
+  productId: string,
+  shot: NewShot,
+  meta: ShotMeta,
+  now: number = Date.now(),
+): { indexed: IndexedShot; replaced: readonly ReplacedShot[] } {
+  return insertExtraShot(db, productId, shot, 'teach', meta, now);
 }
 
 function shotSource(value: unknown): ShotSource {

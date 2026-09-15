@@ -3,9 +3,9 @@ import { describe, test } from 'node:test';
 
 import {
   captureStillMatches,
-  correctionsToReplace,
+  extraShotsToReplace,
   likelyProducts,
-  MAX_CORRECTION_SHOTS,
+  MAX_EXTRA_SHOTS,
   MAX_PRODUCT_SHOTS,
   type ExistingShot,
 } from './correction.ts';
@@ -16,49 +16,45 @@ import { decisionKey } from './stability.ts';
 
 const enroll = (id: string, createdAt: number): ExistingShot => ({ id, source: 'enroll', createdAt });
 const correction = (id: string, createdAt: number): ExistingShot => ({ id, source: 'correction', createdAt });
+const teach = (id: string, createdAt: number): ExistingShot => ({ id, source: 'teach', createdAt });
 const fiveEnrolled = [1, 2, 3, 4, 5].map((i) => enroll(`e${i}`, i));
 
-describe('correctionsToReplace (SR-07, TR-42, D-3)', () => {
-  test('the caps: 5 enrollment + 3 correction shots, inside what KNN_LIMIT keeps exact', () => {
-    assert.equal(MAX_CORRECTION_SHOTS, 3);
+describe('extraShotsToReplace (SR-07, SR-33, TR-42, D-3, ADR-024)', () => {
+  test('the caps: 5 enrollment + 3 extra shots, inside what KNN_LIMIT keeps exact', () => {
+    assert.equal(MAX_EXTRA_SHOTS, 3);
     assert.equal(MAX_PRODUCT_SHOTS, 8);
     assert.ok(MAX_PRODUCT_SHOTS + 1 <= KNN_LIMIT, 'a product needs ≤ KNN_LIMIT − 1 shots (knn.ts)');
   });
 
-  test('nothing is replaced while a product holds fewer than 3 corrections', () => {
-    assert.deepEqual(correctionsToReplace(fiveEnrolled), []);
-    assert.deepEqual(correctionsToReplace([...fiveEnrolled, correction('c1', 10)]), []);
-    assert.deepEqual(correctionsToReplace([...fiveEnrolled, correction('c1', 10), correction('c2', 20)]), []);
+  test('nothing is replaced while a product holds fewer than 3 extras', () => {
+    assert.deepEqual(extraShotsToReplace(fiveEnrolled), []);
+    assert.deepEqual(extraShotsToReplace([...fiveEnrolled, correction('c1', 10)]), []);
+    assert.deepEqual(extraShotsToReplace([...fiveEnrolled, correction('c1', 10), teach('t1', 20)]), []);
   });
 
-  test('at 3 corrections the oldest correction goes, never an older enrollment shot', () => {
+  test('at 3 extras the oldest extra goes, never an older enrollment shot', () => {
     const shots = [correction('c2', 20), ...fiveEnrolled, correction('c3', 30), correction('c1', 10)];
-    assert.deepEqual(correctionsToReplace(shots), ['c1']);
+    assert.deepEqual(extraShotsToReplace(shots), ['c1']);
   });
 
-  test('a product somehow over the cap is brought back under it by the next correction', () => {
-    const shots = [...fiveEnrolled, ...[50, 10, 40, 20, 30].map((t) => correction(`c${t}`, t))];
-    assert.deepEqual(correctionsToReplace(shots), ['c10', 'c20', 'c30']);
+  test('corrections and taught photos share the slots: the oldest of either kind goes first', () => {
+    assert.deepEqual(extraShotsToReplace([teach('t1', 1), correction('c1', 10), correction('c2', 20)]), ['t1']);
+    assert.deepEqual(extraShotsToReplace([correction('c1', 1), teach('t1', 10), teach('t2', 20)]), ['c1']);
   });
 
-  test('teach shots are never replaced', () => {
-    const shots: ExistingShot[] = [
-      { id: 't1', source: 'teach', createdAt: 1 },
-      correction('c1', 10),
-      correction('c2', 20),
-      correction('c3', 30),
-    ];
-    assert.deepEqual(correctionsToReplace(shots), ['c1']);
+  test('a product somehow over the cap is brought back under it by the next extra', () => {
+    const shots = [...fiveEnrolled, ...[50, 10, 40].map((t) => correction(`c${t}`, t)), ...[20, 30].map((t) => teach(`t${t}`, t))];
+    assert.deepEqual(extraShotsToReplace(shots), ['c10', 't20', 't30']);
   });
 
   test('equal times break by id, so the choice never depends on row order', () => {
-    const a = [correction('b', 5), correction('a', 5), correction('c', 5)];
-    assert.deepEqual(correctionsToReplace(a), ['a']);
-    assert.deepEqual(correctionsToReplace([...a].reverse()), ['a']);
+    const a = [correction('b', 5), teach('a', 5), correction('c', 5)];
+    assert.deepEqual(extraShotsToReplace(a), ['a']);
+    assert.deepEqual(extraShotsToReplace([...a].reverse()), ['a']);
   });
 
-  test('refuses a correction with no usable time instead of replacing the wrong one', () => {
-    assert.throws(() => correctionsToReplace([correction('c1', NaN), correction('c2', 2), correction('c3', 3)]), RangeError);
+  test('refuses an extra with no usable time instead of replacing the wrong one', () => {
+    assert.throws(() => extraShotsToReplace([correction('c1', NaN), correction('c2', 2), teach('t3', 3)]), RangeError);
   });
 });
 

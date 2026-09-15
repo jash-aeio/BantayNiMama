@@ -32,6 +32,19 @@ export function purgeableIds(trash: readonly { readonly id: string; readonly del
   return trash.filter((item) => isPurgeable(item.deletedAt, now)).map((item) => item.id);
 }
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * SR-32: whole days left before the launch purge removes a trashed product, for the trash list. A
+ * part day counts as a day, so "1" is shown until the purge is actually due, then "0". Never more
+ * than 30, even with the clock set backwards since the delete.
+ */
+export function trashDaysLeft(deletedAt: number, now: number): number {
+  const remaining = TRASH_RETENTION_MS - elapsedMs(deletedAt, now);
+  if (remaining <= 0) return 0;
+  return Math.min(Math.ceil(remaining / DAY_MS), TRASH_RETENTION_MS / DAY_MS);
+}
+
 function elapsedMs(deletedAt: number, now: number): number {
   // NaN compares false both ways: NaN would never purge, but it would also never undo, silently.
   if (!Number.isSafeInteger(deletedAt) || !Number.isSafeInteger(now)) {

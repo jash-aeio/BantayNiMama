@@ -1056,6 +1056,57 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     - **Split medians:** 3 photos in 4.1 s, and last photo → saved in 5.0 s.
     - **First seen on device:** *Try scanning it* and *No* → *Not in my list*.
     - **Scan afterwards:** all 5 products locked and were confirmed with *Yes*.
+- **P2-7: the Products tab becomes the Directory — done** (2026-09-15; `SR-30`–`SR-35`, `SR-14`,
+  ADR-024). Tests went from 311 to **350**, and typecheck is clean. Every requirement was exercised on
+  the Infinix side-by-side copy and survived force-stops. The exception is the 30-day purge, which
+  cannot come due on a normal clock and is unit-tested only.
+  - **Domain (pure, tested):**
+    - `directory.ts`: name filter (every word, any order, case and accents ignored), three sorts that
+      always end on name then id, `scannedProductIds` (only an ACCEPT names a product), photo storage
+      and `formatBytes`.
+    - `productEdit.ts`: `planProductEdit` parses like enrollment. An edit that changes nothing writes
+      nothing, and a rename writes no price history.
+    - `correction.ts`: `extraShotsToReplace`. Corrections and taught photos share the 3 extra slots,
+      the oldest of either replaced first (ADR-024).
+    - `trash.ts`: `trashDaysLeft`.
+  - **Repositories (tested under `node:sqlite`):**
+    - `listDirectory`, `updateProduct` (all fields in one transaction, prices through `price_history`),
+      `markScanned`, `shotCounts`.
+    - `purgeExpiredTrash`: rows first, then photos; a photo that fails to delete is left for the
+      sweep.
+    - `insertExtraShot`, with `insertTeachShot` and `insertCorrectionShot` as thin wrappers.
+  - **Launch:** `openCatalog` purges trash older than 30 days before the orphan sweep. The gate
+    panel's launch line reads `trash purged n`.
+  - **Directory (Products tab):**
+    - Search, sort by name / newest / last scanned, a thumbnail per row, and the photo count and size
+      (`SR-35`).
+    - Tapping a row opens a full-screen editor for every field and the *repacked* flag, with *Teach
+      again* and delete.
+    - The trash shows thumbnails and the days left.
+    - *Not in my list* items show their photos and can be deleted; the index is rebuilt after.
+  - ***Teach again* (`SR-33`):**
+    - The Directory hands the product to the Scan tab, which opens a teach panel under the camera.
+    - Each photo is shown first and saved only on *Save this photo*, or retaken.
+    - The panel shows the photo count against the 3 shared extra slots.
+  - **Scan tab:** `last_scanned_at` is stamped once per lock change that names a product and once per
+    chip or tile tap, never per frame (`SR-34`).
+  - **Copy:** Directory, trash, *Not in my list* and *Teach again* strings in `en` and `fil`. The
+    Filipino is Claude's draft, for the operator's review before `/phase-gate`.
+  - **Device run 1** (2026-09-15, 12:51–12:57, Infinix X6823, side-by-side copy, airplane mode on):
+    - **Exercised:** *Teach again* (2 retakes, 1 saved, 3 → 4 photos); a *Not in my list* delete
+      (index rebuild 2.6 ms); a delete from the Directory (1.5 ms), shown with 30 days left; storage
+      384 → 376 KB.
+    - **Survived a force-stop**, and the launch removed 0 orphan photos, so retaken photos were
+      cleaned up.
+    - **Not yet exercised:** edit, restore, sort by last scanned, search.
+  - **Device run 2** (2026-09-15, 12:57–13:32, same copy, one process until a force-stop, airplane
+    mode on):
+    - **Exercised:** an edit renamed a product and raised its price ₱100.00 → ₱110.00, with one
+      `price_history` row (was ₱100.00); a restore from the trash (index rebuild 4.8 ms, 16 rows);
+      search ("clover", 1 of 5); two scans confirmed with *Yes*, then *Last scanned* ordered those two
+      first and the unscanned three by name.
+    - **Survived a force-stop:** the rename, the price, the restore, the scan order and the history
+      row. Launch line `index 16 (negatives 0) · orphan photos removed 0`.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

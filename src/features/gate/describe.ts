@@ -22,7 +22,7 @@ import type { GateCheckResult } from './runGateCheck';
 export function describeLaunch(c: Catalog): string {
   return (
     // ASCII "->": the Infinix's font drew "→" as a stray glyph in this line (P2-2 checkpoint screenshot).
-    `launch · schema ${c.migratedFrom} -> ${c.meta.schemaVersion} · orphan photos removed ${c.orphanPhotosRemoved} · ` +
+    `launch · schema ${c.migratedFrom} -> ${c.meta.schemaVersion} · trash purged ${c.purgedProducts} · orphan photos removed ${c.orphanPhotosRemoved} · ` +
     `index ${c.index.size} (negatives ${c.index.negativeIds.size}) · other-model ${c.otherModelShots}`
   );
 }

@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-6 done** (gates A2–A4, B5 early, B1, and B2 with time recorded per ADR-023, all on the Infinix). P2-6: welcome, language and camera screens with an *Open Settings* recovery, a guided add with a *n of 5* banner, angle prompts, placeholder quality warnings and enrollment timing, tested on a side-by-side copy (`com.jash.bantaynimama.fresh`). Tests **311**, typecheck clean. **The gate catalog now holds 20 live products, 2 negatives, 1 correction shot (Knorr Chicken), 2 price edits (Clover) and 3 trashed repacked bags (15 shots, 15 photos)** until P2-7's purge (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
-| **Next action** | **P2-7**: the Products tab becomes the Directory (`SR-30`–`SR-35`) and the negatives list. **P2-6 is done:** B1 passed; B2 passed on its other checks, with `SR-25`'s time recorded, not blocking (ADR-023). The best run's median was 27.5 s, with 3 of 5 products within 30 s. **Still owed before `/phase-gate`:** the operator reviews P2-6's Filipino copy. |
+| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-7 done** (gates A2–A4, B5 early, B1, and B2 with time recorded per ADR-023; P2-7 exercised on the side-by-side copy `com.jash.bantaynimama.fresh`, all on the Infinix). P2-7: the Directory with search, sort, storage, a full editor, trash with days left and a launch purge, *Not in my list* with delete, and *Teach again* sharing the 3 extra slots (ADR-024). Tests **350**, typecheck clean. **The gate catalog now holds 20 live products, 2 negatives, 1 correction shot (Knorr Chicken), 2 price edits (Clover) and 3 trashed repacked bags (15 shots, 15 photos)** until P2-7's purge (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
+| **Next action** | **P2-8**: time-to-lock measured and calibrated (`NFR-04`): frame log, episode proxy, and a `screenrecord` calibration over USB. It feeds gate A5, which scans the 20-product gate catalog, so the gate app (`com.jash.bantaynimama`, still on the P2-5 build) gets the current release APK first. **P2-7 is done:** every requirement was exercised on the side-by-side copy and survived force-stops; the 30-day purge is unit-tested only. **Still owed before `/phase-gate`:** the operator reviews P2-6's and P2-7's Filipino copy. |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
@@ -30,7 +30,7 @@
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
 | **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-6 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid, first run and guided add on device; gates B5 early, B1, B2 passed, B2's time recorded per ADR-023); P2-7 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
+| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-7 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid, first run and guided add, the Directory and *Teach again* on device; gates B5 early, B1, B2 passed, B2's time recorded per ADR-023); P2-8 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
@@ -132,7 +132,34 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
       - **Quality:** luminance 0.217–0.539, sharpness ×1000 min 1.27, **0 warned**. Frame-vs-JPEG dot min 0.9902.
       - **Trend across attempts:** median 42.6 → 40.8 → **27.5 s**.
   - [ ] Filipino copy for the first run, camera screens and guided add: operator review before `/phase-gate`
-- [ ] P2-7 Directory (`SR-30`–`SR-35`) and the negatives list
+- [x] P2-7 Directory (`SR-30`–`SR-35`) and the negatives list *(2026-09-15; every requirement exercised on the Infinix side-by-side copy and survived force-stops, except the 30-day purge, which is unit-tested only)*
+  - [x] Built *(2026-09-15)*:
+    - **Directory:** search, three sorts, thumbnails, photo storage; full-screen editor for every field; trash with days left; *Not in my list* with delete.
+    - **Launch:** 30-day purge.
+    - ***Teach again*:** on the Scan tab, review before save; shares the 3 extra slots with corrections (ADR-024, operator's call).
+    - **Sort data:** `last_scanned_at` stamped per lock change and chip / tile tap.
+    - Tests 311 → 350, typecheck clean.
+  - [x] **On the Infinix, side-by-side copy (operator's call), run 1 (12:51–12:57, airplane mode on): partly exercised.**
+    - **Exercised in one process (pid 20749):**
+      - *Teach again* on Ascorbic Acid: 2 retakes, 1 photo saved, 3 → 4 photos (`SR-33`).
+      - The *Not in my list* item deleted; index rebuilt in 2.6 ms (`SR-14`).
+      - Clover Chips deleted from the editor; rebuilt in 1.5 ms (13 rows); listed with 30 days left (`SR-32`).
+      - Storage line 384 → 376 KB, 16 photos (`SR-35`).
+    - **Survived a force-stop** (pid 20749 → 22103, cold start): 4 products, Ascorbic still 4 photos, Clover still in the trash, no *Not in my list* section. Launch line `trash purged 0 · orphan photos removed 0 · index 13 (negatives 0)`: the two retaken photos left no orphan.
+    - **Not yet exercised:**
+      - Edit (`SR-31`): no `productSaved`, `price_history` 0.
+      - Restore from the trash.
+      - Sort by last scanned after scanning (`SR-34`): 0 locks since install.
+      - Search (`SR-30`): not logged.
+  - [x] **Run 2 (12:57–13:32, one process pid 22103, airplane mode on): the rest exercised.**
+    - **Edit (`SR-31`):** Ascorbic Acid renamed "…500mg 10pcs" and repriced ₱100.00 → ₱110.00 at 13:28:13; `price_history rows 1`, "was ₱100.00".
+    - **Restore (`SR-32`):** Clover Chips at 13:28:16; index rebuild 4.8 ms, 16 rows.
+    - **Search (`SR-30`):** "clover" left in the box showed "1 of 5 products".
+    - **Sort (`SR-34`):** two locks confirmed with *Yes* (Ascorbic 13:28:28, Kopiko 13:28:42). *Last scanned* then read Kopiko, Ascorbic, then Clover, Knorr, Sponge (never scanned, by name).
+    - **Survived a force-stop** (pid 22103 → 24449, cold start): 5 products, the rename and ₱110.00, an empty trash, the same *Last scanned* order, `price_history rows 1`. Launch line `index 16 (negatives 0) · orphan photos removed 0`.
+    - **Not exercisable on a normal clock:** the 30-day purge (`SR-32`), covered by `purgeExpiredTrash` and `trashDaysLeft` tests.
+    - **Reading side effect:** Claude's scroll swipes landed on the open keyboard and typed "mo" into the search box. That was view state only, cleared before the force-stop.
+  - [ ] Filipino copy for the Directory, trash, *Not in my list* and *Teach again*: operator review before `/phase-gate`
 - [ ] P2-8 Time-to-lock measured and calibrated (`NFR-04`)
 - [ ] P2-9 Gate run — §4 parts A and B, then `/phase-gate`
 
@@ -334,6 +361,8 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | **Camera denial and recovery (P2-6, gate B1)** | two denials → recovery screen → *Open Settings* → grant → back in the flow (`SR-43`) | **Met** (attempt 2). Asked 11:46:02 and 11:46:16, both denied; `cameraBlocked`; *Open Settings* 11:46:28 (`APPLICATION_DETAILS_SETTINGS` for the fresh package, process alive); granted 11:46:54 and the guided add opened the same second. Interaction log and system log agree. Attempt 1 only allowed on the first ask — Infinix X6823, release APK, side-by-side copy, airplane mode | 2026-09-15 |
 | **Enrollment time, *Add* → saved (P2-6, gate B2)** | ≤ 30 s per product (`SR-25`) | **Not met; recorded, not blocking (ADR-023).** Attempt 2 (full form, 5 photos): median 42.6 s, max 55.7, 0/6. Attempt 3 (trimmed form, 5 photos): median 40.8, max 64.6, 0/6. **Attempt 4 (trimmed form, 3 photos): median 27.5, max 41.8, 3/5.** Attempt 4 split medians: *Add* → first photo 19.5 s, 3 photos 4.1 s, last photo → saved 5.0 s — Infinix X6823, release APK, side-by-side copy, airplane mode, operator = developer | 2026-09-15 |
 | Photo luminance and sharpness at enrollment (P2-6, `SR-22` inputs) | placeholder limits: luminance 0.12 / 0.88, sharpness 0.0005 | Attempts 2–4, n = 31 / 31 / 15: luminance 0.204–0.590 · 0.287–0.567 · 0.217–0.539; sharpness ×1000 min 1.24 · 0.61 · 1.27, medians 9.59 · 10.78 · 12.27. **No shot warned.** Store lighting untested — Infinix X6823, release APK | 2026-09-15 |
+| **Directory on device (P2-7)** | each of `SR-30`–`SR-35` exercised; changes survive a force-stop | **Met, except the 30-day purge (unit tests only).**<br>• **Run 1:** *Teach again* (2 retakes, 1 saved, 3 → 4 photos); a negative deleted; a product deleted (30 days left); storage 384 → 376 KB.<br>• **Run 2:** rename and reprice ₱100.00 → ₱110.00 (`price_history` 1); restore; search "clover" → 1 of 5; *Last scanned* put the two scanned products first, then the rest by name.<br>• **Both survived force-stops** (launch index 13, then 16; 0 orphan photos).<br>Infinix X6823, release APK, side-by-side copy, airplane mode | 2026-09-15 |
+| Index rebuild from the Directory (P2-7, E-4) | rare taps; no budget | negative delete **2.6 ms**, delete **1.5 ms** (13 rows), restore **4.8 ms** (16 rows); n = 1 each, small catalog — Infinix X6823, release APK | 2026-09-15 |
 
 ---
 
