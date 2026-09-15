@@ -1167,6 +1167,46 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   - **Decided (operator's calls):** B1–B2 are re-run in part B on the cleared gate app; A5 is
     screen-recorded; the gate catalog is backed up before part B clears it; the P2-8 calibration
     videos and the A5 segments were deleted from the phone after archiving.
+- **Gate part B passed: B1–B5 on the cleared gate app** (2026-09-15 23:32 → 2026-09-16 01:26; `SR-10`,
+  `SR-13`, `SR-14`, `SR-25`, `SR-42`–`SR-44`, `TR-53`). Infinix X6823, release APK (P2-8 build, no app
+  code changed since), gate app, airplane mode on, screen-recorded in 31 back-to-back segments.
+  - **Backup first** (operator's call, P2-2's method): debug APK over the release app without launching
+    it, `run-as` tar of `files/`, release APK reinstalled. `C:\BantayNiMamaBackups\gate-catalog-v2-pre-partB`:
+    124/124 SHA-256 match, `integrity_check` ok, 20 live + 3 trashed products, 116 shots, 2 negatives,
+    118 photos, 0 missing, 0 orphans.
+  - **Cleared** with `pm clear` at 23:36:47; camera permission reset.
+  - **B1 PASS** (pid 686): `cameraAsk 2 · cameraDenied 2 · cameraBlocked 1 · cameraOpenSettings 1 ·
+    cameraGranted 1 · addFromFirstRun 1`. The system log agrees: permission dialogs at 23:42:05.237
+    and 23:42:07.870, App info for the gate package at 23:42:10.038, no kill. **Caveat:** no
+    `introLanguage`, so the language screen was passed with *Next* (English kept).
+  - **B2 PASS on its other checks:** 6 products through the guided flow, Kopiko from an Unknown card's
+    *Add*, all 6 later locked with the right name. **`SR-25` recorded (ADR-023):** 31.0, 30.3, 24.8, 21.9,
+    33.4, 29.9 s; median 29.9 s, 3 of 6 within 30 s.
+  - **B3 PASS: 0 confident prices.** Every recorded frame of both passes was scanned for a price without
+    Yes/No: only the Products list and the post-*Yes* card matched. The 6 enrolled products each drew
+    the right question. **15 un-enrolled items, attributed from video: 8 drew a question, 1 chips only,
+    6 read Unknown** — the first store measurement of ADR-013's small-catalog risk (6 products).
+    Look-alikes led: Argentina 260g, Alaska and both Datu Puti packs were asked as Argentina 100g; Knorr
+    Pork as Knorr Chicken; three Lucky Me packs as Clover Cheese.
+  - **B4 PASS:** *Not in my list* saved for 6 of the 8 (Spicy Labuyo and Chilimansi read Unknown when
+    tried). `am force-stop` → pid 15174: launch `index 36 (negatives 6)`, *Not in my list (6)*. All 6
+    negative items read Unknown; no negative named, priced or chipped (lock log 7 LOCK, 0 CHIPS, all
+    enrolled); all 6 products locked correctly.
+  - **B5 PASS** (pid 21302): Sugar White, Sili and Sugar Brown enrolled as repacked (24.7, 23.1, 44.4 s).
+    Lock log 0 LOCK, 0 CHIPS, 7 GRID; 0 frames with Yes/No; tile taps showed ₱10.00; the *Repacked*
+    button opened the grid. The look-alike offer (Sugar White on Sugar Brown) was declined.
+  - **Final gate check PASS** (01:25:57): 9 products, 39 shots, 6 negatives, index 45, photo rows 45,
+    **missing 0**, self-match **45/45**, own min 1.000000, nearest other max 0.8999, 7.2 s.
+  - **Findings, carried forward:**
+    - **The capture guard refuses often on chips:** 15 refusals for 6 negatives saved, 6 in a row on one
+      chips card, because a chips lock swaps pairs frame to frame. A usability cost, not a safety one.
+    - **One B5 recall miss:** Sugar White read Unknown for one 12 s presentation (votes 0.36–0.48 vs τ).
+    - **Wrong icon, twice:** the operator opened "BantayNiMama fresh" at 23:38 and 01:06; the second
+      start got the gate app killed by the low-memory killer (01:06:32) and saved a bag into the fresh
+      copy. No gate data was lost. The fresh copy is now `pm disable-user`d (data kept, operator's call;
+      `pm enable com.jash.bantaynimama.fresh` restores it); its stray bag stays (operator's call).
+  - **Evidence:** `C:\BantayNiMamaBackups\p2-9-gate-b` (videos, frame sheets, gate-panel text, system
+    log, per-step result files, `SHA256SUMS`). The 31 segments are still on the phone.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

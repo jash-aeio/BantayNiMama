@@ -497,6 +497,18 @@ start-time proxy, calibrated once against video.
 - **A5 passed** (2026-09-15): 0 wrong locks in 62 episodes. The gate panel was not cleared first, so
   A5's episodes were split out by time.
 
+*Amended 2026-09-16 (part B, operator's calls):*
+- **The gate catalog was backed up before `pm clear`**, by P2-2's method, to
+  `C:\BantayNiMamaBackups\gate-catalog-v2-pre-partB` (124/124 SHA-256).
+- **B3–B5 were screen-recorded** like A5, and every B3 item was attributed from video. B3 ran in two
+  passes, because the first covered only one enrolled product.
+- **B2 enrolled 6 products, not 5**, and B3–B4 scanned all 6.
+- **B4 saved negatives for 6 of the 8 items** that drew a question in B3: the other two read Unknown
+  when tried, so there was nothing to reject.
+- **The side-by-side copy was disabled** (`pm disable-user`, data kept) after its icon was opened by
+  mistake twice. One B5 bag saved there stays.
+- **Part B passed** (2026-09-16): B1–B5, zero confident prices, final gate check PASS.
+
 ---
 
 ## 6. Not in Phase 2
