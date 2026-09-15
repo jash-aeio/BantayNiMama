@@ -448,6 +448,26 @@ start-time proxy, calibrated once against video.
 *Done when:* the proxy and its calibration are recorded in `ARCHITECTURE.md` §3 and §8 and
 `PROJECT_STATUS.md`, with device and n.
 
+*Amended 2026-09-15 (P2-8 build):*
+- **Both clocks are `Date.now()`.** The worklet and the JS thread are separate runtimes, and their
+  `performance.now()` need not share an origin. `Date` reads the same system clock on both. The gate
+  panel checks it on every frame: arrival − capture − worklet time must not be negative.
+- **t_seen is when the worklet began on the frame**, not the sensor time. The camera-to-worklet delay
+  is not seen by the proxy; the video calibration absorbs it.
+- **Frames join an episode by when they arrived; t_seen is when that frame was captured.** A frame
+  captured just before the Unknown lock but processed after it still counts.
+- **A scanner reset inside an episode leaves it out** (`interrupted`), for example *Add* on the
+  Unknown card. The lock log records no event for a reset, so the frame log marks it.
+- **The calibration video carries the phone's clock** (`screenrecord --bugreport` overlay), so t_enter
+  is read on the same clock as t_seen. The overlay stamps each frame when it is encoded, a little
+  after it was shown.
+- **The corrected p90 is computed on the laptop** from the recorded bias, not in the gate panel. The
+  bias is read off video, and a measured constant in app code would go stale.
+- **Protocol** (operator's call): recording 1 with 10 gate products, then 20 plain episodes, then
+  recording 2 with the other 10, all in one process on the Scan tab. The plain block sits between
+  the recordings, so phone heat bears on both conditions alike.
+- **The gate panel's clear button now clears the frame log too**, since an episode needs both logs.
+
 ### P2-9 · Gate run
 
 1. The operator reviews the new Filipino copy.

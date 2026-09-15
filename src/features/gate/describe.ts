@@ -5,7 +5,8 @@ import type { PersistenceProblem } from '../../domain/gateCheck.ts';
 import { formatCentavos } from '../../domain/money.ts';
 import { countInteractions, enrollmentTimes, type Interaction } from '../../domain/interactionLog.ts';
 import { segmentLockLog, type LockEvent } from '../../domain/lockLog.ts';
-import { summarize } from '../../domain/stats.ts';
+import { summarize, type Summary } from '../../domain/stats.ts';
+import { clockCheck, confirmDelays, lockEpisodes, timeToLockReport, type FrameLogEntry } from '../../domain/timeToLock.ts';
 import type { StageTimings } from '../../ml/frameEmbedder';
 import type { ShotMeasurement } from '../enrollment/useEnrollment';
 import type { ScanTiming } from '../scanner/useScanner';
@@ -246,6 +247,41 @@ export function describeLockDetails(events: readonly LockEvent[], nameOf: (id: s
   ];
 }
 
+/**
+ * NFR-04 (P2-8): the time-to-lock proxy from the lock log and the frame log, the clock check that
+ * makes subtracting their times valid, and in confirm mode the time from a lock to its *Yes*. Every
+ * episode is listed to the millisecond, so it can be matched to a screen recording's timestamp
+ * overlay (`screenrecord --bugreport`) for the calibration.
+ */
+export function describeTimeToLock(
+  frames: readonly FrameLogEntry[],
+  locks: readonly LockEvent[],
+  interactions: readonly Interaction[],
+  nameOf: (id: string) => string,
+): string[] {
+  const oldest = frames[0];
+  if (oldest === undefined) return ['time-to-lock: frame log empty (clear the logs, then empty table -> product; lost on relaunch)'];
+  const report = lockEpisodes(frames, locks);
+  const { proxy } = timeToLockReport(report.episodes);
+  const clocks = clockCheck(frames);
+  const yes = summarize(confirmDelays(locks, interactions));
+  const resets = frames.filter((f) => f.kind === 'reset').length;
+  const spread = (s: Summary | null) => (s === null ? '—' : `median ${s.median} · p90 ${s.p90} · max ${s.max} ms`);
+  // ASCII "->" throughout, as in describeLaunch: the Infinix drew "→" as a stray glyph.
+  return [
+    `time-to-lock proxy, t_seen -> t_lock (NFR-04 p90 <= 1200 ms; uncalibrated) n=${report.episodes.length}: ${spread(proxy)} · ` +
+      `left out: truncated ${report.truncated} · interrupted ${report.interrupted} · inconsistent ${report.inconsistent}`,
+    `frame log: ${frames.length - resets} frames, ${resets} resets since ${clockMs(oldest.arrivedAtMs)} · clock check, arrived - captured - worklet: ` +
+      `median ${fixed(clocks.transit?.median, 1)} · p90 ${fixed(clocks.transit?.p90, 1)} · min ${fixed(clocks.transitMinMs, 1)} ms · impossible ${clocks.impossible}`,
+    `lock -> Yes (informational, not NFR-04) n=${yes?.n ?? 0}: ${spread(yes)}`,
+    ...report.episodes.map((e, i) => {
+      const names = e.productIds.map((id) => shortName(nameOf(id))).join(' | ');
+      const kind = e.lockKind === 'accept' ? 'LOCK' : e.lockKind === 'disambiguate' ? 'CHIPS' : 'GRID';
+      return `ttl #${i + 1} seen ${clockMs(e.seenMs)} -> lock ${clockMs(e.lockMs)} · ${e.proxyMs} ms · ${kind} ${names}`;
+    }),
+  ];
+}
+
 /** "Alaska Evaporada 360ml" → "Alaska…360ml": keeps the brand and the size or flavour that tells siblings apart. */
 function shortName(name: string): string {
   const words = name.split(' ');
@@ -255,6 +291,11 @@ function shortName(name: string): string {
 function clock(ms: number): string {
   const d = new Date(ms);
   return [d.getHours(), d.getMinutes(), d.getSeconds()].map((n) => String(n).padStart(2, '0')).join(':');
+}
+
+/** HH:MM:SS.mmm, to line up with a screen recording's timestamp overlay. */
+function clockMs(ms: number): string {
+  return `${clock(ms)}.${String(new Date(ms).getMilliseconds()).padStart(3, '0')}`;
 }
 
 function fixed(value: number | null | undefined, digits = 4): string {

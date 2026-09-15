@@ -6,6 +6,7 @@ import type { VectorIndex } from '../domain/knn.ts';
 import type { Interaction, InteractionKind } from '../domain/interactionLog.ts';
 import type { Language } from '../domain/language.ts';
 import type { LockEvent } from '../domain/lockLog.ts';
+import type { FrameLogEntry } from '../domain/timeToLock.ts';
 import type { ShotMeasurement } from '../features/enrollment/useEnrollment';
 import type { ScanTiming } from '../features/scanner/useScanner';
 import type { StageTimings } from '../ml/frameEmbedder';
@@ -40,6 +41,8 @@ export interface Diagnostics {
   readonly enrollmentMeasurements: RefObject<readonly ShotMeasurement[]>;
   /** Every scanner lock change since launch or the last clear (PHASE_1_PLAN §4 step 5). */
   readonly lockLog: RefObject<readonly LockEvent[]>;
+  /** Every processed frame's kind and times, and every scanner reset, for time-to-lock (NFR-04, P2-8). Appended in place. */
+  readonly frameLog: RefObject<FrameLogEntry[]>;
   /** Every tap the Phase 2 gate is judged on, since launch (PHASE_2_PLAN §4). Never persisted. */
   readonly interactionLog: RefObject<readonly Interaction[]>;
   /** Index rebuilds since launch (E-4). */

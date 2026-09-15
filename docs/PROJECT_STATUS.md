@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-7 done** (gates A2–A4, B5 early, B1, and B2 with time recorded per ADR-023; P2-7 exercised on the side-by-side copy `com.jash.bantaynimama.fresh`, all on the Infinix). P2-7: the Directory with search, sort, storage, a full editor, trash with days left and a launch purge, *Not in my list* with delete, and *Teach again* sharing the 3 extra slots (ADR-024). Tests **350**, typecheck clean. **The gate catalog now holds 20 live products, 2 negatives, 1 correction shot (Knorr Chicken), 2 price edits (Clover) and 3 trashed repacked bags (15 shots, 15 photos)** until P2-7's purge (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
-| **Next action** | **P2-8**: time-to-lock measured and calibrated (`NFR-04`): frame log, episode proxy, and a `screenrecord` calibration over USB. It feeds gate A5, which scans the 20-product gate catalog, so the gate app (`com.jash.bantaynimama`, still on the P2-5 build) gets the current release APK first. **P2-7 is done:** every requirement was exercised on the side-by-side copy and survived force-stops; the 30-day purge is unit-tested only. **Still owed before `/phase-gate`:** the operator reviews P2-6's and P2-7's Filipino copy. |
+| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-7 done; P2-8 built, device calibration pending** (gates A2–A4, B5 early, B1, and B2 with time recorded per ADR-023; P2-7 exercised on the side-by-side copy `com.jash.bantaynimama.fresh`, all on the Infinix). P2-8: a frame log stamped in the worklet, episodes, a clock check and lock → *Yes* in the gate panel. Tests **360**, typecheck clean. **The gate app runs the P2-8 release APK** (installed 13:51, data kept). **The gate catalog now holds 20 live products, 2 negatives, 1 correction shot (Knorr Chicken), 2 price edits (Clover) and 3 trashed repacked bags (15 shots, 15 photos)** until P2-7's purge (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
+| **Next action** | **P2-8 calibration on the Infinix, when the operator is ready.** Recording 1 (10 gate products, `screenrecord --bugreport`), then 20 plain episodes, then recording 2 (the other 10), all in one process on the Scan tab. Then read t_enter from the videos with ffmpeg and record the proxy, bias and p90 with and without recording. Then P2-9. **Filipino copy for P2-6 and P2-7: reviewed, no corrections.** Still owed: the gate panel's relabelled clear button in `fil`. |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
@@ -30,7 +30,7 @@
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
 | **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-7 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid, first run and guided add, the Directory and *Teach again* on device; gates B5 early, B1, B2 passed, B2's time recorded per ADR-023); P2-8 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
+| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-7 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid, first run and guided add, the Directory and *Teach again* on device; gates B5 early, B1, B2 passed, B2's time recorded per ADR-023); P2-8 built, device calibration pending | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
@@ -131,7 +131,7 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
       - **Exercised for the first time:** *Try scanning it* (1), *No* (2) → *Not in my list* saved (1). Lock log 8 LOCK, 0 CHIPS, `confirmYes` on all 5 products.
       - **Quality:** luminance 0.217–0.539, sharpness ×1000 min 1.27, **0 warned**. Frame-vs-JPEG dot min 0.9902.
       - **Trend across attempts:** median 42.6 → 40.8 → **27.5 s**.
-  - [ ] Filipino copy for the first run, camera screens and guided add: operator review before `/phase-gate`
+  - [x] Filipino copy for the first run, camera screens and guided add: reviewed by the operator, **no corrections** *(2026-09-15)*
 - [x] P2-7 Directory (`SR-30`–`SR-35`) and the negatives list *(2026-09-15; every requirement exercised on the Infinix side-by-side copy and survived force-stops, except the 30-day purge, which is unit-tested only)*
   - [x] Built *(2026-09-15)*:
     - **Directory:** search, three sorts, thumbnails, photo storage; full-screen editor for every field; trash with days left; *Not in my list* with delete.
@@ -159,8 +159,18 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
     - **Survived a force-stop** (pid 22103 → 24449, cold start): 5 products, the rename and ₱110.00, an empty trash, the same *Last scanned* order, `price_history rows 1`. Launch line `index 16 (negatives 0) · orphan photos removed 0`.
     - **Not exercisable on a normal clock:** the 30-day purge (`SR-32`), covered by `purgeExpiredTrash` and `trashDaysLeft` tests.
     - **Reading side effect:** Claude's scroll swipes landed on the open keyboard and typed "mo" into the search box. That was view state only, cleared before the force-stop.
-  - [ ] Filipino copy for the Directory, trash, *Not in my list* and *Teach again*: operator review before `/phase-gate`
+  - [x] Filipino copy for the Directory, trash, *Not in my list* and *Teach again*: reviewed by the operator, **no corrections** *(2026-09-15)*
 - [ ] P2-8 Time-to-lock measured and calibrated (`NFR-04`)
+  - [x] Built *(2026-09-15)*:
+    - **Worklet:** each frame carries a `Date.now()` stamp from when processing began.
+    - **Scanner:** a frame log of each frame's resolved kind, its capture and arrival times and its worklet time, with resets marked (6,000 frames, in memory).
+    - **Domain:** episodes join frames by arrival; `interrupted` for a reset inside; `clockCheck`; `confirmDelays` (lock → *Yes*).
+    - **Gate panel:** proxy n / median / p90 / max, episodes left out, the clock check, lock → *Yes*, and each episode's seen and lock times to the millisecond. The clear button clears both logs.
+    - Tests 350 → 360, typecheck clean.
+  - [x] **Release APK on the gate app** (`install -r` 13:51:32, data kept): launched as pid 25779 and scanning read Unknown; airplane mode on, 33.0 °C.
+  - [ ] **Calibration on the Infinix, not yet run** (protocol, operator's call): recording 1 (10 products) · 20 plain episodes · recording 2 (the other 10), one process, Scan tab only. ffmpeg 9.0.1 is on the laptop for reading frames. A first recording ran its full 180 s (13:55:58–13:58:59) while the operator deferred the run. It is not counted, and is still on the phone as `/sdcard/ttl-r1.mp4`.
+    - **Calibration episodes do not count toward gate A5** (operator's call, 2026-09-15): screen recording may slow scanning, so A5 runs its own 60 episodes afterwards, as §4 is written.
+  - [ ] Filipino for the gate panel's clear button, now "I-clear ang lock log at frame log": operator review
 - [ ] P2-9 Gate run — §4 parts A and B, then `/phase-gate`
 
 ---

@@ -19,6 +19,7 @@ import { appendInteraction, type Interaction, type InteractionKind } from '../do
 import type { VectorIndex } from '../domain/knn.ts';
 import { resolveLanguage, UI_LANGUAGE_META_KEY, type Language } from '../domain/language.ts';
 import type { LockEvent } from '../domain/lockLog.ts';
+import type { FrameLogEntry } from '../domain/timeToLock.ts';
 import type { ShotMeasurement } from '../features/enrollment/useEnrollment';
 import { FirstRunIntro } from '../features/firstRun/FirstRunIntro';
 import type { ScanTiming } from '../features/scanner/useScanner';
@@ -93,10 +94,11 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
   const scanTimings = useRef<readonly ScanTiming[]>([]);
   const enrollmentMeasurements = useRef<readonly ShotMeasurement[]>([]);
   const lockLog = useRef<readonly LockEvent[]>([]);
+  const frameLog = useRef<FrameLogEntry[]>([]);
   const interactionLog = useRef<readonly Interaction[]>([]);
   const indexRebuilds = useRef<readonly IndexRebuild[]>([]);
   const diagnostics = useMemo(
-    () => ({ workletTimings, scanTimings, enrollmentMeasurements, lockLog, interactionLog, indexRebuilds }),
+    () => ({ workletTimings, scanTimings, enrollmentMeasurements, lockLog, frameLog, interactionLog, indexRebuilds }),
     [],
   );
 

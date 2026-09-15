@@ -1107,6 +1107,30 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       first and the unscanned three by name.
     - **Survived a force-stop:** the rename, the price, the restore, the scan order and the history
       row. Launch line `index 16 (negatives 0) · orphan photos removed 0`.
+- **P2-8: time-to-lock proxy — built; device calibration pending** (2026-09-15; `NFR-04`, `TR-25`).
+  Tests went from 350 to **360**, and typecheck is clean.
+  - **Worklet:** `embedFrame` and `captureReference` stamp each frame with `Date.now()` when processing
+    begins. No other per-frame work (`NFR-07`).
+  - **Domain (pure, tested), `timeToLock.ts`:**
+    - Frame log entries hold the resolved kind, the capture and arrival times, and the worklet time.
+      `appendFrameLog` trims in chunks and keeps about 6,000 frames.
+    - `lockEpisodes` joins frames to an episode by arrival and takes t_seen from the capture time.
+      An episode with a reset inside counts as `interrupted`; t_seen after t_lock counts as
+      `inconsistent`.
+    - `clockCheck`: arrival − capture − worklet time per frame, with a count of impossible (negative)
+      frames.
+    - `confirmDelays`: ACCEPT lock → *Yes*, informational.
+  - **Scanner:** `useScanner` appends every stamped frame and every reset to the frame log.
+  - **Gate panel:**
+    - Proxy n / median / p90 / max, the episodes left out, the clock check, and lock → *Yes*.
+    - Each episode's seen and lock times to the millisecond, to match against
+      `screenrecord --bugreport`'s clock overlay.
+    - *Clear lock log* now clears the frame log too, relabelled in `en` and `fil`.
+  - **Device:** release APK installed over the gate app at 13:51:32 (data kept), launched and
+    scanning, airplane mode on. Calibration not yet run.
+  - **Laptop tooling:** ffmpeg 9.0.1 (`winget`, Gyan.FFmpeg) to read calibration video frames. It never
+    ships in the APK (`TR-51` unaffected).
+  - **Copy review:** the operator reviewed P2-6's and P2-7's Filipino copy, with no corrections.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

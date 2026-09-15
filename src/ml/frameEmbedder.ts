@@ -27,6 +27,11 @@ export interface FrameEmbedding {
   /** 1280-d, unit length (TR-22). */
   readonly vector: Float32Array;
   readonly timings: StageTimings;
+  /**
+   * `Date.now()` when the worklet began on this frame: t_seen for the NFR-04 frame log (P2-8).
+   * `Date`, not `performance.now()`, because the JS thread must subtract it from its own times.
+   */
+  readonly capturedAtMs: number;
 }
 
 export interface ReferenceCapture {
@@ -40,8 +45,8 @@ export interface ReferenceCapture {
 
 type NitroImage = ReturnType<typeof HybridFrameConverter.convertFrameToImage>;
 
-/** The shared scanning path from a reticle crop onward. `t0` is when frame conversion began. */
-function embedCrop(cropped: NitroImage, model: TensorflowModel, t0: number): FrameEmbedding {
+/** The shared scanning path from a reticle crop onward. `t0` and `capturedAtMs` are when frame conversion began. */
+function embedCrop(cropped: NitroImage, model: TensorflowModel, t0: number, capturedAtMs: number): FrameEmbedding {
   'worklet';
   let resized: NitroImage | null = null;
   try {
@@ -66,6 +71,7 @@ function embedCrop(cropped: NitroImage, model: TensorflowModel, t0: number): Fra
     return {
       vector,
       timings: { cropResizeMs: t1 - t0, inferenceMs: t2 - t1, normalizeMs: t3 - t2, totalMs: t3 - t0 },
+      capturedAtMs,
     };
   } finally {
     resized?.dispose();
@@ -83,13 +89,14 @@ function embedCrop(cropped: NitroImage, model: TensorflowModel, t0: number): Fra
  */
 export function embedFrame(frame: Frame, model: TensorflowModel): FrameEmbedding {
   'worklet';
+  const capturedAtMs = Date.now();
   const t0 = performance.now();
   const image = HybridFrameConverter.convertFrameToImage(frame);
   let cropped: NitroImage | null = null;
   try {
     const { x0, y0, x1, y1 } = reticleRect(image.width, image.height, RETICLE_FRACTION);
     cropped = image.crop(x0, y0, x1, y1);
-    return embedCrop(cropped, model, t0);
+    return embedCrop(cropped, model, t0, capturedAtMs);
   } finally {
     cropped?.dispose();
     image.dispose();
@@ -105,6 +112,7 @@ export function embedFrame(frame: Frame, model: TensorflowModel): FrameEmbedding
  */
 export function captureReference(frame: Frame, model: TensorflowModel): ReferenceCapture {
   'worklet';
+  const capturedAtMs = Date.now();
   const t0 = performance.now();
   const image = HybridFrameConverter.convertFrameToImage(frame);
   let cropped: NitroImage | null = null;
@@ -112,7 +120,7 @@ export function captureReference(frame: Frame, model: TensorflowModel): Referenc
   try {
     const rect = reticleRect(image.width, image.height, RETICLE_FRACTION);
     cropped = image.crop(rect.x0, rect.y0, rect.x1, rect.y1);
-    const embedding = embedCrop(cropped, model, t0);
+    const embedding = embedCrop(cropped, model, t0, capturedAtMs);
 
     const side = referenceSide(rect.x1 - rect.x0);
     stored = cropped.resize(side, side);

@@ -15,6 +15,13 @@ import {
   STABILITY_WINDOW,
   type StabilityBuffer,
 } from '../../domain/stability.ts';
+import { appendFrameLog, type FrameLogEntry } from '../../domain/timeToLock.ts';
+
+/** When the worklet began on a frame, and how long it took there (the P2-8 frame log). */
+export interface FrameStamp {
+  readonly capturedAtMs: number;
+  readonly workletMs: number;
+}
 
 /** How many recent frames the JS-side timing samples cover. */
 export const SCAN_TIMING_WINDOW = 200;
@@ -35,8 +42,8 @@ export interface ScannerState {
    * when the lock changes, never at frame rate (SR-12). No id in it is a negative (TR-39).
    */
   readonly locked: FrameDecision | null;
-  /** Hot path: one call per processed frame, with the worklet's unit vector and its sharpness. */
-  onVector(vector: Float32Array, sharpness?: number | null): void;
+  /** Hot path: one call per processed frame, with the worklet's unit vector, its stamp and its sharpness. */
+  onVector(vector: Float32Array, stamp?: FrameStamp | null, sharpness?: number | null): void;
   /**
    * One frame through the same KNN → policy → resolveFrame path, without voting. The capture guard
    * judges the capture frame with it (P2-3).
@@ -68,6 +75,7 @@ export function useScanner({
   indexRef,
   timingsRef,
   lockLogRef,
+  frameLogRef,
 }: {
   catalog: Catalog;
   /** Goes up whenever products change, so the repacked set and the product and photo caches are re-read. */
@@ -77,6 +85,8 @@ export function useScanner({
   timingsRef?: RefObject<readonly ScanTiming[]>;
   /** Every lock change is appended here, with its voting frames (PHASE_1_PLAN §4 step 5). reset() never clears it. */
   lockLogRef?: RefObject<readonly LockEvent[]>;
+  /** Every stamped frame's resolved kind, and every reset, for NFR-04's time-to-lock (P2-8). reset() never clears it. */
+  frameLogRef?: RefObject<FrameLogEntry[]>;
 }): ScannerState {
   const [locked, setLocked] = useState<FrameDecision | null>(null);
   const lockedKey = useRef<string | null>(null);
@@ -100,7 +110,8 @@ export function useScanner({
   ambiguousIds.current = ambiguous;
 
   const onVector = useCallback(
-    (vector: Float32Array, sharpness: number | null = null) => {
+    (vector: Float32Array, stamp: FrameStamp | null = null, sharpness: number | null = null) => {
+      const arrivedAtMs = Date.now();
       const index = indexRef.current;
       const t0 = performance.now();
       const hits = nearestShots(index, vector);
@@ -120,6 +131,9 @@ export function useScanner({
       // log still shows what a negative silenced.
       lastTop.current = rankProducts(hits).slice(0, 3);
       votes.current = [...votes.current.slice(-(STABILITY_WINDOW - 1)), frameVote(decision, sharpness)];
+      if (frameLogRef !== undefined && stamp !== null) {
+        appendFrameLog(frameLogRef.current, { kind: frame.kind, capturedAtMs: stamp.capturedAtMs, arrivedAtMs, workletMs: stamp.workletMs });
+      }
 
       // lockedDecision returns a new object every frame, but its meaning only changes with its key.
       // Comparing keys keeps React out of the 4 fps loop.
@@ -142,7 +156,7 @@ export function useScanner({
         }
       }
     },
-    [catalog, indexRef, lockLogRef],
+    [catalog, indexRef, lockLogRef, frameLogRef],
   );
 
   const classify = useCallback(
@@ -163,7 +177,13 @@ export function useScanner({
     votes.current = [];
     lockedKey.current = null;
     setLocked(null);
-  }, []);
+    // Marked in the frame log, because the lock log records no event here: an episode that spans a
+    // reset did not lock from one look at the product, so timeToLock leaves it out.
+    if (frameLogRef !== undefined) {
+      const now = Date.now();
+      appendFrameLog(frameLogRef.current, { kind: 'reset', capturedAtMs: now, arrivedAtMs: now, workletMs: 0 });
+    }
+  }, [frameLogRef]);
 
   const productOf = useCallback(
     (id: string) => {

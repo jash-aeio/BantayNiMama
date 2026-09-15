@@ -93,6 +93,10 @@ adb install -r <scratch>\app-release-fresh.apk
 - **To reset the fresh copy for another first run:** `adb shell pm clear com.jash.bantaynimama.fresh`,
   which also resets its camera permission. Never run this on `com.jash.bantaynimama`.
 
+**Video frames for P2-8's calibration** (2026-09-15): ffmpeg 9.0.1, installed on the laptop with
+`winget install Gyan.FFmpeg`. Recordings come from `adb shell screenrecord --bugreport` over USB, which
+stamps the phone's clock on every frame and stops after 180 s. Nothing here ships in the APK.
+
 One trap worth recording: `babel-preset-expo` shipped nested at
 `node_modules/expo/node_modules/babel-preset-expo` rather than hoisted, so Babel could not resolve
 it from the project root and Metro failed with `Cannot find module 'babel-preset-expo'` while the

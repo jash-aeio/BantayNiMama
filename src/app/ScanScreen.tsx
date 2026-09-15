@@ -124,6 +124,7 @@ export function ScanScreen() {
     indexRef,
     timingsRef: diagnostics.scanTimings,
     lockLogRef: diagnostics.lockLog,
+    frameLogRef: diagnostics.frameLog,
   });
   const { onVector, reset: resetScanner } = scanner;
 
@@ -184,7 +185,7 @@ export function ScanScreen() {
     (result: FrameEmbedding) => {
       const timings = diagnostics.workletTimings;
       timings.current = [...timings.current.slice(-(WORKLET_TIMING_WINDOW - 1)), result.timings];
-      if (!pausedRef.current) onVector(result.vector);
+      if (!pausedRef.current) onVector(result.vector, { capturedAtMs: result.capturedAtMs, workletMs: result.timings.totalMs });
     },
     [onVector, diagnostics],
   );

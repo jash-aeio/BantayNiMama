@@ -247,6 +247,6 @@
     "run": "Run check",
     "running": "Checking photo {{done}} of {{total}}…",
     "needsModel": "The recognition model is still loading.",
-    "clearLog": "Clear lock log"
+    "clearLog": "Clear lock and frame logs"
   }
 }

@@ -15,6 +15,7 @@ import {
   describeLockDetails,
   describeLockLog,
   describeScanTimings,
+  describeTimeToLock,
   describeWorkletTimings,
 } from './describe';
 import { runGateCheck } from './runGateCheck';
@@ -58,8 +59,11 @@ export function GateCheckPanel() {
       .finally(() => setProgress(null));
   };
 
-  const clearLockLog = () => {
+  // Both logs together: an episode needs its Unknown lock and its frames, so clearing only one would
+  // leave every open episode truncated or inconsistent (timeToLock.ts).
+  const clearLogs = () => {
     diagnostics.lockLog.current = [];
+    diagnostics.frameLog.current = [];
     setLogVersion((n) => n + 1);
   };
 
@@ -110,9 +114,16 @@ export function GateCheckPanel() {
             </Text>
           ))}
 
-          <Pressable onPress={clearLockLog} style={styles.button}>
+          <Pressable onPress={clearLogs} style={styles.button}>
             <Text style={styles.buttonText}>{t('gate.clearLog')}</Text>
           </Pressable>
+          {describeTimeToLock(diagnostics.frameLog.current, diagnostics.lockLog.current, diagnostics.interactionLog.current, nameOf).map(
+            (line, i) => (
+              <Text key={`ttl-${i}`} style={styles.line}>
+                {line}
+              </Text>
+            ),
+          )}
           {describeLockLog(diagnostics.lockLog.current, nameOf).map((line, i) => (
             <Text key={`log-${i}`} style={styles.line}>
               {line}

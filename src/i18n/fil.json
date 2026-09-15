@@ -247,6 +247,6 @@
     "run": "Patakbuhin ang check",
     "running": "Sinusuri ang litrato {{done}} ng {{total}}…",
     "needsModel": "Naglo-load pa ang model para sa pagkilala.",
-    "clearLog": "I-clear ang lock log"
+    "clearLog": "I-clear ang lock log at frame log"
   }
 }

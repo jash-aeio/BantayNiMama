@@ -56,8 +56,8 @@ This is the most important thing to understand about the codebase.
 | **JS thread** | Vector search, matching policy, stability buffer, DB reads, enrollment | Run inference on live frames |
 | **UI thread** | Native view rendering. The overlay is plain RN views that re-render only when the lock changes (P1-6); Reanimated is deferred (ADR-020) | Re-render React on the hot path |
 
-**Rule:** the worklet's only output is a `Float32Array(1280)` posted to the JS thread. Nothing else
-crosses that boundary per frame. An explicit capture during enrollment is the one exception: it
+**Rule:** per frame, the worklet posts only a `Float32Array(1280)` to the JS thread, with its stage
+timings (P1-3) and a `Date.now()` capture stamp (P2-8). Nothing else crosses that boundary per frame. An explicit capture during enrollment is the one exception: it
 also sends that frame's reticle crop, once per button press (P1-4).
 
 **One model instance per thread.** The camera worklet calls `runSync` on its model continuously. A
@@ -108,6 +108,28 @@ Perceived lock:       ~1 s (4 agreeing frames at 4 fps; was ~750 ms at 3 — ADR
 a budget Android thermally throttles within minutes. At 4 fps, with a 4-of-5 stability gate
 (ADR-016), a result locks in ~1 s nominal. That is still below the 1.2 s p90 target (NFR-04), with
 less headroom than the original 3-of-5's ~750 ms; time-to-lock is not yet measured on device.
+
+### Time-to-lock proxy (P2-8, built 2026-09-15; not yet measured)
+
+The app cannot see a product enter the reticle, so `domain/timeToLock.ts` measures a proxy.
+- **Frame log:** every processed frame's kind after `resolveFrame`, with two `Date.now()` stamps:
+  when the worklet began on it and when the JS thread received it. It also marks every scanner
+  reset. It is held in memory, up to 6,000 frames (about 25 min at 4 fps), and never persisted.
+- **Episode:** from an Unknown lock (the empty table) to the next ACCEPT, chips or grid lock. t_seen is
+  the capture time of the first frame received after the Unknown lock that was not UNKNOWN. The
+  proxy is t_lock − t_seen.
+- **Left out, and counted:** episodes that opened before the oldest logged frame (`truncated`), ones
+  with a reset inside (`interrupted`), and ones with no non-UNKNOWN frame or with t_seen after t_lock
+  (`inconsistent`, meaning the clocks disagree).
+- **Clock check:** arrival − capture − worklet time per frame. It can be negative only if the two
+  runtimes' `Date.now()` disagree.
+- **Under-reads by design:** a product moving in, blurred, or below τ votes UNKNOWN while already in
+  view. So a screen recording with the phone's clock overlaid (`screenrecord --bugreport`) gives
+  t_enter, and the bias t_seen − t_enter is reported beside the proxy, not folded into it.
+- **Informational, not `NFR-04`:** lock → *Yes* in confirm mode, from the lock log and interaction
+  log.
+- **Added cost per frame:** one `Date.now()` in the worklet; on the JS thread, one more `Date.now()`
+  and an in-place append, outside the timed KNN and policy span.
 
 ---
 
@@ -670,7 +692,7 @@ BantayNiMama/
 │   │   ├── cameraAccess.ts    ← permission status → ask / ask again / open settings; what to log (SR-43)
 │   │   ├── shotQuality.ts     ← mean luminance; too dark / blown out / blurred, placeholder limits (SR-22)
 │   │   ├── interactionLog.ts  ← gate taps in memory; enrollmentTimes: Add → saved per product, split into photos and typing (SR-25)
-│   │   ├── timeToLock.ts      ← NFR-04 proxy episodes, median / p90, calibration bias
+│   │   ├── timeToLock.ts      ← NFR-04 frame log, proxy episodes, clock check, lock → Yes, calibration bias
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor
 │   │   ├── model.ts           ← model id, input size, reticle fraction, fps — shared by scan + enroll
@@ -740,6 +762,7 @@ a `require()` that works throughout development fails on the first release build
 | JS brute-force KNN, in the scanner | — | **15 shots: median 1.31 ms, p90 4.23** (P1-6). **100 shots: median 8.52 ms, p90 13.78** (P1-8 gate catalog). n = 200 live frames each, `useScanner`. The 100-shot figure agrees with P1-2's synthetic 9.2 ms. **102 rows (100 shots + 2 negatives): median 8.94 ms, p90 12.30**, n = 60 (P2-3). Infinix X6823, release APK, 2026-09-14. |
 | Policy + stability | <2 ms | **median 0.07 ms, p90 0.11** (P1-6, 15 shots) · **0.08 / 0.10** (P1-8, 100 shots). n = 200 live frames each: `match` + `pushDecision` + `lockedDecision`. Same device and date. **With `resolveFrame` added (P2-3), 102 rows: median 0.09 ms, p90 0.12**, n = 60. |
 | **Total per frame** | **≤ 60 ms** (NFR-07) | **~126 ms at 15 shots, ~135 ms at 100 shots — not met.** These are **sums of medians**, not one timed span: P1-6 worklet 124.7 + KNN 1.31 + policy 0.07; P1-8 worklet 126.9 + KNN 8.52 + policy 0.08. The JS side is 1–7% of it; the worklet is the problem. |
+| **Time-to-lock, p90** | **≤ 1.2 s** (NFR-04) | **Not yet measured.** The proxy and its readout are built (P2-8, §3), and the P2-8 release APK is on the gate app. Expected ≈ 0.9–1.0 s for a clean 4-of-5 lock, a **computed** figure (`PHASE_2_PLAN.md` P2-8). |
 
 **Measurement, 2026-09-13.** 7 samples read off the spike's on-screen counter (`elapsedMs`, timed
 inside the worklet around crop → resize → `runSync` → L2-normalize): 140.5, 142.4, 147.5, 148.2,
