@@ -1207,8 +1207,64 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       `pm enable com.jash.bantaynimama.fresh` restores it); its stray bag stays (operator's call).
   - **Evidence:** `C:\BantayNiMamaBackups\p2-9-gate-b` (videos, frame sheets, gate-panel text, system
     log, per-step result files, `SHA256SUMS`). The 31 segments are still on the phone.
+- **Gate A1–A4 re-run in airplane mode** (2026-09-16 03:15–04:21; `SR-06`–`SR-08`, `SR-32`, `TR-53`).
+  Remediation for the 2026-09-16 `/phase-gate` FAIL, whose only failing item was that A1 (P2-2) and
+  A2–A4 (P2-4) were recorded online (operator's call: re-run, not an ADR). Infinix X6823, gate app,
+  `airplane_mode_on` 1 at every check, screen-recorded in 16 back-to-back segments (1,344 MB).
+  - **Setup:** part B's catalog backed up (`gate-catalog-partB-final`, 48/48 SHA-256, integrity ok).
+    The schema-1 catalog from P2-2 restored with the Phase 0 debug APK and `run-as` (101/101 SHA-256
+    on the phone). A Phase 1 release APK rebuilt from `main` `53cc7a7` (native dependencies unchanged)
+    installed and launched once: Scan read Unknown, Clover Chips at ₱12.00.
+  - **A1 PASS:** the P2-8 release APK (the A5 / part B binary) installed over it; cold start
+    `schema 1 -> 2 · orphan photos removed 0 · index 100`; gate check **PASS** — 20 products, 100 shots,
+    0 missing, self-match 100/100, nearest other 0.7512 / 0.8254 / 0.8954, 13.6 s. Same numbers as P2-2.
+  - **A2 PASS:** Clover Chips 24g ₱12.00 → ₱15.00 from the scan card. The editor opened on Clover
+    (03:37:16), the phone moved to another product, and it saved on Clover (03:39:16);
+    `price_history rows 1`, "was ₱12.00", no other product. After force-stop (pid 13111 → 17724):
+    launch `schema 2 -> 2`, LOCK Clover, **₱15.00** on Yes, `price_history rows 1`.
+  - **A3 PASS:** CHIPS Knorr Chicken | Pork → *Wrong?* (the pair offered, ADR-022) → Chicken,
+    `correctSaved` 03:52:25 on the first try. After force-stop (→ pid 22394): `index 101`, Knorr
+    Chicken 6 photos, gate check **PASS** — shots 101 (corrections 1), photo rows 101, missing 0,
+    self-match 101/101, 13.8 s.
+  - **A4 PASS as worded:** delete → undo twice (8 s, 3 s), then delete → `undoLapsed`. Index rebuilds
+    n = 5, median 7.5 ms, max 13.2. After force-stop (→ pid 28607): `index 96`, *Deleted products (1)*
+    with 30 days left. Restore rebuilt in 20.5 ms (101 rows), then LOCK Sponge and Yes.
+  - **Found, A4: a wrong lock, attributed from video.** With the deleted Sponge held after the
+    relaunch, the lock log recorded **LOCK Clover Chips 24g at 04:15:24** (s 0.570, m 0.094, 4 accept
+    votes), between CHIPS Clover | Knorr Pork. Segment 14 shows only the Sponge pack in view, with the
+    phone dipped so the box caught its lower edge. The card read **"Is this Clover Chips 24g? ₱15.00 /
+    pack · Yes / No"**. No Yes was tapped, so it was not a confident price under §4, but one wrong tap
+    quotes the wrong price. Before the relaunch, 2 minutes with the deleted Sponge gave 0 LOCK and 10
+    chips changes, mostly Clover | Knorr Pork. This attributes P2-4's unattributed 20:17:04 Knorr Pork
+    lock to the same cause: **a deleted product is an un-enrolled product** (`NFR-03`).
+  - **`TR-53`:** `npm test` passed with the laptop offline (operator-run, count not reported; last
+    measured 360).
+  - **End state:** the gate app holds the upgraded 20-product catalog (Clover ₱15.00, 1 Knorr
+    correction, English). Evidence: `C:\BantayNiMamaBackups\p2-9-gate-a-offline` (`README.md`,
+    A1–A4 results, screens and panel dumps, frame sheet, `video\SHA256SUMS` 16/16); APKs in
+    `C:\BantayNiMamaBackups\apks`. The 16 segments are still on the phone.
 
 ### Changed
+- **Phase 2 gate PASSED, verified with `/phase-gate`** (2026-09-16). The first verdict that day was
+  FAIL, because A1 (P2-2) and A2–A4 (P2-4) had run online. After the offline re-run, every
+  `PHASE_2_PLAN.md` §4 criterion has measured evidence, all on the Infinix X6823, release APK,
+  airplane mode:
+  - **A1–A4:** passed, offline re-run.
+  - **A5:** 0 wrong locks in 62 episodes.
+  - **B1–B5:** passed.
+  - **Zero confident wrong prices** across the whole run.
+  - **Filipino copy:** reviewed by the operator.
+  - **`TR-53`:** suite passed offline (operator-run; 360/360 on the laptop the same day).
+
+  A4's LOCK Clover Chips 24g with the deleted Sponge held was shown as `SR-13`'s question
+  ("Is this …? ₱price · Yes / No") and not confirmed. It is not a confident price, and §4's
+  zero-wrong-locks rule is written into A5. It is carried to Phase 3 with un-enrolled rejection
+  (`NFR-03`).
+
+  Recorded, not gate-blocking: `NFR-04` time-to-lock p90 2.88 s (E-2) and `SR-25` enrollment
+  median 29.9 s (ADR-023).
+
+  Phase 2 is closed; Phase 3 is next.
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2
   (UI / UX) is in progress.
   - **Every §4 criterion has measured evidence** on the Infinix X6823, release APK, in airplane mode:

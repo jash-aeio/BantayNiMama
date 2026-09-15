@@ -509,6 +509,18 @@ start-time proxy, calibrated once against video.
   mistake twice. One B5 bag saved there stays.
 - **Part B passed** (2026-09-16): B1–B5, zero confident prices, final gate check PASS.
 
+*Amended 2026-09-16 (A1–A4 offline re-run, operator's calls):*
+- **`/phase-gate` failed on the run condition:** A1 (P2-2) and A2–A4 (P2-4) had been recorded
+  online. A1–A4 were **re-run in airplane mode** rather than excused by an ADR.
+- **A1's "Phase 1 APK" was rebuilt from `main` `53cc7a7`**, because none had been kept. Native
+  dependencies are unchanged since. The P2-2 schema-1 catalog was restored under it (101/101
+  SHA-256), after part B's catalog was backed up.
+- **A2–A4 were screen-recorded** like A5 and part B. The UI was switched to English first.
+- **A4's delete → undo ran twice**, because the scan-card delete has no confirmation step.
+- **A1–A4 passed offline** (2026-09-16). A4 logged one wrong LOCK (Clover Chips, with the deleted
+  Sponge held), shown as a question and not confirmed. `TR-53`'s suite passed offline
+  (operator-run).
+
 ---
 
 ## 6. Not in Phase 2

@@ -4,8 +4,8 @@
 > decided.** Keep it short — it is a dashboard, not a journal. The journal is `CHANGELOG.md`.
 
 **Last updated:** 2026-09-16
-**Current phase:** Phase 2 — UI / UX, gate parts A and B passed, `/phase-gate` next *(Phase 1 gate passed and verified with `/phase-gate` 2026-09-14; Phase 0 gate 2026-09-13)*
-**Overall health:** 🟢 The real data path holds: 20 products survive a force-stop and scan with zero wrong locks. Latency (`NFR-07`), time-to-lock (`NFR-04`, p90 2.9 s), un-enrolled handling (`NFR-03`) and look-alike confusion are open.
+**Current phase:** Phase 3 — ML integration & accuracy, not started, plan not yet written *(Phase 2 gate passed and verified with `/phase-gate` 2026-09-16; Phase 1 2026-09-14; Phase 0 2026-09-13)*
+**Overall health:** 🟢 Phase 2's UI holds on device: across the gate run (upgrade, edit, correct, delete, confirm mode, negatives, quick pick), all in airplane mode, **zero confident wrong prices**. Open for Phase 3: latency (`NFR-07`), time-to-lock (`NFR-04`, p90 2.9 s), un-enrolled and deleted-product handling (`NFR-03`), look-alike confusion.
 
 ---
 
@@ -13,12 +13,12 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-8 done; P2-9 gate parts A and B both passed** (A5 2026-09-15; B1–B5 on the cleared gate app 2026-09-16, screen-recorded, all on the Infinix). **Part B:** 0 confident prices; 8 of 15 un-enrolled items drew a question at 6 products; 6 negatives survived a force-stop and all read Unknown; 3 repacked bags opened the grid 7 times with 0 locks. **Final gate check PASS:** 9 products, 39 shots, 6 negatives, 0 missing, self-match 45/45. Tests **360**, typecheck clean. **The gate app now holds the part B catalog**; the 20-product catalog is backed up at `C:\BantayNiMamaBackups\gate-catalog-v2-pre-partB` (124/124 SHA-256). |
-| **Next action** | **`/phase-gate` verdict FAIL (2026-09-16):** every step's result passed, but §4's run condition "airplane mode" was missed by **A1–A4** (recorded online at P2-2 and P2-4); `TR-53`'s suite in airplane mode is unproven (360/360, laptop network state not recorded). Remediation is the operator's call: re-run A1–A4 offline, or amend the gate with an ADR. The PR to `main` waits on that. **Before any more device work:** `BantayNiMama fresh` is disabled with `pm disable-user` (data kept) — `adb shell pm enable com.jash.bantaynimama.fresh` restores it. The 31 part B video segments are archived and still on the phone (delete after `/phase-gate`, operator's call). |
+| **Working on** | **Phase 2 closed** on `feat/phase-2-ui` (gate PASS 2026-09-16). **A1–A4**, re-run offline: upgrade 100/100, price edit bound and persisted, chip correction counted, delete / undo / trash / restore. **A5:** 0 wrong locks in 62 episodes. **B1–B5:** 0 confident prices, negatives survive a relaunch, grid never names. **`TR-53`:** suite passed offline. Tests **360**, typecheck clean. **The gate app holds the upgraded 20-product catalog** (Clover ₱15.00, 1 Knorr correction, English). The part B catalog is backed up at `C:\BantayNiMamaBackups\gate-catalog-partB-final`. |
+| **Next action** | **1. Open the PR** `feat/phase-2-ui` → `main`. **2. Write the Phase 3 plan** before any Phase 3 code. It must cover: calibrate `confirm_below`; `NFR-01` / `NFR-03` retune with JPEG-path vectors; un-enrolled and deleted-product locks (A4's Clover lock); look-alike chips; native search (ADR-014); `NFR-07` latency; `NFR-04`. **Phone housekeeping, operator's call:** 31 part B and 16 A1–A4 segments are archived and still on the phone. `BantayNiMama fresh` stays disabled (`adb shell pm enable com.jash.bantaynimama.fresh` restores it). |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
-| **Known soft spot** | **Un-enrolled products.** At τ/δ, 50 of 105 un-enrolled frames land in *disambiguate* (two wrong chips), so only 49.5% return Unknown (`NFR-03` ≥ 85%, not met). `analyze.mjs`'s 97.1% counts "not auto-accepted". All 3 false accepts are Zonrox bottles → Datu Puti vinegar. **A deleted product is un-enrolled too:** gate A4 logged a possible wrong LOCK Knorr Pork 6 s after deleting the sponge (unattributed, shown as a question). |
+| **Known soft spot** | **Un-enrolled products.** At τ/δ, 50 of 105 un-enrolled frames land in *disambiguate* (two wrong chips), so only 49.5% return Unknown (`NFR-03` ≥ 85%, not met). `analyze.mjs`'s 97.1% counts "not auto-accepted". All 3 false accepts are Zonrox bottles → Datu Puti vinegar. **A deleted product is un-enrolled too, now confirmed on video:** in the offline A4 re-run (2026-09-16 04:15:24) the deleted Sponge, held with the box on its lower edge, **LOCKed as Clover Chips 24g** (s 0.570, m 0.094). The card read "Is this Clover Chips 24g? ₱15.00 / pack · Yes / No". It was not confirmed, but one wrong tap quotes a wrong price. P2-4's unattributed Knorr Pork lock after deleting the Sponge fits the same pattern. |
 | **New risk — small catalogs** | δ rejects un-enrolled items only when an enrolled product is close. Simulated on Phase 0 data, **15.1%** of un-enrolled frames are auto-accepted at 5 products (SR-44's first five), and 9.7% still at 15. Plan (ADR-013): confirm mode + store-local negatives (`SR-13`, `SR-14`), built in Phase 2 (P2-3). Until Phase 3 calibrates `confirm_below`, **every ACCEPT is a question** (ADR-017). **Measured at gate B3 (2026-09-16, 6 products): 8 of 15 un-enrolled shelf items drew a question**, 1 chipped, 6 read Unknown; after *Not in my list*, all 6 marked items read Unknown. |
 | **Biggest risk** | Correct accepts are **74.7%** at τ/δ vs `NFR-01` ≥ 90%. Ranking is strong (top-3 100%) but margins are thin, so many correct matches fall to disambiguate. A Phase 3 problem — the Phase 0 gate measures ranking only. |
 
@@ -30,8 +30,8 @@
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
 | **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-7 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid, first run and guided add, the Directory and *Teach again* on device; gates B5 early, B1, B2 passed, B2's time recorded per ADR-023); P2-8 time-to-lock calibrated (p90 2.88 s, recorded, not blocking); P2-9 parts A and B passed (A5 2026-09-15; B1–B5 2026-09-16), `/phase-gate` next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
-| 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
+| **2** | UI / UX | 🟢 Passed gate — A1–A5 + B1–B5 in airplane mode, **zero confident wrong prices**, `TR-53` offline (2026-09-16; the first verdict failed on A1–A4's run condition, and A1–A4 were re-run offline). Recorded, not blocking: time-to-lock p90 2.88 s (`NFR-04`), enrollment median 29.9 s (`SR-25`) | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
+| 3 | ML integration & accuracy | 🔵 Next — Phase 2 gate passed 2026-09-16; plan not yet written | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
 
@@ -180,7 +180,7 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
     - **Evidence:** `C:\BantayNiMamaBackups\p2-8-calibration` (videos, frame sheets, gate-panel screenshots, episode lines; 71 files, SHA-256 checked against source). Both videos are still on the phone.
     - **Launch line at 21:02:** `orphan photos removed 3`. Earlier gate-app launches read 0. The gate check after A5 found 118 photo rows and **0 missing**, so the 3 were unreferenced. Where they came from is not explained.
   - [x] Filipino for the gate panel's clear button, "I-clear ang lock log at frame log": reviewed by the operator, **no corrections** *(2026-09-15)*
-- [ ] P2-9 Gate run — §4 parts A and B, then `/phase-gate`
+- [x] P2-9 Gate run — §4 parts A and B, then `/phase-gate` *(2026-09-16, **PASS** on the re-run after A1–A4 offline)*
   - [x] **Part A complete** *(2026-09-15)*: A1 at P2-2, A2–A4 at P2-4, A5 below. All on the 20-product gate catalog, Infinix X6823, release APK.
   - [x] **Gate A5 passed** *(22:40:43–22:53:22, one process pid 4396, airplane mode on, 27.8 °C at the start; screen-recorded in 5 back-to-back segments, operator's call)*:
     - **Protocol:** 3 passes of all 20 gate products, group 1 then group 2, from an empty table. Group 2's order varied between passes, so every episode was attributed from video, not from the list.
@@ -202,7 +202,19 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
     - **Final gate check PASS** (01:25:57): 9 products, 39 shots, 6 negatives, photo rows 45, **missing 0**, self-match **45/45**.
     - **Wrong icon twice:** "BantayNiMama fresh" was opened at 23:38 and 01:06; the second got the gate app killed for memory and a bag saved into the fresh copy. No gate data lost. Fresh is now disabled (data kept).
     - **Evidence:** `C:\BantayNiMamaBackups\p2-9-gate-b` (`README.md`, per-step results, `SHA256SUMS`).
-  - [ ] **`/phase-gate` verdict: FAIL** *(2026-09-16)*. Every A1–A5 and B1–B5 result meets §4, and zero confident wrong prices were recorded. **But §4 requires airplane mode, and A1 (P2-2) and A2–A4 (P2-4) ran online**, so the gate is not passed. **Unproven:** `TR-53`'s test suite in airplane mode (360/360 on 2026-09-16, network state not recorded). Offline and never exercised in the gate app: edit, correction, delete + undo + restore, the schema upgrade.
+  - [x] **First `/phase-gate` verdict: FAIL** *(2026-09-16)*. Every A1–A5 and B1–B5 result met §4, with zero confident wrong prices. **But A1 (P2-2) and A2–A4 (P2-4) had run online**, and `TR-53`'s suite in airplane mode was unproven. Operator's call: re-run A1–A4 offline.
+  - [x] **A1–A4 re-run in airplane mode** *(2026-09-16 03:15–04:21, Infinix X6823, gate app, screen-recorded in 16 segments)*:
+    - **Setup:** part B's catalog backed up (`gate-catalog-partB-final`, 48/48 SHA-256); P2-2's schema-1 catalog restored (101/101); Phase 1 release APK rebuilt from `main` `53cc7a7`, launched once.
+    - **A1 PASS:** P2-8 release APK over it; `schema 1 -> 2`, index 100; gate check PASS 20 / 100 / 0 missing / self-match 100/100.
+    - **A2 PASS:** Clover ₱12.00 → ₱15.00 from the scan card, saved on Clover with the camera on another product; after force-stop, ₱15.00 on Yes and `price_history rows 1`.
+    - **A3 PASS:** CHIPS Knorr Chicken \| Pork → *Wrong?* → Chicken, `correctSaved`; after force-stop, gate check PASS shots 101 (corrections 1), photo rows 101, 0 missing, 101/101.
+    - **A4 PASS as worded:** delete → undo ×2; delete → lapse, 0 LOCK; after force-stop, index 96 and in the trash; restore (20.5 ms) → LOCK Sponge.
+    - [ ] **A4 wrong lock, attributed from video:** LOCK Clover Chips 24g at 04:15:24 with the deleted Sponge held. Shown as "Is this Clover Chips 24g? ₱15.00 / pack · Yes / No", not confirmed. For `/phase-gate` to weigh.
+    - **`TR-53`:** `npm test` passed with the laptop offline (operator-run, count not reported).
+    - **Evidence:** `C:\BantayNiMamaBackups\p2-9-gate-a-offline` (`README.md`, A1–A4 results, `video\SHA256SUMS` 16/16).
+  - [x] **`/phase-gate` re-run: PASS** *(2026-09-16)*:
+    - **Every §4 criterion has measured evidence meeting its target:** run conditions (Infinix X6823, release APK, airplane mode); A1–A4 offline; A5 0 wrong locks; B1–B5; zero confident wrong prices; Filipino copy reviewed; `TR-53` offline (360/360).
+    - **A4's Clover lock** was `SR-13`'s question, not a confident price. §4's zero-wrong-locks rule is written into A5. Carried to Phase 3 (`NFR-03`).
 
 ---
 
