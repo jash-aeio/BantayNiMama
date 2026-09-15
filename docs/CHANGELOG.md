@@ -1150,6 +1150,23 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     ships in the APK (`TR-51` unaffected).
   - **Copy review:** the operator reviewed P2-6's and P2-7's Filipino copy and the relabelled clear
     button, with no corrections. All Phase 2 Filipino copy is now reviewed.
+- **Gate A5 passed; P2-9 part A complete** (2026-09-15; `NFR-04`, `SR-40`, `TR-53`). Infinix X6823,
+  release APK, gate app, one process, airplane mode on.
+  - **Run:** 3 passes of all 20 gate products from an empty table, 22:40–22:53, screen-recorded in 5
+    back-to-back segments (operator's call).
+  - **62 episodes:** 60 presentations, plus a repeated Reno (#55) and a Spicy Labuyo re-lock (#100).
+  - **0 wrong locks**, with every LOCK checked against video at its lock moment. The two brief
+    Alaska 140ml locks in #83 were found by a frame-by-frame scan for the confirm card's *Yes* button,
+    and the can held was the 140ml.
+  - **Finding:** with Reno held, #54 and #77 passed through chips Alaska 140ml | Argentina 100g, a pair
+    without the held product. Not a lock or a price. Carried to Phase 3 with the look-alike confusion.
+  - **Time-to-lock proxy:** n = 62, median 951 ms, p90 2153. With P2-8's bias, an estimate: p90 ≈ 2649 ms.
+  - **Gate check after A5: PASS.** 20 products, 116 shots, 2 negatives, photo rows 118, 0 missing,
+    self-match 103/103. So the 3 orphan photos swept at the 21:02 launch were unreferenced.
+  - **Evidence:** `C:\BantayNiMamaBackups\p2-9-gate-a5`, SHA-256 checked against source.
+  - **Decided (operator's calls):** B1–B2 are re-run in part B on the cleared gate app; A5 is
+    screen-recorded; the gate catalog is backed up before part B clears it; the P2-8 calibration
+    videos and the A5 segments were deleted from the phone after archiving.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

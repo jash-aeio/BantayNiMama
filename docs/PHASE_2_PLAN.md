@@ -486,6 +486,17 @@ start-time proxy, calibrated once against video.
 2. Run §4 on the device, in airplane mode.
 3. Run `/phase-gate`.
 
+*Amended 2026-09-15 (operator's calls):*
+- **B1–B2 are re-run in part B**, on the cleared gate app and the current build. Clearing the app forces
+  the first run and five guided enrollments anyway, and B3 needs them. P2-6's side-by-side runs stay
+  as the record of how B2's time was measured and why it is not blocking (ADR-023).
+- **Step 1 is done:** all Phase 2 Filipino copy was reviewed, with no corrections (2026-09-15).
+- **A5 is screen-recorded** in back-to-back 180 s segments, and each LOCK is checked against the frame
+  at its lock moment. P2-8 showed recording does not slow scanning, and a lock-log label alone cannot
+  prove which product was held (P2-8's plain-block #20). The group order is not relied on.
+- **A5 passed** (2026-09-15): 0 wrong locks in 62 episodes. The gate panel was not cleared first, so
+  A5's episodes were split out by time.
+
 ---
 
 ## 6. Not in Phase 2
