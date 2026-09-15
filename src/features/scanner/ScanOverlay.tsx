@@ -6,6 +6,7 @@ import { resolvePhotoPath } from '../../db/photos';
 import type { Product, QuickPickProduct } from '../../db/products';
 import { confidenceOf, type Confidence } from '../../domain/confidence.ts';
 import type { NegativeSource } from '../../domain/correction.ts';
+import { FIRST_RUN_TARGET } from '../../domain/firstRun.ts';
 import type { InteractionKind } from '../../domain/interactionLog.ts';
 import type { Thresholds } from '../../domain/match.ts';
 import { formatCentavos } from '../../domain/money.ts';
@@ -151,6 +152,8 @@ export const ScanOverlay = memo(function ScanOverlay({
                 <Text style={styles.price}>{priceText(product, t)}</Text>
               </View>
             </View>
+            {/* SR-44 step 7: one line on why a small list asks, shown while it is small (ADR-013). */}
+            {liveProductCount < FIRST_RUN_TARGET && <Text style={styles.why}>{t('scan.confirm.whySmall')}</Text>}
             {level !== null && <ConfidenceBars level={level} />}
             <View style={styles.answers}>
               <Pressable
@@ -331,6 +334,7 @@ const styles = StyleSheet.create({
   editText: { color: '#9ec5fe', fontSize: 16, fontWeight: '700', paddingVertical: 8 },
   pack: { color: '#e6eaef', fontSize: 16, fontVariant: ['tabular-nums'] },
   question: { color: '#ffffff', fontSize: 22, fontWeight: '700' },
+  why: { color: '#9aa5b1', fontSize: 14 },
   confirmRow: { flexDirection: 'row', gap: 12, alignItems: 'center' },
   photo: { width: 96, height: 96, borderRadius: 8, backgroundColor: '#1b2430' },
   answers: { flexDirection: 'row', gap: 10 },

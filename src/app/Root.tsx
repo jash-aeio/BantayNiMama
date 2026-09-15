@@ -12,12 +12,15 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 import { openCatalog, type Catalog } from '../db/catalog';
 import { readMetaValue, writeMetaValue } from '../db/meta';
+import { catalogCounts } from '../db/products';
 import { loadVectorIndex } from '../db/shots';
+import { FIRST_RUN_DISMISSED_META_KEY, FIRST_RUN_DISMISSED_VALUE, firstRunState } from '../domain/firstRun.ts';
 import { appendInteraction, type Interaction, type InteractionKind } from '../domain/interactionLog.ts';
 import type { VectorIndex } from '../domain/knn.ts';
 import { resolveLanguage, UI_LANGUAGE_META_KEY, type Language } from '../domain/language.ts';
 import type { LockEvent } from '../domain/lockLog.ts';
 import type { ShotMeasurement } from '../features/enrollment/useEnrollment';
+import { FirstRunIntro } from '../features/firstRun/FirstRunIntro';
 import type { ScanTiming } from '../features/scanner/useScanner';
 import type { StageTimings } from '../ml/frameEmbedder';
 import { useEmbeddingModel } from '../ml/useEmbeddingModel';
@@ -25,7 +28,8 @@ import { ProductsScreen } from './ProductsScreen';
 import { ScanScreen } from './ScanScreen';
 import { AppServicesContext, type AppServices, type IndexRebuild, type IndexRebuildReason } from './services';
 
-// App shell — TR-14 as amended by ADR-015: two bottom tabs on React Navigation, Scan and Products.
+// App shell — TR-14 as amended by ADR-015: two bottom tabs on React Navigation, Scan and Products,
+// behind the first-run intro on an empty catalog (SR-44, P2-6).
 
 /** Rebuilds kept for the gate panel. Deletes and restores are rare taps. */
 const INDEX_REBUILD_LOG = 50;
@@ -124,6 +128,36 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
   const [catalogVersion, setCatalogVersion] = useState(0);
   const bumpCatalogVersion = useCallback(() => setCatalogVersion((n) => n + 1), []);
 
+  // SR-44. The count is re-read after every catalog write, so deleting back below five brings the
+  // banner back, and the fifth save ends the guided flow.
+  const liveProductCount = useMemo(() => catalogCounts(catalog.db).products, [catalog, catalogVersion]);
+  const [dismissal, setDismissal] = useState(() => readMetaValue(catalog.db, FIRST_RUN_DISMISSED_META_KEY));
+  const firstRun = useMemo(() => firstRunState(liveProductCount, dismissal), [liveProductCount, dismissal]);
+  const finishFirstRunLater = useCallback(() => {
+    writeMetaValue(catalog.db, FIRST_RUN_DISMISSED_META_KEY, FIRST_RUN_DISMISSED_VALUE);
+    setDismissal(FIRST_RUN_DISMISSED_VALUE);
+    logInteraction('finishLater', []);
+  }, [catalog, logInteraction]);
+
+  // The intro runs at most once per launch. After it hands over, an empty catalog stays in the guided
+  // add on the Scan tab rather than replaying screens she has just seen. The handoff is a ref read
+  // once by the Scan tab, so a re-render can never open the guided add a second time.
+  const [introDone, setIntroDone] = useState(false);
+  const guidedStartPending = useRef(false);
+  const consumeGuidedStart = useCallback(() => {
+    const pending = guidedStartPending.current;
+    guidedStartPending.current = false;
+    return pending;
+  }, []);
+  const startGuided = useCallback(() => {
+    guidedStartPending.current = true;
+    setIntroDone(true);
+  }, []);
+  const finishIntroLater = useCallback(() => {
+    finishFirstRunLater();
+    setIntroDone(true);
+  }, [finishFirstRunLater]);
+
   const services = useMemo<AppServices>(
     () => ({
       catalog,
@@ -136,31 +170,52 @@ function Shell({ catalog, initialLanguage }: { catalog: Catalog; initialLanguage
       bumpCatalogVersion,
       rebuildIndex,
       logInteraction,
+      firstRun,
+      finishFirstRunLater,
+      consumeGuidedStart,
       diagnostics,
     }),
-    [catalog, frameModel, stillModel, language, setLanguage, catalogVersion, bumpCatalogVersion, rebuildIndex, logInteraction, diagnostics],
+    [
+      catalog,
+      frameModel,
+      stillModel,
+      language,
+      setLanguage,
+      catalogVersion,
+      bumpCatalogVersion,
+      rebuildIndex,
+      logInteraction,
+      firstRun,
+      finishFirstRunLater,
+      consumeGuidedStart,
+      diagnostics,
+    ],
   );
 
   return (
     <AppServicesContext.Provider value={services}>
-      <NavigationContainer theme={THEME}>
-        <Tab.Navigator
-          screenOptions={{
-            // Text-only tabs, with no icon library to audit. The icon slot must be removed, not just
-            // left empty: an empty slot pushes a 16 sp label below the bar's content area, under
-            // Android's navigation-bar scrim (seen on the Infinix, P1-7).
-            tabBarIconStyle: { display: 'none' },
-            tabBarLabelPosition: 'beside-icon',
-            tabBarActiveTintColor: '#ffd166',
-            tabBarInactiveTintColor: '#9aa5b1',
-            tabBarLabelStyle: { fontSize: 16, fontWeight: '700' },
-            headerTintColor: '#ffffff',
-          }}
-        >
-          <Tab.Screen name="Scan" component={ScanScreen} options={{ title: t('tabs.scan'), headerShown: false }} />
-          <Tab.Screen name="Products" component={ProductsScreen} options={{ title: t('tabs.products') }} />
-        </Tab.Navigator>
-      </NavigationContainer>
+      {firstRun.kind === 'welcome' && !introDone ? (
+        <FirstRunIntro onStart={startGuided} onFinishLater={finishIntroLater} />
+      ) : (
+        <NavigationContainer theme={THEME}>
+          <Tab.Navigator
+            screenOptions={{
+              // Text-only tabs, with no icon library to audit. The icon slot must be removed, not just
+              // left empty: an empty slot pushes a 16 sp label below the bar's content area, under
+              // Android's navigation-bar scrim (seen on the Infinix, P1-7).
+              tabBarIconStyle: { display: 'none' },
+              tabBarLabelPosition: 'beside-icon',
+              tabBarActiveTintColor: '#ffd166',
+              tabBarInactiveTintColor: '#9aa5b1',
+              tabBarLabelStyle: { fontSize: 16, fontWeight: '700' },
+              headerTintColor: '#ffffff',
+            }}
+          >
+            <Tab.Screen name="Scan" component={ScanScreen} options={{ title: t('tabs.scan'), headerShown: false }} />
+            <Tab.Screen name="Products" component={ProductsScreen} options={{ title: t('tabs.products') }} />
+          </Tab.Navigator>
+        </NavigationContainer>
+      )}
     </AppServicesContext.Provider>
   );
 }

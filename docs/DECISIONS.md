@@ -697,3 +697,51 @@ So the pairs `SR-07` most needs to teach apart were the ones it could not teach.
   products.
 - **The interaction log kind `neither` is renamed `wrongChip`.** Earlier logs were never persisted.
 - *Not in my list* from chips is unchanged: it still saves a negative.
+
+---
+
+## ADR-023 — Enrollment time is recorded, not gate-blocking, in Phase 2
+
+**Status:** Accepted · Revisit at Phase 4 · 2026-09-15 · Defers `SR-25` · Amends `PHASE_2_PLAN.md` §4 B2
+
+**Context.** Gate B2 asks each of 5 products to take ≤ 30 s from *Add* to saved (`SR-25`). P2-6
+measured it on the guided add, on the Infinix X6823's side-by-side copy, in airplane mode, from the
+interaction log. Attempt 1's times were lost when the app was swiped away.
+
+| Run | Form | Photos per product | Median | Max | Within 30 s |
+|---|---|---|---|---|---|
+| Attempt 2 | full | 5 | 42.6 s | 55.7 s | 0 of 6 |
+| Attempt 3 | name and price, the rest behind *More details* | 5 | 40.8 s | 64.6 s | 0 of 6 |
+| Attempt 4 | same as attempt 3 | 3 | 27.5 s | 41.8 s | 3 of 5 |
+
+- **Where the time goes** (attempt 4 medians): *Add* → first photo 19.5 s, 3 photos in 4.1 s, last
+  photo → saved 5.0 s. Typing the name and price is the largest block. It came before the photos on
+  3 of 5 products.
+- **The misses are not all the app.** One was 1.6 s over. The other had 17.3 s before its first
+  photo.
+- **Enrollment time never changes a quoted price.** `NFR-02`, confirm mode and negatives do not
+  depend on how long an add takes.
+
+**Decision** (operator's call): in Phase 2, enrollment time is **recorded against `SR-25`, not
+gate-blocking**, as time-to-lock is recorded against `NFR-04` (E-2). Gate B2 passes on its other
+checks: products saved through the guided flow, at least one started from an Unknown card's *Add*,
+and each locking afterwards.
+
+**Rejected.**
+
+- ***A faster keyboard flow and a fifth run now.*** *Next* to the price, *Save* from the price field,
+  and the name focused after the 3rd photo would likely fix the 1.6 s miss, but not a pause before
+  the first photo. Each run costs the operator a full guided add.
+- ***Amend `SR-25` to a median.*** Attempt 4 would pass as measured, but the requirement would then
+  allow one product in five to take over 40 s. Changing the promise to fit one run is the wrong way
+  round.
+
+**Consequences.**
+
+- **`SR-25` stays a MUST**, marked not met in Phase 2 with these numbers. It is not dropped.
+- **Phase 4 owns it:** the keyboard flow above, then a re-measure with a store's own operator, who
+  may type slower than the developer.
+- **The gate panel keeps the split** (`enrollmentTimes`), so the Phase 4 re-measure uses the same
+  instrument.
+- **For scale** (arithmetic, not measured): enrolling 500 products (`NFR-09`) takes about 3.8 h at
+  attempt 4's median, 4.2 h at 30 s, and 5.9 h at attempt 2's median.

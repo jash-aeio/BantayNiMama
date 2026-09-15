@@ -72,7 +72,7 @@ Requirement IDs are stable. Reference them in commits, PRs and test names.
 | **SR-22** | Warn the user when a captured frame is blown out, too dark, or out of focus. | SHOULD |
 | **SR-23** | Before saving, check the new embedding against the catalog and warn on a likely duplicate. *Amended 2026-09-14 (P2-5, ADR-018): the warning also offers, off by default, to mark the named products and the new one as repacked (`SR-10`), in the enrollment transaction. A suggestion only, since `L-02` size pairs trigger it too.* | MUST |
 | **SR-24** | The product must be recognizable on the next camera frame — no restart, no rebuild. | MUST |
-| **SR-25** | Complete enrollment of one product in **≤ 30 seconds**. | MUST |
+| **SR-25** | Complete enrollment of one product in **≤ 30 seconds**. *Not met in Phase 2 (2026-09-15, ADR-023). On the Infinix X6823, the best of four guided-add runs had a median of 27.5 s, with 3 of 5 products within 30 s. The time is recorded, not gate-blocking, and carried to Phase 4.* | MUST |
 
 ### 4.3 Directory (Tab 2)
 

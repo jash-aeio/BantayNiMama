@@ -3,7 +3,7 @@ import type { Catalog } from '../../db/catalog';
 import type { PriceChange } from '../../db/products';
 import type { PersistenceProblem } from '../../domain/gateCheck.ts';
 import { formatCentavos } from '../../domain/money.ts';
-import { countInteractions, type Interaction } from '../../domain/interactionLog.ts';
+import { countInteractions, enrollmentTimes, type Interaction } from '../../domain/interactionLog.ts';
 import { segmentLockLog, type LockEvent } from '../../domain/lockLog.ts';
 import { summarize } from '../../domain/stats.ts';
 import type { StageTimings } from '../../ml/frameEmbedder';
@@ -102,16 +102,65 @@ export function describeScanTimings(samples: readonly ScanTiming[]): string {
   );
 }
 
-/** Frame-vs-JPEG agreement and JPEG size over the shots captured since launch (ARCHITECTURE.md §4, NFR-08). */
-export function describeEnrollmentMeasurements(measurements: readonly ShotMeasurement[]): string {
+/**
+ * Frame-vs-JPEG agreement and JPEG size over the shots captured since launch (ARCHITECTURE.md §4,
+ * NFR-08), then the SR-22 quality inputs. Those are recorded so Phase 3 can set the warning limits
+ * from real shots; today's limits are placeholders.
+ */
+export function describeEnrollmentMeasurements(measurements: readonly ShotMeasurement[]): string[] {
   const agreement = summarize(measurements.map((m) => m.agreement));
   const bytes = summarize(measurements.map((m) => m.bytes));
-  if (agreement === null || bytes === null) return 'enrollment shots this session: none yet (enroll first; lost on relaunch)';
-  const min = Math.min(...measurements.map((m) => m.agreement));
-  return (
-    `enrollment shots this session n=${agreement.n}: frame-vs-JPEG dot min ${min.toFixed(4)} · ` +
-    `median ${agreement.median.toFixed(4)} · JPEG median ${(bytes.median / 1024).toFixed(1)} KB, max ${(bytes.max / 1024).toFixed(1)} KB`
-  );
+  const luminance = summarize(measurements.map((m) => m.luminance));
+  const sharpness = summarize(measurements.map((m) => m.sharpness * 1000));
+  if (agreement === null || bytes === null || luminance === null || sharpness === null) {
+    return ['enrollment shots this session: none yet (enroll first; lost on relaunch)'];
+  }
+  const min = (values: number[]) => Math.min(...values);
+  return [
+    `enrollment shots this session n=${agreement.n}: frame-vs-JPEG dot min ${min(measurements.map((m) => m.agreement)).toFixed(4)} · ` +
+      `median ${agreement.median.toFixed(4)} · JPEG median ${(bytes.median / 1024).toFixed(1)} KB, max ${(bytes.max / 1024).toFixed(1)} KB`,
+    `photo quality (SR-22, placeholder limits): luminance min ${min(measurements.map((m) => m.luminance)).toFixed(3)} · ` +
+      `median ${luminance.median.toFixed(3)} · max ${luminance.max.toFixed(3)} · sharpness ×1000 min ` +
+      `${min(measurements.map((m) => m.sharpness * 1000)).toFixed(2)} · median ${sharpness.median.toFixed(2)} · ` +
+      `warned ${measurements.filter((m) => m.warned).length}`,
+  ];
+}
+
+/** SR-25's limit, from *Add* to saved. */
+const ENROLLMENT_LIMIT_MS = 30_000;
+
+/**
+ * Gate B2's evidence: time from *Add* to saved for each product since launch (SR-25), and how many
+ * were started from an Unknown card's *Add*.
+ */
+export function describeEnrollmentTimes(log: readonly Interaction[], nameOf: (id: string) => string, limit = 10): string[] {
+  const times = enrollmentTimes(log);
+  const s = summarize(times.map((e) => e.ms));
+  if (s === null) return ['enrollment times: none yet (Add → saved; lost on relaunch)'];
+  const over = times.filter((e) => e.ms > ENROLLMENT_LIMIT_MS).length;
+  const fromUnknown = times.filter((e) => e.source === 'unknown').length;
+  // Where the time went (added after gate B2 attempt 2): medians over the products that logged each step.
+  const median = (pick: (e: (typeof times)[number]) => number | null) => {
+    const m = summarize(times.map(pick).filter((x): x is number => x !== null));
+    return m === null ? '—' : seconds(m.median);
+  };
+  return [
+    `enrollment times n=${s.n} (SR-25 ≤ 30 s): median ${seconds(s.median)} · p90 ${seconds(s.p90)} · max ${seconds(s.max)} · ` +
+      `over 30 s ${over} · from Unknown's Add ${fromUnknown}`,
+    `enrollment split, medians: Add → 1st photo ${median((e) => e.firstPhotoMs)} · 1st → last photo ` +
+      `${median((e) => (e.firstPhotoMs === null || e.lastPhotoMs === null ? null : e.lastPhotoMs - e.firstPhotoMs))} · ` +
+      `last photo → saved ${median((e) => (e.lastPhotoMs === null ? null : e.ms - e.lastPhotoMs))} · ` +
+      `1st key → saved ${median((e) => (e.firstKeyMs === null ? null : e.ms - e.firstKeyMs))}`,
+    ...times.slice(-limit).map((e) => {
+      const photos = e.firstPhotoMs === null ? '' : ` +${seconds(e.firstPhotoMs)}…+${seconds(e.lastPhotoMs ?? e.firstPhotoMs)}`;
+      const typing = e.firstKeyMs === null ? '' : ` · typing from +${seconds(e.firstKeyMs)}`;
+      return `${clock(e.savedMs)} ${nameOf(e.productId)} · ${seconds(e.ms)} · ${e.photos} photos${photos}${typing} · from ${e.source}`;
+    }),
+  ];
+}
+
+function seconds(ms: number): string {
+  return `${(ms / 1000).toFixed(1)} s`;
 }
 
 /** Gate A2's persistence evidence: price_history survives a force-stop, so this reads the same after a relaunch. */

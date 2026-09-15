@@ -13,8 +13,8 @@
 
 | | |
 |---|---|
-| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-5 done** (P2-4's gate A2–A4 and P2-5's early gate B5 passed on the Infinix). P2-5: a *repacked* toggle at enrollment, an offer to mark look-alikes, and a grid (lock or pinned *Repacked* button) of photo + name tiles with a price only after a tap. Tests **277**, typecheck clean. **The gate catalog now holds 20 live products, 2 negatives, 1 correction shot (Knorr Chicken), 2 price edits (Clover) and 3 trashed repacked bags (15 shots, 15 photos)** until P2-7's purge (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
-| **Next action** | **P2-6** — first run, permission recovery, guided enrollment. Filipino copy for P2-3 to P2-5 reviewed, no corrections (2026-09-15). **Gate check after B5 PASS** in airplane mode on a fresh process: self-match 103/103, 0 missing of **118 photo rows** (the trashed bags count until P2-7). |
+| **Working on** | **Phase 2, on `feat/phase-2-ui`. P2-1 to P2-6 done** (gates A2–A4, B5 early, B1, and B2 with time recorded per ADR-023, all on the Infinix). P2-6: welcome, language and camera screens with an *Open Settings* recovery, a guided add with a *n of 5* banner, angle prompts, placeholder quality warnings and enrollment timing, tested on a side-by-side copy (`com.jash.bantaynimama.fresh`). Tests **311**, typecheck clean. **The gate catalog now holds 20 live products, 2 negatives, 1 correction shot (Knorr Chicken), 2 price edits (Clover) and 3 trashed repacked bags (15 shots, 15 photos)** until P2-7's purge (backup of the pre-migration catalog: `C:\BantayNiMamaBackups\gate-catalog-v1`). |
+| **Next action** | **P2-7**: the Products tab becomes the Directory (`SR-30`–`SR-35`) and the negatives list. **P2-6 is done:** B1 passed; B2 passed on its other checks, with `SR-25`'s time recorded, not blocking (ADR-023). The best run's median was 27.5 s, with 3 of 5 products within 30 s. **Still owed before `/phase-gate`:** the operator reviews P2-6's Filipino copy. |
 | **Blocked on** | Nothing. |
 | **Owed — native search** | sqlite-vec cannot load on 32-bit ARM ([op-sqlite#456](https://github.com/OP-Engineering/op-sqlite/issues/456)). JS search measured **9.2 ms at 100 shots but 234 ms at 2,500** on the Infinix, so `NFR-09` (500 products) needs native search before Phase 4. Tracked for Phase 3 (ADR-014). |
 | **Watch out for** | **Per-frame latency is over budget** (`NFR-07` ≤ 60 ms).<br>• **P1-3 split on the Infinix:** `runSync` 62.8 ms on CPU, 43.2 ms with the GPU delegate; crop + resize ~37 ms.<br>• **Since P1-6:** crop + resize reads **~60 ms**, **unplugged too**, and the gate-run total is ~126 ms at 100 shots. The cause is unconfirmed; a 6-frame cold reading of 35.9 ms hints at sustained-use heat.<br>• **Look-alike confusion:** Alaska 360ml ↔ Argentina 260g produced accept-grade votes above δ (ADR-016). The 4-of-5 quorum makes a lock harder, but the confusion remains. See `ARCHITECTURE.md` §8. |
@@ -30,7 +30,7 @@
 |---|---|---|---|
 | **0** | Embedding viability spike | 🟢 Passed gate — 94.5% (2026-09-13) | ≥ 85% top-1 on non-ambiguous items |
 | **1** | Proof of concept — real data path | 🟢 Passed gate — run 3: 20/20, 0 wrong locks, self-match 100/100 (2026-09-14; run 2 failed first, ADR-016) | Enroll 20 → force-quit → relaunch → persistence + self-match checks → scan all 20: correct lock **or** chip for every product, **zero wrong locks** (`PHASE_1_PLAN.md` §4) |
-| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-5 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid on device; gate B5 early run passed); P2-6 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
+| 2 | UI / UX | 🔵 In progress — plan approved 2026-09-14; P2-1 to P2-6 done (schema v2, confirm mode, negatives, edit / correct / delete, quick-pick grid, first run and guided add on device; gates B5 early, B1, B2 passed, B2's time recorded per ADR-023); P2-7 next | Two runs, upgrade (20 products) + fresh install (5): **zero confident wrong prices**; confirm mode, negatives, edit / correct / delete, quick pick, first run ≤ 30 s per product; time-to-lock recorded, not blocking (`PHASE_2_PLAN.md` §4) |
 | 3 | ML integration & accuracy | ⚪ Not started | NFR-01 ≥ 90%, NFR-02 ≤ 2% |
 | 4 | Polish & ship | ⚪ Not started | All NFRs met on a real device |
 | 5 | Post-MVP | ⚪ Deferred | — |
@@ -82,7 +82,56 @@ Detail and "done when" for each step: [`PHASE_2_PLAN.md`](PHASE_2_PLAN.md) §5. 
     - [x] **Gate check after B5, airplane mode on** *(10:55:35, pid 27266 after `am force-stop` from 24308, cold start)*: **PASS** — products 20, shots 116 (corrections 1), negatives 2, index 103, trashed 3 (15 shots), other-model 0; schema 2, 1280-d, τ 0.46, δ 0.075; photo rows 118, **0 missing**; self-match **103/103**, own min 1.000000; nearest other median 0.7512 · p90 0.8254 · max 0.8954 (unchanged since Phase 1 run 3); 14.3 s. No *Repacked* button on Scan.
     - Gate part B runs B5 again on the fresh install.
   - [x] Filipino copy for the toggle, offer and grid: reviewed by the operator, **no corrections** *(2026-09-15)*
-- [ ] P2-6 First run, permission recovery, guided enrollment (`SR-44`, `SR-43`, `SR-20`, `SR-22`, `SR-25`)
+- [x] P2-6 First run, permission recovery, guided enrollment (`SR-44`, `SR-43`, `SR-20`, `SR-22`, `SR-25`) *(2026-09-15; B1 passed; B2 passed on its other checks, with `SR-25`'s time recorded, not blocking, ADR-023)*
+  - [x] Built *(2026-09-15)*:
+    - **Domain:** `nextShotAngle` and `afterGuidedSave` in `firstRun.ts`; `cameraAccess.ts`; `shotQuality.ts` with placeholder limits; `enrollmentTimes`.
+    - **App:** welcome → language → camera in place of the tabs; *Open Settings* recovery on the Scan tab too; *n of 5* banner; guided panel with photos first, coach, angle prompts, quality warnings and *Try scanning it*; the confirm card's why-it-asks line.
+    - **Gate panel:** enrollment times (`SR-25`) and per-shot luminance and sharpness.
+    - Tests 277 → 311 (306, then 3 for the resume fix and 2 for the enrollment-time split), typecheck clean.
+  - [x] **Gate B1–B2 on the side-by-side install** (`com.jash.bantaynimama.fresh`, release APK, operator's call): **B1 passed** (attempt 2). **B2 passed on its other checks** (attempt 4); its time per product is recorded against `SR-25`, not blocking (ADR-023).
+    - **Attempt 1 (11:22–11:36): not recordable.** The system log shows one OS camera prompt (11:27:10, closed in 3.4 s), and enrollment followed, so it was allowed: no denial, no in-app recovery. 5 products / 25 shots were saved 11:27:14–11:34:05. The app was swiped from Recents at 11:34:06, which cleared the in-memory interaction log, so no *Add* → saved times survive. Settings was then opened from the launcher's App info, not from the app.
+    - **Found:** Android's memory manager killed the app 4 s after Permissions opened (11:35:12, `rampolicy`, 293 MB free), and a relaunch replayed the welcome. **Fixed** (operator's call): the intro saves reaching its camera step and resumes there (`introStartStep`).
+    - [ ] **Attempt 2 (11:45–11:53, one process, pid 5505, airplane mode on): B1 PASS, B2 FAIL on time.**
+      - **B1 PASS.**
+        - **Interaction log:** `cameraAsk` ×2 and `cameraDenied` ×2; `cameraBlocked` 11:46:17; `cameraOpenSettings` 11:46:28; `cameraGranted` 11:46:54, with `addFromFirstRun` in the same second (back in the flow).
+        - **System log agrees:** `GrantPermissionsActivity` at 11:46:02 and 11:46:16, then `APPLICATION_DETAILS_SETTINGS` for the fresh package at 11:46:28 while its process was alive.
+        - **Caveats:** the language screen was passed with *Next*, keeping English (no `introLanguage`). Android did not kill the app in Settings this time, so the resume fix is still unexercised on device.
+      - **B2 FAIL: `SR-25` (≤ 30 s) met by 0 of 6.**
+        - **Times:** n = 6, median **42.6 s**, p90 / max **55.7 s**.
+        - **Per product:** Cover Chips 49.0 s (from the first-run handoff); Ascorbic Acid 51.2, Knorr Chicken 42.6, Sponge 38.0, Kopiko 40.6 (each from the previous save); Greatest White 55.7 s (from an Unknown card's *Add*, as B2 requires).
+        - 5 photos per product. Nothing is logged between *Add* and save, so where the time went is unmeasured.
+      - **Scan afterwards:** 7 LOCK, 0 CHIPS, `confirmYes` on all 6 products, no *No*.
+      - **Photos (`SR-22` inputs):**
+        - n = 31: luminance 0.204–0.590, median 0.421; sharpness ×1000 min 1.24, median 9.59.
+        - **0 warned**, so no warning has been seen on device.
+        - Frame-vs-JPEG dot min 0.9894, median 0.9952. JPEG median 22.8 KB, max 27.4 KB.
+      - **Not exercised:** *Try scanning it*, *Finish later*, the confirm card's why-it-asks line (every confirm came at 5 or more products), a quality warning, and the resume after a kill.
+    - [ ] **Attempt 3, B2 only (12:03–12:10; copy cleared; trimmed guided form; one process, pid 9824; airplane mode on): B2 FAIL on time again.**
+      - **Times:** n = 6, median **40.8 s**, p90 / max **64.6 s**, min 31.9 s. **0 of 6 within 30 s.**
+        - Knorr Chicken 64.6 s, from the first-run handoff.
+        - Ascorbic Acid 55.0, Kopiko 61.0, Sponge 32.2 and Clover 40.8 s, each from the previous save.
+        - Isopropyl Alcohol **31.9 s**, from an Unknown card's *Add*.
+      - **Split (medians):** *Add* → first photo 19.6 s · first → last photo 12.0 s · last photo → saved 6.1 s · first key → saved 37.1 s.
+      - **Where the time went:**
+        - **Typing first:** on 4 of 6 products typing began first (+2.3 to +8.4 s), and the first photo came 13.4–31.2 s later. The name and price are the largest block.
+        - **Photos first:** Knorr took 37.1 s from first key to saved; Isopropyl took 14.2 s.
+      - **Photos:** 5 per product (Kopiko 6), 31 in all, not the suggested 3. Five photos took 9.3–13.9 s.
+      - **Quality:** luminance 0.287–0.567, sharpness ×1000 min 0.61, **0 warned**.
+      - **Also:** one camera prompt, allowed (B1 had already passed); 7 `confirmYes` afterwards.
+    - [x] **Attempt 4, B2 only (12:17–12:21; copy cleared; same build as attempt 3; one process, pid 13261; airplane mode on): 3 of 5 within 30 s. Failed as worded; B2 passed on its other checks once ADR-023 made the time recorded, not blocking (operator's call).**
+      - **Times:** n = 5, median **27.5 s**, p90 / max **41.8 s**.
+        - Sponge **23.4 s**, from the first-run handoff.
+        - Clover Chips 31.6 s, from an Unknown card's *Add*.
+        - Kopiko **27.5**, Ascorbic Acid 41.8 and Knorr Chicken **27.0 s**, each from the previous save.
+      - **Split (medians):** *Add* → first photo 19.5 s · first → last photo **4.1 s** (3 photos each, 15 in all) · last photo → saved 5.0 s · first key → saved 21.3 s.
+      - **Why the two misses missed:**
+        - **Clover:** typing first; 1.6 s over.
+        - **Ascorbic Acid:** photos first, but 17.3 s passed before the first photo.
+        - Typing still came first on 3 of 5 products.
+      - **Exercised for the first time:** *Try scanning it* (1), *No* (2) → *Not in my list* saved (1). Lock log 8 LOCK, 0 CHIPS, `confirmYes` on all 5 products.
+      - **Quality:** luminance 0.217–0.539, sharpness ×1000 min 1.27, **0 warned**. Frame-vs-JPEG dot min 0.9902.
+      - **Trend across attempts:** median 42.6 → 40.8 → **27.5 s**.
+  - [ ] Filipino copy for the first run, camera screens and guided add: operator review before `/phase-gate`
 - [ ] P2-7 Directory (`SR-30`–`SR-35`) and the negatives list
 - [ ] P2-8 Time-to-lock measured and calibrated (`NFR-04`)
 - [ ] P2-9 Gate run — §4 parts A and B, then `/phase-gate`
@@ -282,6 +331,9 @@ Accuracy rows stay empty until the store data exists. **Claude: record real numb
 | **Price edit, delete, undo, restore (P2-4, gates A2 and A4)** | price lands on the tapped product and survives a force-stop; a deleted product never locks; undo inside 10 s; trash survives a force-stop; restore locks | **Met.** A2: Clover repriced twice, binding check landed on Clover, `price_history rows 2` after force-stop. A4: sponge deleted, undo lapsed, out of the index after force-stop (index 98), restored (23.2 ms rebuild), LOCK sponge; Kopiko delete → Undo → LOCK. Index rebuilds: delete/undo **median 9.2 ms, max 17.0** (n = 3), restore **23.2 ms** (n = 1). **One unattributed possible wrong lock:** LOCK Knorr Pork 6 s after deleting the sponge (shown as a question) — Infinix X6823, release APK, CPU, not in airplane mode | 2026-09-14 |
 | **Quick-pick grid on clear bags (P2-5, gate B5 early run)** | the grid names nothing; a tile tap shows that product's price; the *Repacked* button opens the same grid | **Met for 3/3 bags** (Sugar White 5g, Sugar Brown 10g, Sili 20p; operator-reported). Database afterwards: 20 live products, 0 gate products flagged repacked or deleted, 0 new negatives or price edits, 118 photos = 118 rows, 0 missing. Look-alike offer and airplane mode not recorded — Infinix X6823, release APK, CPU, 20-product gate catalog | 2026-09-15 |
 | **Gate check after B5 (`PHASE_1_PLAN` §4 steps 3–4)** | 0 missing photos; every live shot and negative self-matches | **PASS** after `am force-stop` (cold start, pid 27266), **airplane mode on**: products 20, shots 116 (15 of them trashed), index 103 (negatives 2); photo rows 118, **0 missing**; self-match **103/103**, own min 1.000000; nearest other median 0.7512 · p90 0.8254 · max 0.8954, unchanged since Phase 1 run 3; 14.3 s — Infinix X6823, release APK, CPU | 2026-09-15 |
+| **Camera denial and recovery (P2-6, gate B1)** | two denials → recovery screen → *Open Settings* → grant → back in the flow (`SR-43`) | **Met** (attempt 2). Asked 11:46:02 and 11:46:16, both denied; `cameraBlocked`; *Open Settings* 11:46:28 (`APPLICATION_DETAILS_SETTINGS` for the fresh package, process alive); granted 11:46:54 and the guided add opened the same second. Interaction log and system log agree. Attempt 1 only allowed on the first ask — Infinix X6823, release APK, side-by-side copy, airplane mode | 2026-09-15 |
+| **Enrollment time, *Add* → saved (P2-6, gate B2)** | ≤ 30 s per product (`SR-25`) | **Not met; recorded, not blocking (ADR-023).** Attempt 2 (full form, 5 photos): median 42.6 s, max 55.7, 0/6. Attempt 3 (trimmed form, 5 photos): median 40.8, max 64.6, 0/6. **Attempt 4 (trimmed form, 3 photos): median 27.5, max 41.8, 3/5.** Attempt 4 split medians: *Add* → first photo 19.5 s, 3 photos 4.1 s, last photo → saved 5.0 s — Infinix X6823, release APK, side-by-side copy, airplane mode, operator = developer | 2026-09-15 |
+| Photo luminance and sharpness at enrollment (P2-6, `SR-22` inputs) | placeholder limits: luminance 0.12 / 0.88, sharpness 0.0005 | Attempts 2–4, n = 31 / 31 / 15: luminance 0.204–0.590 · 0.287–0.567 · 0.217–0.539; sharpness ×1000 min 1.24 · 0.61 · 1.27, medians 9.59 · 10.78 · 12.27. **No shot warned.** Store lighting untested — Infinix X6823, release APK | 2026-09-15 |
 
 ---
 

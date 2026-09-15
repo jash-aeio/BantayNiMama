@@ -6,6 +6,7 @@ import { useAppServices } from '../../app/services';
 import { priceHistorySummary, productNameIncludingTrash } from '../../db/products';
 import {
   describeEnrollmentMeasurements,
+  describeEnrollmentTimes,
   describeGateCheck,
   describeIndexRebuilds,
   describeInteractions,
@@ -87,7 +88,16 @@ export function GateCheckPanel() {
           ))}
           <Text style={styles.line}>{describeWorkletTimings(diagnostics.workletTimings.current)}</Text>
           <Text style={styles.line}>{describeScanTimings(diagnostics.scanTimings.current)}</Text>
-          <Text style={styles.line}>{describeEnrollmentMeasurements(diagnostics.enrollmentMeasurements.current)}</Text>
+          {describeEnrollmentMeasurements(diagnostics.enrollmentMeasurements.current).map((line, i) => (
+            <Text key={`shot-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
+          {describeEnrollmentTimes(diagnostics.interactionLog.current, nameOf).map((line, i) => (
+            <Text key={`enroll-${i}`} style={styles.line}>
+              {line}
+            </Text>
+          ))}
           <Text style={styles.line}>{describeIndexRebuilds(diagnostics.indexRebuilds.current)}</Text>
           {describePriceHistory(priceHistorySummary(catalog.db)).map((line, i) => (
             <Text key={`price-${i}`} style={styles.line}>

@@ -116,18 +116,31 @@ less headroom than the original 3-of-5's ~750 ms; time-to-lock is not yet measur
 Separate path. Quality matters, latency does not, so this runs on the JS thread.
 
 ```
-Tap "Add"
-  → guided capture of 3–5 angles          (SR-20)
-  → quality check per frame               (SR-22)  blown out? dark? blurry?
+Tap "Add" (+ Add product · Unknown's Add · "n of 5" banner · first-run handoff)
+                                          (SR-25)  interaction log: the 30 s clock starts here
+  → framing coach + one angle per photo   (SR-20)  front · left · right · back/top · other light (P2-6)
   → save each as q80 JPEG, ≤ 512 px        (TR-42)  documentDirectory/photos/  (never upscaled)
-  → embed each once on the JS thread
+  → decode once on the JS thread:
+       embed                              (TR-24)
+       measure luminance + sharpness      (SR-22)  too dark / blown out / blurry → warn, never block
   → duplicate check: KNN vs catalog       (SR-23)  match > τ → "Ganito ba ito?"
   → ONE transaction:                      (TR-45)
        INSERT products
        INSERT product_shots  × 3–5   (photo path + embedding BLOB)
   → add the vectors to the in-memory search matrix — only after COMMIT succeeds
   → live on the very next frame           (SR-24)
+  → interaction log: enrollSaved          (SR-25)  Add → saved, per product
 ```
+
+**Quality warnings (`SR-22`, P2-6) are measured after the JPEG is saved, not per frame.** They use
+the same decoded 224² input the vector comes from, so a warning describes what was embedded.
+- **Limits are placeholders** (`shotQuality.ts`): luminance < 0.12 or > 0.88, and sharpness < 0.0005.
+  `TR-27`'s floor is still 0, so they only warn. The gate panel reads out every shot's luminance and
+  sharpness, so Phase 3 can set measured limits.
+- **Exposure wins over blur.** A black or clipped-white photo has almost no edges and would always
+  read blurry too, so only the exposure warning shows.
+- **Cost:** about one `laplacianVariance` per shot (20.9 ms per frame in the worklet, P1-8), on the
+  JS thread, which enrollment may block (`TR-25`). Not yet measured on this path.
 
 **Enrollment embeds a JPEG, scanning embeds a frame** (measured in P1-4). Both come from the same
 reticle crop (`captureReference`). The enrolled vector goes through one more resize and JPEG q80;
@@ -648,7 +661,10 @@ BantayNiMama/
 │   │   ├── priceEdit.ts       ← typed prices → centavos, shared with enrollment; no-op edits write nothing; editor text (SR-06)
 │   │   ├── productSearch.ts   ← name search, case and accents ignored (SR-07; SR-30 in P2-7)
 │   │   ├── trash.ts           ← 10 s undo, 30-day purge (SR-32)
-│   │   ├── firstRun.ts        ← welcome / "n of 5" banner / complete (SR-44)
+│   │   ├── firstRun.ts        ← welcome / "n of 5" banner / complete; angle per photo; after-save step (SR-44, SR-20)
+│   │   ├── cameraAccess.ts    ← permission status → ask / ask again / open settings; what to log (SR-43)
+│   │   ├── shotQuality.ts     ← mean luminance; too dark / blown out / blurred, placeholder limits (SR-22)
+│   │   ├── interactionLog.ts  ← gate taps in memory; enrollmentTimes: Add → saved per product, split into photos and typing (SR-25)
 │   │   ├── timeToLock.ts      ← NFR-04 proxy episodes, median / p90, calibration bias
 │   │   └── *.test.ts          ← `node --test`; match.golden.test.ts replays Phase 0 (ADR-012)
 │   ├── ml/                    ← model loading, worklet frame processor

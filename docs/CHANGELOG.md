@@ -968,6 +968,94 @@ versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Filipino copy for P2-3 to P2-5 reviewed by the operator** (2026-09-15, `SR-42`): **no corrections**,
   so `fil.json` stands as drafted. This covers the scan card and reject sheet, the price editor,
   *Wrong?* sheet, undo bar and trash, and the repacked toggle, look-alike offer and grid.
+- **P2-6: first run, permission recovery, guided enrollment — done** (2026-09-15; `SR-44`, `SR-43`,
+  `SR-20`, `SR-22`, `SR-25`, `SR-42`). Tests went from 277 to **311**, and typecheck is clean.
+  - **Gate B1 passed** on attempt 2.
+  - **Gate B2 passed on its other checks** on attempt 4.
+  - **`SR-25`'s time per product is recorded, not blocking** (ADR-023, operator's call). The best
+    run had a median of 27.5 s, with 3 of 5 products within 30 s.
+  - **Domain (pure, tested):**
+    - `firstRun.ts`: `nextShotAngle` gives one prompt per photo (front, turned left, turned right,
+      back or top, other light), up to `MAX_SHOTS`. `afterGuidedSave` decides what follows a save: the
+      first product offers *Try scanning it*, two to four ask for the next, five completes.
+    - `cameraAccess.ts`: VisionCamera's status becomes *ask*, *ask again* or *open settings*. On
+      Android, `denied` means "don't ask again", where asking shows nothing, so the only button there
+      is *Open Settings*. `permissionChangeKind` logs a grant however it arrived.
+    - `shotQuality.ts`: mean luminance, plus the existing `laplacianVariance`. At most one warning,
+      exposure first. **The limits are placeholders** (luminance 0.12 / 0.88, sharpness 0.0005) and
+      never block a save.
+    - `interactionLog.ts`: kinds for each *Add* source, `enrollSaved`, `enrollClosed`, first run and
+      the camera. `enrollmentTimes` pairs each *Add* with its save. A save with the panel still open
+      starts the next timing, and closing the panel abandons one.
+  - **First run:** on an empty, never-dismissed catalog, welcome → language → camera replaces the tabs.
+    The camera step asks only on a tap, shows *Open Settings* when blocked, and moves on by itself
+    when the grant arrives, including on return from system settings. *Finish later* writes
+    `first_run_dismissed` to `app_meta`.
+  - **Scan tab:**
+    - **It no longer asks for the camera on mount.** The same camera panel is its recovery screen.
+    - **An *n of 5* banner** opens the guided add until five products exist.
+    - **Each way into enrollment is logged:** *+ Add product*, Unknown's *Add*, the banner, and the
+      first-run handoff.
+  - **Enrollment panel:**
+    - **Photos now come before the form.** The camera is already on the item, and the `SR-23` warning
+      shows before a name is typed.
+    - The framing coach, a *Photo n* angle prompt, and a quality warning per photo with its thumbnail
+      marked.
+    - In the guided flow: *Item n of 5*, *Finish later*, and *Try scanning it* after the first save.
+  - **Confirm card:** while fewer than five products exist, one line says why the app asks (`SR-44`
+    step 7).
+  - **Gate panel:** each shot's luminance and sharpness, for Phase 3's calibration. Enrollment times:
+    n, median, p90, max, how many were over 30 s, and how many started from Unknown's *Add*.
+  - **Side-by-side test install** (operator's call): `"-PbantayAppIdSuffix=.fresh"` builds
+    `com.jash.bantaynimama.fresh`, labelled "BantayNiMama fresh", with its own data and camera
+    permission. B1–B2 then never touch the gate catalog (`TOOLING.md`). Release APK built at 11:21 in
+    3 min.
+  - **Copy:** `camera.permissionNeeded` and `enroll.captureHint` are replaced by `camera.why`, the
+    coach and the angle prompts. The Filipino copy is Claude's draft, for the operator's review before
+    `/phase-gate`.
+  - **Device attempt 1 (2026-09-15, 11:22–11:36, Infinix X6823, fresh copy): not recordable.**
+    - **B1:** the system log shows one OS camera prompt, allowed in 3.4 s. No denial, so the recovery
+      screen was not exercised.
+    - **B2:** 5 products were saved in 6 min 51 s. The app was then swiped from Recents, which cleared
+      the in-memory interaction log, so per-product times are gone.
+  - **Fixed from attempt 1** (operator's call): Android's memory manager killed the app 4 s after
+    system Permissions opened (`rampolicy`, 293 MB free). The relaunch replayed the welcome, breaking
+    `SR-43`'s return to the flow. The intro now writes `first_run_intro` = `camera` to `app_meta` on
+    reaching that step, `introStartStep` resumes there, and the step moves on by itself once the camera
+    is granted. Logged as `introResumedAtCamera`.
+  - **Device attempt 2 (2026-09-15, 11:45–11:53, Infinix X6823, fresh copy cleared with `pm clear`,
+    one process throughout, airplane mode on): B1 PASS, B2 FAIL on `SR-25`.**
+    - **B1:** two OS prompts, both denied, then blocked. The app's *Open Settings* opened App info
+      (`APPLICATION_DETAILS_SETTINGS`, 11:46:28). Camera granted 11:46:54, and the guided add opened in
+      the same second. The system log and the interaction log agree.
+    - **B2:** 6 products, 5 photos each, one started from an Unknown card's *Add*. **Add → saved: median
+      42.6 s, max 55.7 s, 0 of 6 within 30 s.**
+    - **Photos:** 31 shots, luminance 0.204–0.590, sharpness ×1000 min 1.24. **No quality warning
+      fired**, so the placeholder limits were never crossed.
+    - **Scan afterwards:** all 6 products locked and were confirmed with *Yes*.
+  - **Changed after attempt 2** (operator's call, `SR-25`, `SR-21`):
+    - **The guided form shows only name and price per piece.** Pack price, unit and category sit behind
+      *More details*, which a bad pack price opens. The *repacked* toggle stays visible (ADR-018).
+      Outside the guided flow the form is unchanged.
+    - **Step timings:** `enrollPhoto` and `enrollTyping` join the interaction log. `enrollmentTimes`
+      reports each product's photo count, first and last photo, and first keystroke. The gate panel
+      shows medians for *Add* → first photo, first → last photo, last photo → saved, and first key →
+      saved.
+  - **Device attempt 3, B2 only (2026-09-15, 12:03–12:10, Infinix X6823, cleared fresh copy, trimmed
+    form, one process, airplane mode on): FAIL on `SR-25` again.**
+    - **Times:** 6 products; median 40.8 s, max 64.6 s, min 31.9 s (the product from an Unknown card's
+      *Add*). 0 of 6 within 30 s.
+    - **Split medians:** *Add* → first photo 19.6 s, photos 12.0 s, last photo → saved 6.1 s.
+    - **Typing was the largest block:** it came first on 4 of 6 products, and the first photo followed
+      13–31 s later.
+    - **Photos:** 5 per product (31 in all) rather than 3. No quality warning fired.
+  - **Device attempt 4, B2 only (2026-09-15, 12:17–12:21, Infinix X6823, cleared fresh copy, same
+    build, one process, airplane mode on): 3 of 5 within 30 s. FAIL as worded.**
+    - **Times:** median 27.5 s, max 41.8 s. The two over 30 s were 31.6 s (from an Unknown card's
+      *Add*, typing first) and 41.8 s (17.3 s before the first photo).
+    - **Split medians:** 3 photos in 4.1 s, and last photo → saved in 5.0 s.
+    - **First seen on device:** *Try scanning it* and *No* → *Not in my list*.
+    - **Scan afterwards:** all 5 products locked and were confirmed with *Yes*.
 
 ### Changed
 - **Phase 1 gate PASSED, verified with `/phase-gate`** (2026-09-14). Phase 1 is closed; Phase 2

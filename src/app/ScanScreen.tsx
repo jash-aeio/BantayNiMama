@@ -3,18 +3,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import {
-  Camera,
-  useCameraDevice,
-  useCameraPermission,
-  useFrameOutput,
-  usePreviewOutput,
-} from 'react-native-vision-camera';
+import { Camera, useCameraDevice, useFrameOutput, usePreviewOutput } from 'react-native-vision-camera';
 import { createSynchronizable, scheduleOnRN } from 'react-native-worklets';
 
 import { catalogCounts, listProducts, listQuickPickProducts } from '../db/products';
+import { FIRST_RUN_TARGET } from '../domain/firstRun.ts';
+import type { AddSource, InteractionKind } from '../domain/interactionLog.ts';
 import { EnrollmentPanel } from '../features/enrollment/EnrollmentPanel';
 import { useEnrollment } from '../features/enrollment/useEnrollment';
+import { CameraAccessPanel } from '../features/firstRun/CameraAccessPanel';
+import { useCameraAccess } from '../features/firstRun/useCameraAccess';
 import { PriceEditPanel } from '../features/scanner/PriceEditPanel';
 import { RejectPanel } from '../features/scanner/RejectPanel';
 import { ScanOverlay } from '../features/scanner/ScanOverlay';
@@ -28,6 +26,14 @@ import { useAppServices } from './services';
 /** How many recent frames the worklet timing samples cover. */
 const WORKLET_TIMING_WINDOW = 40;
 
+/** SR-25 is timed from these (interactionLog.enrollmentTimes). */
+const ADD_KINDS = {
+  button: 'addFromButton',
+  unknown: 'addFromUnknown',
+  banner: 'addFromBanner',
+  firstRun: 'addFromFirstRun',
+} as const satisfies Record<AddSource, InteractionKind>;
+
 /**
  * The Scan tab: one camera for scanning, enrollment, the reject sheet and the price editor.
  *
@@ -39,6 +45,9 @@ const WORKLET_TIMING_WINDOW = 40;
  * Voting pauses while a panel or the pinned quick-pick grid is open (P2-3, P2-4, P2-5). The card is
  * then pinned to what the tindera tapped, and a lock changing under her finger cannot redirect the
  * tap to another product. Resuming starts a fresh stability window, and so does every catalog write.
+ *
+ * Until five products exist, enrollment is the guided add (SR-44, P2-6): an *n of 5* banner, progress
+ * in the panel, and *Finish later* in place of *Back to scanning*.
  */
 export function ScanScreen() {
   const { t } = useTranslation();
@@ -53,9 +62,14 @@ export function ScanScreen() {
     bumpCatalogVersion,
     rebuildIndex,
     logInteraction: log,
+    firstRun,
+    finishFirstRunLater,
+    consumeGuidedStart,
   } = useAppServices();
   const focused = useIsFocused();
-  const { hasPermission, requestPermission } = useCameraPermission();
+  // SR-43: never asks on mount. The OS prompt comes from a tap after the reason is on screen, and a
+  // blocked permission shows the route to system settings instead of a button that does nothing.
+  const camera = useCameraAccess(log);
   const device = useCameraDevice('back');
   const preview = usePreviewOutput();
   const model = frameModel.state === 'loaded' ? frameModel.loaded.model : undefined;
@@ -69,6 +83,8 @@ export function ScanScreen() {
   const [torch, setTorch] = useState(false);
   /** SR-10: the pinned quick-pick grid, opened from its button rather than by a lock. */
   const [gridOpen, setGridOpen] = useState(false);
+  /** SR-44: the guided flow is on until five live products exist. */
+  const guided = firstRun.kind !== 'complete';
 
   // One capture channel, set from JS and read by the worklet on its next processed frame. Enrollment
   // and a rejection are never open together, so the owner says where the capture goes.
@@ -83,7 +99,7 @@ export function ScanScreen() {
     captureRequest.setBlocking(true);
   }, [captureRequest]);
 
-  const enrollment = useEnrollment({ catalog, indexRef, stillModel: jpegModel, requestFrameCapture: requestEnrollCapture });
+  const enrollment = useEnrollment({ catalog, indexRef, stillModel: jpegModel, requestFrameCapture: requestEnrollCapture, log });
   useEffect(() => {
     if (enrollment.savedCount > 0) bumpCatalogVersion();
   }, [enrollment.savedCount, bumpCatalogVersion]);
@@ -165,8 +181,33 @@ export function ScanScreen() {
     setFrameError((previous) => (previous === message ? previous : message));
   }, []);
 
-  const openEnrollment = useCallback(() => setEnrolling(true), []);
-  const closeEnrollment = useCallback(() => setEnrolling(false), []);
+  const openEnrollment = useCallback(
+    (source: AddSource) => {
+      log(ADD_KINDS[source], []);
+      setEnrolling(true);
+    },
+    [log],
+  );
+  const openFromButton = useCallback(() => openEnrollment('button'), [openEnrollment]);
+  const openFromUnknown = useCallback(() => openEnrollment('unknown'), [openEnrollment]);
+  const openFromBanner = useCallback(() => openEnrollment('banner'), [openEnrollment]);
+  const closeEnrollment = useCallback(() => {
+    // In the guided flow this button reads *Finish later*, and the choice is saved (SR-44).
+    if (guided) finishFirstRunLater();
+    log('enrollClosed', []);
+    setEnrolling(false);
+  }, [guided, finishFirstRunLater, log]);
+  const tryScanning = useCallback(() => {
+    log('tryScanning', []);
+    log('enrollClosed', []);
+    setEnrolling(false);
+  }, [log]);
+
+  // The first-run intro handed over: open the guided add once (Root.consumeGuidedStart).
+  useEffect(() => {
+    if (consumeGuidedStart()) openEnrollment('firstRun');
+  }, [consumeGuidedStart, openEnrollment]);
+
   const toggleTorch = useCallback(() => {
     log(torch ? 'torchOff' : 'torchOn', []);
     setTorch(!torch);
@@ -201,10 +242,6 @@ export function ScanScreen() {
     [undoDelete.remove],
   );
 
-  useEffect(() => {
-    if (!hasPermission) void requestPermission();
-  }, [hasPermission, requestPermission]);
-
   // TR-26: throttle inside the worklet. Holding the interval on the camera thread is what makes the
   // dropped frames actually free — bouncing to JS to decide whether to skip would defeat the point.
   const lastRun = useRef(0);
@@ -237,13 +274,10 @@ export function ScanScreen() {
 
   const outputs = useMemo(() => [preview, frameOutput], [preview, frameOutput]);
 
-  if (!hasPermission) {
+  if (!camera.hasPermission) {
     return (
       <Centered>
-        <Text style={styles.info}>{t('camera.permissionNeeded')}</Text>
-        <Pressable onPress={() => void requestPermission()} style={styles.button}>
-          <Text style={styles.buttonText}>{t('camera.grant')}</Text>
-        </Pressable>
+        <CameraAccessPanel access={camera} />
       </Centered>
     );
   }
@@ -293,12 +327,18 @@ export function ScanScreen() {
         )}
         {!panelOpen && (
           <>
-            <Pressable onPress={openEnrollment} style={[styles.topButton, styles.addButton, { top: insets.top + 12 }]}>
+            <Pressable onPress={openFromButton} style={[styles.topButton, styles.addButton, { top: insets.top + 12 }]}>
               <Text style={styles.topButtonText}>{t('scan.addProduct')}</Text>
             </Pressable>
             {!gridOpen && repacked.length > 0 && (
               <Pressable onPress={openGrid} style={[styles.topButton, styles.gridButton, { top: insets.top + 64 }]}>
                 <Text style={styles.topButtonText}>{t('scan.quickPick.open')}</Text>
+              </Pressable>
+            )}
+            {guided && (
+              <Pressable onPress={openFromBanner} style={[styles.banner, { top: insets.top + 64 }]}>
+                <Text style={styles.bannerCount}>{t('firstRun.banner', { done: liveProductCount, target: FIRST_RUN_TARGET })}</Text>
+                <Text style={styles.bannerAction}>{t('firstRun.addNext')}</Text>
               </Pressable>
             )}
             <ScanOverlay
@@ -311,7 +351,7 @@ export function ScanScreen() {
               repacked={repacked}
               gridOpen={gridOpen}
               onCloseGrid={closeGrid}
-              onAdd={openEnrollment}
+              onAdd={openFromUnknown}
               onReject={rejection.reject}
               onEditPrice={openPriceEditor}
               onLog={log}
@@ -346,9 +386,9 @@ export function ScanScreen() {
           {enrolling && (
             <>
               <Pressable onPress={closeEnrollment} style={styles.closeButton}>
-                <Text style={styles.closeText}>{t('enroll.close')}</Text>
+                <Text style={styles.closeText}>{t(guided ? 'enroll.guided.later' : 'enroll.close')}</Text>
               </Pressable>
-              <EnrollmentPanel enrollment={enrollment} />
+              <EnrollmentPanel enrollment={enrollment} guidedDone={guided ? liveProductCount : null} onTryScanning={tryScanning} />
             </>
           )}
           {!enrolling && editingId !== null && (
@@ -400,6 +440,20 @@ const styles = StyleSheet.create({
   torchOn: { backgroundColor: '#ffd166' },
   topButtonText: { color: '#ffffff', fontWeight: '700', fontSize: 16 },
   torchOnText: { color: '#0b0f14' },
+  banner: {
+    position: 'absolute',
+    right: 12,
+    maxWidth: '58%',
+    alignItems: 'flex-end',
+    backgroundColor: 'rgba(11, 15, 20, 0.9)',
+    borderColor: '#ffd166',
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  bannerCount: { color: '#ffffff', fontSize: 14, fontWeight: '700' },
+  bannerAction: { color: '#ffd166', fontSize: 16, fontWeight: '800' },
   undoBar: {
     position: 'absolute',
     left: 12,
@@ -423,6 +477,4 @@ const styles = StyleSheet.create({
   closeText: { color: '#ffd166', fontWeight: '700' },
   info: { color: '#ffffff', textAlign: 'center' },
   error: { color: '#ff6b6b', fontSize: 12, textAlign: 'center' },
-  button: { backgroundColor: '#2b6cb0', borderRadius: 6, paddingVertical: 12, paddingHorizontal: 20 },
-  buttonText: { color: '#ffffff', fontWeight: '700' },
 });

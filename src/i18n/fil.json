@@ -5,9 +5,29 @@
     "modelError": "Hindi na-load ang model para sa pagkilala."
   },
   "camera": {
-    "permissionNeeded": "Kailangan ng BantayNiMama ang camera para kilalanin ang paninda.",
+    "why": "Kinikilala ng BantayNiMama ang iyong paninda gamit ang camera. Ang mga litrato ay nananatili sa teleponong ito at hindi ipinapadala kahit saan.",
     "grant": "Payagan ang camera",
+    "askAgain": "Kailangan ang camera para mag-scan. Pindutin ang Payagan ang camera, pagkatapos payagan ito.",
+    "blocked": "Naka-off ang camera para sa BantayNiMama. Buksan ang Settings, pumunta sa Permissions, at payagan ang Camera. Pagkatapos, bumalik sa app.",
+    "openSettings": "Buksan ang Settings",
     "none": "Walang camera sa likod ng teleponong ito."
+  },
+  "firstRun": {
+    "welcome": {
+      "title": "Maligayang pagdating sa BantayNiMama",
+      "body": "Itapat ang camera sa item para makita ang presyo. Unang gawain: idagdag ang iyong unang 5 item. Mga 30 segundo ang bawat isa.",
+      "start": "Magsimula",
+      "later": "Mamaya na"
+    },
+    "language": {
+      "title": "Pumili ng wika",
+      "next": "Susunod"
+    },
+    "camera": {
+      "title": "Ang camera"
+    },
+    "banner": "{{done}} ng {{target}} item naidagdag",
+    "addNext": "Idagdag ang susunod"
   },
   "tabs": {
     "scan": "I-scan",
@@ -27,8 +47,32 @@
       "label": "Kamukha ng ibang item (repack)",
       "hint": "Para sa asukal, asin o bigas sa plastik. Magtatanong ang scanner kung alin, sa halip na pangalanan ito."
     },
+    "guided": {
+      "progress": "Item {{n}} ng {{target}}",
+      "later": "Mamaya na",
+      "savedTry": "Na-save: {{name}}. Subukang i-scan ito: ilagay sa loob ng kahon.",
+      "tryScanning": "Subukang i-scan",
+      "savedNext": "Na-save: {{name}}. {{done}} ng {{target}} naidagdag.",
+      "complete": "Naidagdag ang {{target}}. Maaari magdagdag ng item anumang oras."
+    },
+    "coach": "Isang item lang sa loob ng kahon.",
+    "more": {
+      "show": "Higit pang detalye: presyo ng buo, yunit, kategorya",
+      "hide": "Itago ang higit pang detalye"
+    },
+    "angle": {
+      "front": "Litrato {{n}}: harap, tuwid",
+      "turnLeft": "Litrato {{n}}: ipihit nang kaunti pakaliwa",
+      "turnRight": "Litrato {{n}}: ipihit nang kaunti pakanan",
+      "backOrTop": "Litrato {{n}}: likod o itaas",
+      "otherLight": "Litrato {{n}}: ilipat sa ibang liwanag"
+    },
+    "quality": {
+      "tooDark": "Madilim ang litrato {{n}}. Pindutin ito para alisin, at kumuha muli sa maliwanag.",
+      "blownOut": "Masyadong maliwanag ang litrato {{n}}. Pindutin ito para alisin, at kumuha muli nang walang silaw.",
+      "blurred": "Malabo ang litrato {{n}}. Pindutin ito para alisin, at kumuha muli nang hindi gumagalaw."
+    },
     "shotsProgress": "Litrato: {{taken}} ng {{max}} — kumuha ng hindi bababa sa {{min}}",
-    "captureHint": "Ilagay ang paninda sa loob ng kahon. Ipihit nang kaunti sa bawat litrato.",
     "capture": "Kumuha ng litrato",
     "capturing": "Kumukuha ng litrato…",
     "removeShot": "Alisin ang litrato {{number}}",
@@ -93,7 +137,8 @@
       "question": "Ito ba ay {{name}}?",
       "yes": "Oo",
       "no": "Hindi",
-      "photoLabel": "Litrato ng {{name}}"
+      "photoLabel": "Litrato ng {{name}}",
+      "whySmall": "Habang maikli ang listahan, nagtatanong ang app bago magpakita ng presyo."
     },
     "quickPick": {
       "title": "Mukhang repack. Alin ito?",

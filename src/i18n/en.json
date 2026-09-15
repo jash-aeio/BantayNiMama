@@ -5,9 +5,29 @@
     "modelError": "The recognition model could not be loaded."
   },
   "camera": {
-    "permissionNeeded": "BantayNiMama needs the camera to recognise products.",
+    "why": "BantayNiMama recognises your products with the camera. The photos stay on this phone and are never sent anywhere.",
     "grant": "Allow camera",
+    "askAgain": "Scanning needs the camera. Tap Allow camera, then allow it.",
+    "blocked": "The camera is turned off for BantayNiMama. Open Settings, go to Permissions, and allow Camera. Then come back to the app.",
+    "openSettings": "Open Settings",
     "none": "No back camera was found on this phone."
+  },
+  "firstRun": {
+    "welcome": {
+      "title": "Welcome to BantayNiMama",
+      "body": "Point the camera at an item to see its price. First, add your first 5 items. Each one takes about 30 seconds.",
+      "start": "Start",
+      "later": "Finish later"
+    },
+    "language": {
+      "title": "Choose your language",
+      "next": "Next"
+    },
+    "camera": {
+      "title": "The camera"
+    },
+    "banner": "{{done}} of {{target}} items added",
+    "addNext": "Add next"
   },
   "tabs": {
     "scan": "Scan",
@@ -27,8 +47,32 @@
       "label": "Looks like other items (repacked)",
       "hint": "For clear bags of sugar, salt or rice. The scanner will ask which one instead of naming it."
     },
+    "guided": {
+      "progress": "Item {{n}} of {{target}}",
+      "later": "Finish later",
+      "savedTry": "Saved: {{name}}. Now try scanning it: hold it inside the box.",
+      "tryScanning": "Try scanning it",
+      "savedNext": "Saved: {{name}}. {{done}} of {{target}} added.",
+      "complete": "All {{target}} added. You can add more items any time."
+    },
+    "coach": "Just one item inside the box.",
+    "more": {
+      "show": "More details: pack price, unit, category",
+      "hide": "Hide more details"
+    },
+    "angle": {
+      "front": "Photo {{n}}: the front, straight on",
+      "turnLeft": "Photo {{n}}: turn it a little to the left",
+      "turnRight": "Photo {{n}}: turn it a little to the right",
+      "backOrTop": "Photo {{n}}: the back or the top",
+      "otherLight": "Photo {{n}}: move it to different light"
+    },
+    "quality": {
+      "tooDark": "Photo {{n}} looks too dark. Tap it to remove it, then retake it with more light.",
+      "blownOut": "Photo {{n}} looks too bright. Tap it to remove it, then retake it away from the glare.",
+      "blurred": "Photo {{n}} looks blurry. Tap it to remove it, then hold still and retake it."
+    },
     "shotsProgress": "Photos: {{taken}} of {{max}} — take at least {{min}}",
-    "captureHint": "Fit the product inside the box. Turn it a little between photos.",
     "capture": "Take photo",
     "capturing": "Taking photo…",
     "removeShot": "Remove photo {{number}}",
@@ -93,7 +137,8 @@
       "question": "Is this {{name}}?",
       "yes": "Yes",
       "no": "No",
-      "photoLabel": "Saved photo of {{name}}"
+      "photoLabel": "Saved photo of {{name}}",
+      "whySmall": "While your list is small, the app asks before it shows a price."
     },
     "quickPick": {
       "title": "Looks like a repacked item. Which one?",

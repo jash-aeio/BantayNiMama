@@ -1,6 +1,7 @@
 import { createContext, useContext, type RefObject } from 'react';
 
 import type { Catalog } from '../db/catalog';
+import type { FirstRun } from '../domain/firstRun.ts';
 import type { VectorIndex } from '../domain/knn.ts';
 import type { Interaction, InteractionKind } from '../domain/interactionLog.ts';
 import type { Language } from '../domain/language.ts';
@@ -32,7 +33,7 @@ export interface Diagnostics {
   readonly workletTimings: RefObject<readonly StageTimings[]>;
   /** Recent JS-thread KNN and policy timings. */
   readonly scanTimings: RefObject<readonly ScanTiming[]>;
-  /** Frame-vs-JPEG agreement and bytes for every shot captured this session (ARCHITECTURE.md §4). */
+  /** Frame-vs-JPEG agreement, bytes and quality for every shot captured this session (ARCHITECTURE.md §4). */
   readonly enrollmentMeasurements: RefObject<readonly ShotMeasurement[]>;
   /** Every scanner lock change since launch or the last clear (PHASE_1_PLAN §4 step 5). */
   readonly lockLog: RefObject<readonly LockEvent[]>;
@@ -64,6 +65,12 @@ export interface AppServices {
   rebuildIndex(reason: IndexRebuildReason): IndexRebuild;
   /** Appends one tap to the interaction log, stamped now. */
   logInteraction(kind: InteractionKind, productIds: readonly string[]): void;
+  /** SR-44: the guided flow's state, from the live product count and the saved dismissal. */
+  readonly firstRun: FirstRun;
+  /** *Finish later*: saves the dismissal in app_meta and logs it. */
+  finishFirstRunLater(): void;
+  /** True once, right after the first-run intro hands over: the Scan tab then opens the guided add. */
+  consumeGuidedStart(): boolean;
   readonly diagnostics: Diagnostics;
 }
 

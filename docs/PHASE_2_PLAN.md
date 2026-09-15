@@ -137,6 +137,17 @@ the result in `PROJECT_STATUS.md` with the date and device. Time-to-lock is reco
 `NFR-04` but does not block the gate (E-2). Before `/phase-gate`, the operator reviews the new
 Filipino copy, as for Phase 1 D-4.
 
+*Amended 2026-09-15 (P2-6, ADR-023, operator's call): B2's time per product is recorded, not
+gate-blocking.*
+- **Measured on four runs of the guided add** (Infinix X6823, side-by-side copy). The median went
+  42.6 s, 40.8 s, then 27.5 s once the form was trimmed and 3 photos were taken. The best run had 3
+  of 5 products within 30 s.
+- **B2 passes on its other checks:** products saved through the guided flow, at least one started
+  from an Unknown card's *Add*, and each locking afterwards. The time is recorded against `SR-25`,
+  as time-to-lock is recorded against `NFR-04` (E-2).
+- **`SR-25` is not dropped.** It stays a MUST, marked not met in Phase 2, and the keyboard
+  speed-ups are queued for Phase 4.
+
 ---
 
 ## 5. Work breakdown
@@ -329,6 +340,39 @@ Picking one saves a correction shot on it, through the same capture guard.
 - **Enrollment time** from *Add* to saved goes to the interaction log (`SR-25`).
 
 *Done when:* gate steps B1 and B2 pass on a cleared install.
+
+*Amended 2026-09-15 (P2-6 build):*
+- **B1–B2 run on a side-by-side install, not a cleared gate app** (operator's call).
+  `com.jash.bantaynimama.fresh` has its own data and camera permission, so both steps get an empty
+  catalog while the 20-product catalog waits for A5 (`TOOLING.md`). Gate part B still clears the real
+  app at P2-9.
+- **Photos come before the form.** The camera is already on the item when *Add* is tapped, and the
+  duplicate warning (`SR-23`) then appears before a name is typed.
+- **The Scan tab no longer asks for the camera on mount.** A prompt with no reason on screen is what
+  step 3 replaces.
+- **On Android 11+, "don't ask again" is a second denial.** The dialog has no checkbox, so gate B1
+  denies twice.
+- **The quality limits are placeholders** (`shotQuality.ts`). The gate panel records each shot's
+  luminance and sharpness for Phase 3.
+- **The intro survives being killed in system settings** (device attempt 1, operator's call). On the
+  Infinix, Android killed the app 4 s after Permissions opened. Reaching the camera step is saved in
+  `app_meta` (`first_run_intro`), so a relaunch resumes there instead of at the welcome.
+- **The interaction log still dies with the process** (§7 is unchanged). So B1's permission steps
+  are also read from the system log (`adb logcat -b events`: `GrantPermissionsActivity` and
+  `APPLICATION_DETAILS_SETTINGS`). B2's times need the app kept running until the gate panel is read.
+
+*Amended 2026-09-15 (gate B2 attempt 2 missed `SR-25`, operator's call):*
+- **Measured:** 6 products at 38–56 s each, median 42.6 s, against 30 s. Nothing between *Add* and
+  save was logged, so the slow part is unknown.
+- **The guided form shows only `SR-21`'s required fields**, name and price per piece. Pack price, unit
+  and category sit behind *More details*, and a bad pack price opens it. Outside the guided flow the
+  form is unchanged. The *repacked* toggle stays in view, because a clear bag saved without it can be
+  named as another bag (ADR-018).
+- **Step timings:** each photo added (`enrollPhoto`) and each product's first keystroke
+  (`enrollTyping`) go to the interaction log. The gate panel splits each product into *Add* → first
+  photo, the photos, and last photo → saved.
+- **B2 is re-run on a cleared fresh copy**, with 3 photos per product where 5 are not needed
+  (`SR-20` allows 3–5).
 
 ### P2-7 · Products tab becomes the Directory (`SR-30`–`SR-35`)
 
